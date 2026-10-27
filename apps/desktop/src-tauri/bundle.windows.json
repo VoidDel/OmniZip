@@ -1,0 +1,18 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && node ../../scripts/prepare-bundle.mjs"
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/omnizip"
+    ],
+    "resources": {
+      "binaries/omnizip_shell.dll": "omnizip_shell.dll"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "../../../platform/windows/nsis/hooks.nsh"
+      }
+    }
+  }
+}

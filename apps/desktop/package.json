@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "tsc -b --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bundle:windows": "tauri build --bundles nsis --config src-tauri/bundle.windows.json"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.23",

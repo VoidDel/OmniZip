@@ -95,7 +95,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: NSIS installer (builds the CLI and the shell DLL through prepare-bundle)
-        run: pnpm --filter omnizip-desktop tauri build --bundles nsis
+        run: pnpm bundle:windows
       - name: MSIX package (unsigned)
         shell: pwsh
         run: platform/windows/msix/pack.ps1 -Version 0.0.0-ci

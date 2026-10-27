@@ -3,7 +3,7 @@
 #   pwsh platform/windows/msix/pack.ps1 -Version 0.1.0 [-Publisher "CN=..."] [-Arch x64]
 #                                       [-Sign path\to\cert.pfx -Password ...]
 #
-# Prerequisite: `tauri build` (or scripts/prepare-bundle.mjs plus a release build of
+# Prerequisite: `pnpm bundle:windows` (or scripts/prepare-bundle.mjs plus a release build of
 # omnizip-desktop) so that target/release and apps/desktop/src-tauri/binaries are filled.
 # An unsigned package can be validated but not installed; CI signs it with the release
 # certificate, whose subject must equal -Publisher.

@@ -2,7 +2,7 @@
 // expects them (docs/10-build-release.md §3):
 //   * omnizip(.exe)        — CLI, bundled as an "external binary" (sidecar);
 //   * omnizip_shell.dll    — Windows context-menu extension, bundled as a resource.
-// Called by `beforeBuildCommand` in apps/desktop/src-tauri/tauri.conf.json.
+// Called by `beforeBuildCommand` in apps/desktop/src-tauri/bundle.windows.json (`pnpm bundle:windows`).
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';

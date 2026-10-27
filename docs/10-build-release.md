@@ -72,7 +72,7 @@ OmniZip/
 
 Tauri bundler 负责基础打包；MSIX、Sparse Package、Flatpak manifest 由 `scripts/release` 补充。
 
-**当前实现（Windows）**：`tauri build` 的 `beforeBuildCommand` 先构建前端，再由 `scripts/prepare-bundle.mjs` 以 release 构建 CLI 与 `omnizip_shell.dll`，分别作为 sidecar（`externalBin`）与资源放入安装包；NSIS 钩子见 `platform/windows/nsis/hooks.nsh`。MSIX 由 `platform/windows/msix/pack.ps1` 依据 `AppxManifest.xml` 模板打包（MakeAppx，签名可选）。WiX / MSI、ARM64、macOS 与 Linux 产物尚未接入。
+**当前实现（Windows）**：`pnpm bundle:windows` 用 `apps/desktop/src-tauri/bundle.windows.json` 叠加基础配置执行 `tauri build`：先构建前端，再由 `scripts/prepare-bundle.mjs` 以 release 构建 CLI 与 `omnizip_shell.dll`，分别作为 sidecar（`externalBin`）与资源放入安装包；NSIS 钩子见 `platform/windows/nsis/hooks.nsh`。这些只在打包时需要的设置不能放进 `tauri.conf.json`：Tauri 的构建脚本每次编译都会检查 sidecar 文件是否存在，干净检出（包括 CI）会因此无法编译。MSIX 由 `platform/windows/msix/pack.ps1` 依据 `AppxManifest.xml` 模板打包（MakeAppx，签名可选）。WiX / MSI、ARM64、macOS 与 Linux 产物尚未接入。
 
 ## 4. CI 流水线（GitHub Actions）
 

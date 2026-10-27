@@ -61,7 +61,7 @@ cargo test --workspace           # 核心、引擎、CLI、挂载核心、Shell 
 pnpm test                        # 前端单元测试
 cargo run -p omnizip-cli -- --help
 pnpm dev                         # 开发模式运行桌面应用
-pnpm build                       # Windows：NSIS 安装包 → target/release/bundle/nsis/
+pnpm bundle:windows              # NSIS 安装包（含 CLI 与右键菜单 DLL）→ target/release/bundle/nsis/
 pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # MSIX（需 Windows SDK，签名可选）
 ```
 

@@ -8,7 +8,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build && node ../../scripts/prepare-bundle.mjs"
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "withGlobalTauri": false,
@@ -43,9 +43,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "externalBin": [
-      "binaries/omnizip"
     ],
     "fileAssociations": [
       {
@@ -112,8 +109,7 @@
           "English",
           "Japanese"
         ],
-        "displayLanguageSelector": true,
-        "installerHooks": "../../../platform/windows/nsis/hooks.nsh"
+        "displayLanguageSelector": true
       },
       "wix": {
         "language": [
@@ -124,9 +120,6 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       }
-    },
-    "resources": {
-      "binaries/omnizip_shell.dll": "omnizip_shell.dll"
     }
   }
 }
