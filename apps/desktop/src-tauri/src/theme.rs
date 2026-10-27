@@ -308,10 +308,22 @@ pub fn resolve(t: &ThemeFile, o: &ResolveOptions) -> ResolvedTheme {
     set("bg-surface", surface.clone());
     set("bg-elevated", elevated.clone());
     set("bg-sidebar", sidebar.clone());
+    // Small windows (progress, standalone dialogs) are all material when it is on: a veil of
+    // the canvas keeps text readable even over Acrylic's live blur.
+    set(
+        "canvas-material",
+        if material {
+            alpha(&canvas, if dark { 0.6 } else { 0.55 })
+        } else {
+            canvas.clone()
+        },
+    );
     set(
         "sidebar-material",
         if material {
-            alpha(&sidebar, if dark { 0.78 } else { 0.72 })
+            // A light veil of the theme color: enough to keep the theme's tint, thin enough for
+            // the material (wallpaper-tinted Mica) to read as a material, like native Windows 11 panes.
+            alpha(&sidebar, if dark { 0.45 } else { 0.35 })
         } else {
             sidebar.clone()
         },

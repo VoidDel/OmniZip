@@ -235,7 +235,27 @@ export function SettingsView() {
                 </div>
               </Row>
               <Row label={t('settings.appearance.material')} hint={sys.materialSupported ? t('settings.appearance.materialHint') : t('settings.appearance.materialUnavailable')}>
-                <Switch label={t('settings.appearance.material')} disabled={!sys.materialSupported} checked={a.material && sys.materialSupported} onChange={(v) => set((s) => (s.appearance.material = v))} />
+                {sys.platform === 'win' && sys.materialSupported ? (
+                  // One choice for both "whether" and "which": Off, Mica, Mica Alt or Acrylic.
+                  <Segmented
+                    label={t('settings.appearance.material')}
+                    value={a.material ? a.material_kind : 'off'}
+                    onChange={(v) =>
+                      set((s) => {
+                        s.appearance.material = v !== 'off';
+                        if (v !== 'off') s.appearance.material_kind = v;
+                      })
+                    }
+                    options={[
+                      ['off', t('settings.appearance.materialKinds.off')],
+                      ['mica', t('settings.appearance.materialKinds.mica')],
+                      ['mica-alt', t('settings.appearance.materialKinds.micaAlt')],
+                      ['acrylic', t('settings.appearance.materialKinds.acrylic')],
+                    ]}
+                  />
+                ) : (
+                  <Switch label={t('settings.appearance.material')} disabled={!sys.materialSupported} checked={a.material && sys.materialSupported} onChange={(v) => set((s) => (s.appearance.material = v))} />
+                )}
               </Row>
               <Row label={t('settings.appearance.density')}>
                 <Segmented value={a.density} onChange={(v) => set((s) => (s.appearance.density = v))} options={[['compact', t('settings.appearance.compact')], ['comfortable', t('settings.appearance.comfortable')], ['spacious', t('settings.appearance.spacious')]]} />

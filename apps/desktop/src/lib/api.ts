@@ -87,6 +87,8 @@ export const api = {
   removeRecent: (path: string) => invoke<void>('recent_remove', { path }),
   clearRecent: () => invoke<void>('recent_clear'),
   windowReady: () => invoke<void>('window_ready'),
+  /** Focuses the window and its page (needed for transparent material windows). */
+  focusWindow: () => invoke<void>('window_focus'),
   openDefaultApps: () => invoke<void>('open_default_apps'),
   shellStatus: () => invoke<ShellStatus>('shell_status'),
   mountProbe: () => invoke<MountProbe>('mount_probe'),

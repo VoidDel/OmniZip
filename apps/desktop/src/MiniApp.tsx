@@ -54,7 +54,7 @@ export function MiniApp({ jobId, label: windowLabel }: { jobId: number; label?: 
   }, []);
   useEffect(() => {
     const w = getCurrentWindow();
-    if (asking) void w.setFocus().catch(() => undefined);
+    if (asking) void api.focusWindow().catch(() => undefined);
     else void w.setSize(new LogicalSize(JOB_WINDOW.width, JOB_WINDOW.height)).catch(() => undefined);
   }, [asking]);
   useFitWindowToDialog(asking ? JOB_WINDOW.width : null, { minHeight: JOB_WINDOW.height });
@@ -80,6 +80,10 @@ export function MiniApp({ jobId, label: windowLabel }: { jobId: number; label?: 
       : job.state === 'failed'
         ? `${t('task.failed')} · ${job.title}`
         : t('task.working', { kind: t(`task.kinds.${job.kind}`), name: job.title });
+
+  // While a question is open the window shows only that question (on a translucent material
+  // the progress view would otherwise show through it).
+  if (asking) return <DialogHost />;
 
   return (
     <div className="mini">
@@ -131,7 +135,6 @@ export function MiniApp({ jobId, label: windowLabel }: { jobId: number; label?: 
           )}
         </div>
       </div>
-      <DialogHost />
     </div>
   );
 }

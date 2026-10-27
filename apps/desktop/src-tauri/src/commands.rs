@@ -15,7 +15,7 @@ use omnizip_core::{
 };
 use omnizip_formats::shared;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, State, WebviewWindow};
 
 use crate::{
     jobs::{JobInfo, JobSpec, PromptAnswer},
@@ -107,14 +107,15 @@ pub fn settings_set(
     settings: Settings,
 ) -> CmdResult<Settings> {
     let previous = state.settings();
-    let material_changed = previous.appearance.material != settings.appearance.material;
+    let material_changed = previous.appearance.material != settings.appearance.material
+        || previous.appearance.material_kind != settings.appearance.material_kind;
     let menu_changed = previous.shell != settings.shell;
     if let Some(p) = &state.config_file {
         settings::save(p, &settings).map_err(|e| err(Error::io(e, p)))?;
     }
     *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = settings.clone();
-    if material_changed && let Some(w) = app.get_webview_window("main") {
-        windows::set_material(&w, settings.appearance.material);
+    if material_changed {
+        windows::apply_material(&app);
     }
     // Flat versus submenu layout lives in the registry: apply it right away.
     if menu_changed && shell_status().registered {
@@ -923,7 +924,16 @@ pub fn recent_clear(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn window_ready(window: WebviewWindow) {
     let _ = window.show();
+    window_focus(window);
+}
+
+/// Brings the calling window to the front with keyboard focus inside its page, so a field the
+/// page focused can be typed into right away. Transparent (material) windows on Windows do
+/// not hand focus to their WebView by themselves.
+#[tauri::command]
+pub fn window_focus(window: WebviewWindow) {
     let _ = window.set_focus();
+    let _ = AsRef::<tauri::Webview>::as_ref(&window).set_focus();
 }
 
 #[derive(Serialize)]

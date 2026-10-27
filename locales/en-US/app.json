@@ -334,7 +334,13 @@
       "accentSystem": "System",
       "accentCustom": "Custom",
       "material": "Window material",
-      "materialHint": "Mica on Windows 11, vibrancy on macOS",
+      "materialHint": "Also used by the progress windows; vibrancy on macOS",
+      "materialKinds": {
+        "off": "Off",
+        "mica": "Mica",
+        "micaAlt": "Mica Alt",
+        "acrylic": "Acrylic"
+      },
       "materialUnavailable": "Not available on this system",
       "density": "Density",
       "compact": "Compact",

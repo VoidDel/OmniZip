@@ -51,21 +51,47 @@ fn parse_hex(s: &str) -> Option<Color> {
     Some(Color(byte(0)?, byte(2)?, byte(4)?, 0xFF))
 }
 
-fn effects_for(material: bool) -> Option<tauri::utils::config::WindowEffectsConfig> {
-    if !material || !system::material_supported() {
+/// The window material for the current settings (`None` when off or unsupported).
+///
+/// Windows 11 offers three (`appearance.material_kind`): Mica (desktop wallpaper, heavily
+/// blurred), Mica Alt (the same with a stronger wallpaper tint) and Acrylic (a live blur of
+/// whatever is behind the window). macOS always uses vibrancy.
+fn current_effects(app: &AppHandle) -> Option<tauri::utils::config::WindowEffectsConfig> {
+    let s = app.state::<AppState>().settings();
+    if !s.appearance.material || !system::material_supported() {
         return None;
     }
     let effect = if cfg!(target_os = "macos") {
         Effect::Sidebar
     } else {
-        Effect::Mica
+        match s.appearance.material_kind.as_str() {
+            "mica-alt" => Effect::Tabbed,
+            "acrylic" => Effect::Acrylic,
+            _ => Effect::Mica,
+        }
     };
     Some(EffectsBuilder::new().effect(effect).build())
 }
 
-/// Applies or removes the window material at run time.
-pub fn set_material(w: &WebviewWindow, material: bool) {
-    let _ = w.set_effects(effects_for(material));
+/// Background of every window. Where a material (Mica, vibrancy) is available it is fully
+/// transparent, whether or not the material is switched on: an opaque color here would be
+/// painted by the WebView underneath the page and cover the material, and it cannot be
+/// cleared reliably at run time. The page paints the theme canvas itself whenever the
+/// material is off (`body` is only transparent under `data-material="true"`), and the window
+/// stays hidden until that first paint, so nothing flashes.
+fn window_background(app: &AppHandle) -> Color {
+    if system::material_supported() {
+        Color(0, 0, 0, 0)
+    } else {
+        canvas_color(app)
+    }
+}
+
+/// Applies the material settings to every open window (main, progress and dialog windows).
+pub fn apply_material(app: &AppHandle) {
+    for w in app.webview_windows().values() {
+        let _ = w.set_effects(current_effects(app));
+    }
 }
 
 /// The main window, created hidden; the UI shows it after its first render.
@@ -73,7 +99,6 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     if let Some(w) = app.get_webview_window("main") {
         return Ok(w);
     }
-    let material = app.state::<AppState>().settings().appearance.material;
     let transparent = system::material_supported();
     let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("OmniZip")
@@ -81,7 +106,7 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .min_inner_size(720.0, 480.0)
         .center()
         .visible(false)
-        .background_color(canvas_color(app));
+        .background_color(window_background(app));
     #[cfg(target_os = "macos")]
     {
         b = b
@@ -96,7 +121,7 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     {
         let _ = transparent;
     }
-    if let Some(fx) = effects_for(material) {
+    if let Some(fx) = current_effects(app) {
         b = b.effects(fx);
     }
     b.build()
@@ -115,15 +140,17 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
         .center()
         .visible(false)
         .always_on_top(true)
-        .background_color(canvas_color(app));
+        .background_color(window_background(app));
     // Rebinding per platform keeps every target free of an unused mut (Linux has no tweak).
     #[cfg(target_os = "macos")]
     let b = b
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
     #[cfg(windows)]
-    let b = b.decorations(false);
-    b.build()
+    let b = b
+        .decorations(false)
+        .transparent(system::material_supported());
+    with_material(app, b).build()
 }
 
 /// A standalone dialog window for "Extract to…" / "Add to archive…" started from the file
@@ -139,14 +166,27 @@ pub fn shell_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow
         .center()
         .visible(false)
         .focused(true)
-        .background_color(canvas_color(app));
+        .background_color(window_background(app));
     #[cfg(target_os = "macos")]
     let b = b
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
     #[cfg(windows)]
-    let b = b.decorations(false);
-    b.build()
+    let b = b
+        .decorations(false)
+        .transparent(system::material_supported());
+    with_material(app, b).build()
+}
+
+/// Adds the current material to a window that is being built.
+fn with_material<'a>(
+    app: &AppHandle,
+    b: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    match current_effects(app) {
+        Some(fx) => b.effects(fx),
+        None => b,
+    }
 }
 
 /// Brings the main window to the front.

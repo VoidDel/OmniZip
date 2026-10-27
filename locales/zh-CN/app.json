@@ -334,7 +334,13 @@
       "accentSystem": "跟随系统",
       "accentCustom": "自定义",
       "material": "窗口材质",
-      "materialHint": "Windows 11 为 Mica，macOS 为毛玻璃",
+      "materialHint": "同样用于进度小窗；macOS 为毛玻璃",
+      "materialKinds": {
+        "off": "关闭",
+        "mica": "Mica",
+        "micaAlt": "Mica Alt",
+        "acrylic": "亚克力"
+      },
       "materialUnavailable": "当前系统不支持",
       "density": "密度",
       "compact": "紧凑",

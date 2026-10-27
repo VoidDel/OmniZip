@@ -34,6 +34,7 @@ export interface Settings {
     theme_dark: string;
     accent: string;
     material: boolean;
+    material_kind: 'mica' | 'mica-alt' | 'acrylic';
     density: 'compact' | 'comfortable' | 'spacious';
     icon_style: 'mono' | 'duotone';
     font_size: number;

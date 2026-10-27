@@ -260,6 +260,7 @@ pub fn run() {
             commands::recent_remove,
             commands::recent_clear,
             commands::window_ready,
+            commands::window_focus,
             commands::open_default_apps,
             commands::shell_status,
             commands::shell_request,

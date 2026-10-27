@@ -73,6 +73,8 @@ pub struct Appearance {
     /// `theme`, `system` or `#RRGGBB`.
     pub accent: String,
     pub material: bool,
+    /// Windows 11 material: `mica`, `mica-alt` or `acrylic` (macOS always uses vibrancy).
+    pub material_kind: String,
     /// `compact`, `comfortable` or `spacious`.
     pub density: String,
     /// `mono` or `duotone`.
@@ -91,6 +93,7 @@ impl Default for Appearance {
             theme_dark: "midnight".into(),
             accent: "theme".into(),
             material: true,
+            material_kind: "mica".into(),
             density: "comfortable".into(),
             icon_style: "duotone".into(),
             font_size: 14,

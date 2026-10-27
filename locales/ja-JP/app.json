@@ -334,7 +334,13 @@
       "accentSystem": "システム",
       "accentCustom": "カスタム",
       "material": "ウィンドウ素材",
-      "materialHint": "Windows 11 では Mica、macOS ではすりガラス",
+      "materialHint": "進捗ウィンドウにも適用。macOS ではすりガラス",
+      "materialKinds": {
+        "off": "オフ",
+        "mica": "Mica",
+        "micaAlt": "Mica Alt",
+        "acrylic": "アクリル"
+      },
       "materialUnavailable": "このシステムでは利用できません",
       "density": "密度",
       "compact": "コンパクト",
