@@ -102,7 +102,7 @@
 | 1 | Tauri 2 壳 | 已实现自绘标题栏、Mica、窗口初始隐藏防闪白、窗口状态记忆（Windows 已验证）。未做：标题栏最大化按钮的 Snap Layout 悬停菜单、冷启动计时、三平台截图对比 |
 | 2 | 百万条目虚拟列表 | 已实现 Rust `TreeIndex` 分页 + 前端 TanStack Virtual。未做：百万条目下的帧率与内存测量 |
 | 3 | ZIP / 7z / tar.zst round-trip | 已验证（引擎与注册表测试覆盖 ZIP、7z、TAR、tar.gz / xz / zst）。未做：与 7-Zip 的互操作差分与速度对比 |
-| 4 | Win11 现代右键菜单 | COM `IExplorerCommand` 已实现并在进程内按 Explorer 调用方式测试；经典菜单注册已在隔离注册表键验证；MSIX 清单通过 MakeAppx 校验。未做：签名安装后在 Win11 一级菜单的实机验证、ARM64 构建、Sparse Package |
+| 4 | Win11 现代右键菜单 | 已验证（2026-10-27）：用自签测试证书签名并安装 MSIX 后，Win11 一级菜单出现 OmniZip 子菜单（压缩包上显示打开、解压到此处、解压到"名称\"、解压到…、挂载、测试），"解压到此处"端到端解压成功；COM 类可从未打包进程激活；`omnizip` 执行别名可用。未做：ARM64 构建、Sparse Package（NSIS 渠道的一级菜单） |
 | 5 | 挂载 | 平台无关的挂载核心 `omnizip-vfs` 已完成并测试（见 12 §13）。**阻塞**：本机未安装 WinFsp（安装驱动需要管理员权限），WinFsp 后端未开始；Linux `fuser` 与 macOS FSKit / NFS 对比未开始 |
 | 6 | 文件名编码探测 | 已实现（chardetng + 区域提示），有单元测试。未做：200 样本准确率评测 |
 | 7 | 主题令牌管线 | 已验证：JSON 主题 → 校验 → CSS 变量热切换，对比度守卫，12 套内置主题 |
@@ -115,16 +115,16 @@
 | 格式 | 已完成且超出范围：ZIP、7z、TAR 及 gz / bz2 / xz / zst / lz4 / br 组合与单文件读写，RAR 只读，ZIP 原地添加 / 删除 / 重命名，格式转换 |
 | 界面 | 已完成：开始页、浏览器（表格、搜索、排序、多选）、压缩 / 解压对话框、任务中心、密码与冲突对话框、文本 / 图片 / 十六进制预览 |
 | 主题与语言 | 已完成且超出范围：12 套内置主题、跟随系统、系统强调色；zh-CN、en-US、zh-TW、ja-JP 四种语言 |
-| Shell | 已完成：经典右键菜单（设置页一键注册 / 移除）、轻量进度窗、单实例转发。安装器钩子自动注册与文件关联已写入安装包，但未实际安装验证。Win11 一级菜单依赖签名 MSIX，未实机验证 |
+| Shell | 已完成：经典右键菜单（设置页一键注册 / 移除）、轻量进度窗、单实例转发。安装器钩子自动注册与文件关联已写入安装包，但未实际安装验证。Win11 一级菜单已用自签证书的 MSIX 实机验证 |
 | CLI | 已完成：`x e a l t i formats completions`，另有 `d rn convert gui` |
 | 挂载 | 部分完成：挂载核心可用；WinFsp 只读挂载因驱动未安装而阻塞 |
-| 打包 | NSIS 安装包已产出（含 CLI、Shell DLL、安装 / 卸载钩子）；MSIX 已产出但未签名，无法安装 |
+| 打包 | NSIS 安装包已产出（含 CLI、Shell DLL、安装 / 卸载钩子）；MSIX 可用自签测试证书签名并安装（`platform/windows/msix/new-test-cert.ps1`），正式签名待证书 |
 | CI | 已编写 `ci`、`release`、`nightly-fuzz` 工作流；仓库尚未推送，工作流未实际运行 |
 | 验收 | 未开始：内部一周试用、崩溃率统计、性能预算全面测量 |
 
 ### 8.3 后续优先级
 
 1. 在有管理员权限的机器上安装 WinFsp，实现 `omnizip-mount-winfsp` 与 `omnizip-mountd`，接入 CLI `mount` 与界面挂载对话框。
-2. 申请代码签名证书，签名安装 MSIX 并实机验证 Win11 一级菜单；补 ARM64 DLL。
+2. 申请正式代码签名证书（自签证书已验证 Win11 一级菜单）；补 ARM64 DLL 与 Sparse Package。
 3. 推送仓库，让 CI 首次在 Windows / macOS / Linux 运行并修复平台差异。
 4. 完成 M0 未做的测量项：百万条目列表、与 7-Zip 的速度与互操作、编码探测准确率、AppVerifier。

@@ -2,7 +2,7 @@
 
 > 一款面向 Windows / macOS / Linux 的现代化压缩与解压软件：统一的 Rust 核心、美观大气的界面、多语言、多主题、广泛的格式支持、深度的 Shell 集成（右键菜单 + 文件关联 + 命令行），以及把任意压缩包像 ISO 一样直接挂载为虚拟磁盘的能力。
 
-本仓库已按路线图进入实施，当前为 **M1 MVP（Windows 优先）**：核心库、ZIP / 7z / TAR 系列 / RAR 引擎、`omnizip` 命令行、Tauri 桌面应用、Windows 右键菜单扩展、挂载核心与 Windows 安装包均已可构建并通过测试。挂载后端（WinFsp）、Win11 一级菜单的实机验证、macOS 与 Linux 尚未完成。逐项进度见 [11 §8 实施状态](docs/11-roadmap.md#8-实施状态2026-10-27windows-优先)，设计文档位于 [docs/](docs/)。
+本仓库已按路线图进入实施，当前为 **M1 MVP（Windows 优先）**：核心库、ZIP / 7z / TAR 系列 / RAR 引擎、`omnizip` 命令行、Tauri 桌面应用、Windows 右键菜单扩展、挂载核心与 Windows 安装包均已可构建并通过测试。Win11 一级右键菜单已用自签证书的 MSIX 实机验证；挂载后端（WinFsp）、正式代码签名、macOS 与 Linux 尚未完成。逐项进度见 [11 §8 实施状态](docs/11-roadmap.md#8-实施状态2026-10-27windows-优先)，设计文档位于 [docs/](docs/)。
 
 ## 一句话定位
 
@@ -66,6 +66,21 @@ pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # MSIX（需 Windows SDK，
 ```
 
 模糊测试在 nightly 上运行：`cargo +nightly fuzz run zip`（目标见 `fuzz/fuzz_targets/`）；稳定版可运行其冒烟测试 `cargo test --manifest-path fuzz/Cargo.toml --lib`。
+
+### 测试用 MSIX（自签证书）
+
+Win11 一级右键菜单只在带包身份的 MSIX 中出现。正式证书到位前，可以用自签证书在本机或测试机上验证；这类包不能对外分发。
+
+```powershell
+# 生成测试证书（私钥存放在 %LOCALAPPDATA%\OmniZip\dev-cert，不进仓库）
+# -Trust 把公钥证书导入“本地计算机\受信任的人”，需要管理员权限，会弹出 UAC
+pwsh platform/windows/msix/new-test-cert.ps1 -Trust
+$d = "$env:LOCALAPPDATA\OmniZip\dev-cert"
+pwsh platform/windows/msix/pack.ps1 -Version 0.1.0 -Sign $d\omnizip-test.pfx -Password (Get-Content $d\password.txt)
+Add-AppxPackage target\release\bundle\msix\OmniZip_0.1.0_x64.msix
+```
+
+其他测试机只需以管理员身份把 `omnizip-test.cer` 导入“本地计算机\受信任的人”。换成正式证书后发布者会变化，系统视为另一个应用，需先卸载测试版：`Get-AppxPackage OmniZip.OmniZip | Remove-AppxPackage`。
 
 ## 仓库结构
 
