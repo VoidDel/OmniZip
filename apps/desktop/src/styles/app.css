@@ -396,7 +396,7 @@ details.adv .advbody { display: flex; flex-direction: column; gap: 12px; padding
 @media (max-width: 520px) { .conf { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------- mini progress window */
-.mini { height: 100%; display: flex; flex-direction: column; background: var(--bg-elevated); }
+.mini { height: 100%; display: flex; flex-direction: column; background: var(--bg-canvas); color: var(--fg-primary); }
 .mini .mini-top { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 0 0 14px; flex: none; }
 .mini .mini-top .ttl { flex: 1; min-width: 0; font-weight: 600; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root[data-platform="mac"] .mini .mini-top { padding-left: 76px; }

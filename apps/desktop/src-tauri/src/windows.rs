@@ -5,11 +5,12 @@ use tauri::{
     window::{Color, Effect, EffectsBuilder},
 };
 
-use crate::{state::AppState, system};
+use crate::{state::AppState, system, theme};
 
 fn canvas_color(app: &AppHandle) -> Color {
-    // First paint uses the canvas color of the theme in use, so the window never flashes white
-    // in dark mode (`docs/05-theming.md` §8).
+    // First paint uses the canvas color of the theme in use, so a window never flashes a
+    // color that is not the theme's (`docs/05-theming.md` §8). Windows opened from the file
+    // manager have no main window to ask, so "system" mode reads the OS setting directly.
     let state = app.state::<AppState>();
     let s = state.settings();
     let dark = match s.appearance.mode.as_str() {
@@ -19,13 +20,35 @@ fn canvas_color(app: &AppHandle) -> Color {
             .get_webview_window("main")
             .and_then(|w| w.theme().ok())
             .map(|t| t == tauri::Theme::Dark)
+            .or_else(system::prefers_dark)
             .unwrap_or(false),
     };
-    if dark {
-        Color(0x0F, 0x11, 0x15, 0xFF)
+    let id = if dark {
+        &s.appearance.theme_dark
     } else {
-        Color(0xF5, 0xF7, 0xFB, 0xFF)
+        &s.appearance.theme_light
+    };
+    let themes = state.themes.lock().unwrap_or_else(|e| e.into_inner());
+    let canvas = themes.iter().find(|(t, _)| &t.id == id).map(|(t, _)| {
+        let options = theme::ResolveOptions {
+            accent: "theme".into(),
+            system_accent: None,
+            material: false,
+        };
+        theme::resolve(t, &options).tokens["bg-canvas"].clone()
+    });
+    match canvas.as_deref().and_then(parse_hex) {
+        Some(c) => c,
+        None if dark => Color(0x0F, 0x11, 0x15, 0xFF),
+        None => Color(0xF5, 0xF7, 0xFB, 0xFF),
     }
+}
+
+/// `#RRGGBB` → opaque color.
+fn parse_hex(s: &str) -> Option<Color> {
+    let h = s.strip_prefix('#').filter(|h| h.len() == 6)?;
+    let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some(Color(byte(0)?, byte(2)?, byte(4)?, 0xFF))
 }
 
 fn effects_for(material: bool) -> Option<tauri::utils::config::WindowEffectsConfig> {

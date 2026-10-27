@@ -11,6 +11,7 @@ import { routePrompt } from './features/tasks/Tasks';
 import { api, events } from './lib/api';
 import { basename } from './lib/format';
 import { useFmt } from './lib/hooks';
+import { applyTheme, onSystemThemeChange } from './lib/theme';
 import type { JobInfo } from './lib/types';
 import { useApp } from './store/app';
 
@@ -33,6 +34,13 @@ export function MiniApp({ jobId }: { jobId: number }) {
     void api.prompts().then((list) => list.filter((p) => p.window === label).forEach(routePrompt));
     return () => subs.forEach((s) => void s.then((f) => f()));
   }, [jobId, label]);
+
+  // Follow the OS switching between light and dark while the window is open.
+  useEffect(() => {
+    const { settings, boot } = useApp.getState();
+    if (!settings || !boot) return;
+    return onSystemThemeChange(() => void applyTheme(settings, boot.system, true).then((th) => useApp.getState().setTheme(th)));
+  }, []);
 
   // Grow while a question is open so the dialog fits, then return to the compact size.
   const asking = useApp((s) => s.dialogs.length > 0);

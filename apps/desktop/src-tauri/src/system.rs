@@ -61,6 +61,21 @@ pub fn accent_color() -> Option<String> {
     None
 }
 
+/// Whether apps should use dark colors, per the OS setting (`None` when unknown).
+#[cfg(windows)]
+pub fn prefers_dark() -> Option<bool> {
+    windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_u32("AppsUseLightTheme"))
+        .ok()
+        .map(|v| v == 0)
+}
+
+#[cfg(not(windows))]
+pub fn prefers_dark() -> Option<bool> {
+    None
+}
+
 pub fn material_supported() -> bool {
     #[cfg(windows)]
     {
