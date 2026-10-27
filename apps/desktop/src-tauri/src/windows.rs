@@ -106,7 +106,7 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow> {
     let label = format!("mini-{job_id}");
     let url = WebviewUrl::App(format!("index.html?mini={job_id}").into());
-    let mut b = WebviewWindowBuilder::new(app, &label, url)
+    let b = WebviewWindowBuilder::new(app, &label, url)
         .title("OmniZip")
         .inner_size(440.0, 196.0)
         .resizable(false)
@@ -116,16 +116,13 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
         .visible(false)
         .always_on_top(true)
         .background_color(canvas_color(app));
+    // Rebinding per platform keeps every target free of an unused mut (Linux has no tweak).
     #[cfg(target_os = "macos")]
-    {
-        b = b
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true);
-    }
+    let b = b
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
     #[cfg(windows)]
-    {
-        b = b.decorations(false);
-    }
+    let b = b.decorations(false);
     b.build()
 }
 
