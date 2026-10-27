@@ -946,6 +946,17 @@ fn shell_dll() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// The request a standalone dialog window was opened for (`None` for other windows).
+#[tauri::command]
+pub fn shell_request(window: WebviewWindow, state: State<'_, AppState>) -> Option<LaunchRequest> {
+    state
+        .shell_requests
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(window.label())
+        .cloned()
+}
+
 /// Context-menu registration state (docs/07-shell-integration.md §7).
 #[tauri::command]
 pub fn shell_status() -> ShellStatus {

@@ -48,6 +48,9 @@ pub struct AppState {
     pub settings: Mutex<Settings>,
     pub themes: Mutex<Vec<(ThemeFile, bool)>>,
     pub launch: Mutex<Option<LaunchRequest>>,
+    /// Requests of standalone dialog windows (`shell-<n>`), by window label.
+    pub shell_requests: Mutex<HashMap<String, LaunchRequest>>,
+    next_shell: AtomicU32,
     pub recent: Mutex<Vec<RecentItem>>,
     pub config_file: Option<PathBuf>,
     pub themes_dir: Option<PathBuf>,
@@ -77,12 +80,19 @@ impl AppState {
             settings: Mutex::new(settings),
             themes: Mutex::new(themes),
             launch: Mutex::new(None),
+            shell_requests: Mutex::new(HashMap::new()),
+            next_shell: AtomicU32::new(1),
             recent: Mutex::new(recent),
             config_file,
             themes_dir,
             data_dir,
             cache_dir: appdirs::cache_dir(),
         }
+    }
+
+    /// Label for a new standalone dialog window.
+    pub fn next_shell_label(&self) -> String {
+        format!("shell-{}", self.next_shell.fetch_add(1, Ordering::Relaxed))
     }
 
     pub fn next_archive_id(&self) -> u32 {

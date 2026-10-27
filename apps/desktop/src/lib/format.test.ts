@@ -31,6 +31,8 @@ describe('names', () => {
     expect(basename('C:\\a\\b.zip')).toBe('b.zip');
     expect(basename('/home/x/c.7z')).toBe('c.7z');
     expect(dirname('C:\\a\\b.zip')).toBe('C:\\a');
+    expect(dirname('D:\\驱动.zip')).toBe('D:\\');
+    expect(dirname('/home/u/a.zip')).toBe('/home/u');
     expect(extOf('a.TAR.GZ')).toBe('gz');
     expect(extOf('.env')).toBe('');
   });

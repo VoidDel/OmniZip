@@ -89,7 +89,10 @@ export function basename(path: string): string {
 
 export function dirname(path: string): string {
   const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  return i > 0 ? path.slice(0, i) : path;
+  if (i <= 0) return path;
+  const dir = path.slice(0, i);
+  // A bare "D:" means the current directory of drive D, not its root.
+  return /^[A-Za-z]:$/.test(dir) ? dir + path[i] : dir;
 }
 
 export function joinPath(dir: string, name: string, sep: string): string {

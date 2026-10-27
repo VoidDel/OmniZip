@@ -169,7 +169,7 @@
     "password": "密碼",
     "passwordHint": "若需要",
     "more": "更多",
-    "moreHint": "檔名編碼 · 損毀檔案",
+    "moreHint": "密碼 · 檔名編碼 · 損毀檔案",
     "encoding": "檔名編碼",
     "keepBroken": "保留檢查碼不符的檔案",
     "openAfter": "完成後開啟目標資料夾",

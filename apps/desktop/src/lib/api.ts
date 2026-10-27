@@ -39,6 +39,8 @@ export function asError(e: unknown): ErrorReport {
 export const api = {
   bootstrap: () => invoke<Bootstrap>('app_bootstrap'),
   takeLaunch: () => invoke<LaunchRequest | null>('app_take_launch'),
+  /** Request of a standalone dialog window opened from the file manager. */
+  shellRequest: () => invoke<LaunchRequest | null>('shell_request'),
   setSettings: (settings: Settings) => invoke<Settings>('settings_set', { settings }),
   resolveTheme: (id: string, options: { accent: string; systemAccent: string | null; material: boolean }) =>
     invoke<ResolvedTheme>('theme_resolve', { id, options }),

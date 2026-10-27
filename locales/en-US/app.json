@@ -169,7 +169,7 @@
     "password": "Password",
     "passwordHint": "if needed",
     "more": "More",
-    "moreHint": "File name encoding · damaged files",
+    "moreHint": "Password · file name encoding · damaged files",
     "encoding": "File name encoding",
     "keepBroken": "Keep files that fail the checksum",
     "openAfter": "Open the folder when done",

@@ -108,7 +108,7 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
     let url = WebviewUrl::App(format!("index.html?mini={job_id}").into());
     let b = WebviewWindowBuilder::new(app, &label, url)
         .title("OmniZip")
-        .inner_size(440.0, 196.0)
+        .inner_size(440.0, 200.0)
         .resizable(false)
         .maximizable(false)
         .minimizable(true)
@@ -117,6 +117,29 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
         .always_on_top(true)
         .background_color(canvas_color(app));
     // Rebinding per platform keeps every target free of an unused mut (Linux has no tweak).
+    #[cfg(target_os = "macos")]
+    let b = b
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+    #[cfg(windows)]
+    let b = b.decorations(false);
+    b.build()
+}
+
+/// A standalone dialog window for "Extract to…" / "Add to archive…" started from the file
+/// manager. It shows only the dialog (the UI sizes it to fit) and then the job's progress.
+pub fn shell_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
+    let url = WebviewUrl::App(format!("index.html?shell={label}").into());
+    let b = WebviewWindowBuilder::new(app, label, url)
+        .title("OmniZip")
+        .inner_size(560.0, 420.0)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(true)
+        .center()
+        .visible(false)
+        .focused(true)
+        .background_color(canvas_color(app));
     #[cfg(target_os = "macos")]
     let b = b
         .title_bar_style(tauri::TitleBarStyle::Overlay)

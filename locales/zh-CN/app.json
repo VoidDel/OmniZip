@@ -169,7 +169,7 @@
     "password": "密码",
     "passwordHint": "若需要",
     "more": "更多",
-    "moreHint": "文件名编码 · 损坏文件",
+    "moreHint": "密码 · 文件名编码 · 损坏文件",
     "encoding": "文件名编码",
     "keepBroken": "保留校验失败的文件",
     "openAfter": "完成后打开目标文件夹",

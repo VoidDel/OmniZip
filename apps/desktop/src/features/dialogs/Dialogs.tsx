@@ -22,6 +22,15 @@ function useClose(d: Dialog) {
   return () => close(d.id);
 }
 
+/**
+ * A standalone dialog window (file-manager "Extract to…" / "Add to archive…") turns into the
+ * job's progress window. Closing the dialog and recording the job is one store update, so the
+ * window never sees "no dialog and no job" (which closes it) or the dialog over the progress.
+ */
+function startedInShell(dialogId: number, jobId: number) {
+  useApp.setState((s) => ({ shellJob: jobId, dialogs: s.dialogs.filter((x) => x.id !== dialogId) }));
+}
+
 // ----------------------------------------------------------------------------------- extract
 
 function defaultDestination(paths: string[] | undefined, archivePath: string | undefined): string {
@@ -66,7 +75,8 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
 
   const start = async () => {
     try {
-      await api.extract({
+      const shell = useApp.getState().shellLabel;
+      const id = await api.extract({
         archiveId: fromDisk ? undefined : archive?.id,
         paths: fromDisk ? d.paths : undefined,
         nodes: d.nodes ?? [],
@@ -80,9 +90,10 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
         deleteAfter: fromDisk && deleteAfter,
         keepBroken,
         eachToFolder: fromDisk && each,
-      });
+      }, shell ?? undefined);
       if (!fromDisk && password && archive) void api.setArchivePassword(archive.id, password);
-      close();
+      if (shell) startedInShell(d.id, id);
+      else close();
     } catch (e) {
       useApp.getState().reportError(e);
     }
@@ -103,7 +114,7 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
         </>
       }
     >
-      <div className="frow">
+      <div className="field">
         <label htmlFor="ex-dest">{t('extract.to')}</label>
         <div className="inline">
           <input id="ex-dest" className="inp mono grow" value={dest} list="ex-dests" onChange={(e) => setDest(e.target.value)} />
@@ -124,28 +135,25 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
           </button>
         </div>
       </div>
-      <div className="frow">
-        <label>{t('extract.paths')}</label>
-        <Segmented
-          value={pathMode}
-          onChange={setPathMode}
-          options={[['smart', t('extract.smart')], ['full', t('extract.full')], ['flat', t('extract.flat')]]}
-        />
-      </div>
-      <div className="frow">
-        <label htmlFor="ex-ow">{t('extract.overwrite')}</label>
-        <select id="ex-ow" className="sel" style={{ maxWidth: 240 }} value={overwrite} onChange={(e) => setOverwrite(e.target.value as OverwriteMode)}>
-          {(['ask', 'skip', 'overwrite', 'overwrite-older', 'rename'] as OverwriteMode[]).map((m) => (
-            <option key={m} value={m}>{t(`extract.overwriteModes.${m}`)}</option>
-          ))}
-        </select>
-      </div>
-      {needsPassword && (
-        <div className="frow">
-          <label>{t('extract.password')}</label>
-          <PasswordInput value={password} onChange={setPassword} label={t('extract.password')} />
+      <div className="fpair">
+        <div className="field">
+          <label htmlFor="ex-paths">{t('extract.paths')}</label>
+          <select id="ex-paths" className="sel" value={pathMode} onChange={(e) => setPathMode(e.target.value as 'smart' | 'full' | 'flat')}>
+            {(['smart', 'full', 'flat'] as const).map((m) => (
+              <option key={m} value={m}>{t(`extract.${m}`)}</option>
+            ))}
+          </select>
         </div>
-      )}
+        <div className="field">
+          <label htmlFor="ex-ow">{t('extract.overwrite')}</label>
+          <select id="ex-ow" className="sel" value={overwrite} onChange={(e) => setOverwrite(e.target.value as OverwriteMode)}>
+            {(['ask', 'skip', 'overwrite', 'overwrite-older', 'rename'] as OverwriteMode[]).map((m) => (
+              <option key={m} value={m}>{t(`extract.overwriteModes.${m}`)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {/* The password stays out of the way: a job that needs one asks for it (docs/04-ui-design.md §4.7). */}
       <details className="adv">
         <summary>
           <Icon name="chevronRight" />
@@ -153,14 +161,22 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
           <span className="hint">{t('extract.moreHint')}</span>
         </summary>
         <div className="advbody">
-          <div className="frow">
-            <label htmlFor="ex-enc">{t('extract.encoding')}</label>
-            <select id="ex-enc" className="sel" value={encoding} onChange={(e) => setEncoding(e.target.value)}>
-              <option value="auto">{t('settings.language.encodingAuto')}</option>
-              {encodings.map((x) => (
-                <option key={x} value={x}>{x}</option>
-              ))}
-            </select>
+          <div className="fpair">
+            {needsPassword && (
+              <div className="field">
+                <label>{t('extract.password')}</label>
+                <PasswordInput value={password} onChange={setPassword} label={t('extract.password')} />
+              </div>
+            )}
+            <div className="field">
+              <label htmlFor="ex-enc">{t('extract.encoding')}</label>
+              <select id="ex-enc" className="sel" value={encoding} onChange={(e) => setEncoding(e.target.value)}>
+                <option value="auto">{t('settings.language.encodingAuto')}</option>
+                {encodings.map((x) => (
+                  <option key={x} value={x}>{x}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <label className="chk">
             <input type="checkbox" checked={keepBroken} onChange={(e) => setKeepBroken(e.target.checked)} /> {t('extract.keepBroken')}
@@ -202,6 +218,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const boot = useApp((s) => s.boot)!;
   const settings = useApp((s) => s.settings)!;
   const sep = boot.system.pathSeparator;
+  const shell = useApp((s) => s.shellLabel);
   const [stats, setStats] = useState<PathStats | null>(null);
   const [format, setFormat] = useState<FormatId>((settings.formats.default_format as FormatId) || 'zip');
   const [level, setLevel] = useState(Math.max(0, LEVELS.indexOf(settings.formats.default_level)));
@@ -256,7 +273,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
 
   const start = async () => {
     try {
-      await api.compress({
+      const id = await api.compress({
         paths: d.paths,
         destination: dest,
         format,
@@ -271,8 +288,9 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         deleteSource,
         verify,
         openAfter,
-      });
-      close();
+      }, shell ?? undefined);
+      if (shell) startedInShell(d.id, id);
+      else close();
     } catch (e) {
       useApp.getState().reportError(e);
     }
@@ -283,7 +301,8 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
     <Modal
       title={t('compress.title')}
       onClose={close}
-      sheet
+      sheet={!shell}
+      width={shell ? 600 : undefined}
       footer={
         <>
           <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>

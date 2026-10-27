@@ -67,6 +67,10 @@ interface State {
   drawer: boolean;
   sidebarOpen: boolean;
   dialogs: Dialog[];
+  /** Label of this window when it is a standalone dialog opened from the file manager. */
+  shellLabel: string | null;
+  /** Job started from that dialog; the window then shows its progress. */
+  shellJob: number | null;
   toasts: Toast[];
 }
 
@@ -131,6 +135,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
   drawer: false,
   sidebarOpen: false,
   dialogs: [],
+  shellLabel: null,
+  shellJob: null,
   toasts: [],
 
   setBoot: (b) => set({ boot: b, settings: b.settings, themes: b.themes }),

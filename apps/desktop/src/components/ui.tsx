@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
+import { isShellWindow } from '../lib/fitWindow';
 import { useApp } from '../store/app';
 import { Icon, type IconName } from './Icon';
 
@@ -60,6 +61,8 @@ export function Modal({ title, onClose, children, footer, width, sheet, sticky }
 }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
+  // In a standalone dialog window the header is the title bar.
+  const drag = useApp((s) => !!s.shellLabel) || isShellWindow() || undefined;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
@@ -92,8 +95,8 @@ export function Modal({ title, onClose, children, footer, width, sheet, sticky }
   return createPortal(
     <div className={`scrim${sheet ? ' sheet' : ''}`} onMouseDown={(e) => !sticky && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="modal" role="dialog" aria-modal="true" style={{ ['--mw' as string]: `${width ?? 520}px` }}>
-        <header>
-          <h2>{title}</h2>
+        <header data-tauri-drag-region={drag}>
+          <h2 data-tauri-drag-region={drag}>{title}</h2>
           <button type="button" className="iconbtn" onClick={onClose} aria-label={t('common.close')}>
             <Icon name="x" />
           </button>

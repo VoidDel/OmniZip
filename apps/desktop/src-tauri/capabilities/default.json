@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window and the mini progress windows. The UI never touches the file system directly; everything goes through OmniZip commands (docs/09-security.md §7).",
-  "windows": ["main", "mini-*"],
+  "description": "Permissions for the main window, the mini progress windows and the standalone dialog windows opened from the file manager. The UI never touches the file system directly; everything goes through OmniZip commands (docs/09-security.md §7).",
+  "windows": ["main", "mini-*", "shell-*"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -16,6 +16,7 @@
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:window:allow-set-size",
+    "core:window:allow-center",
     "core:window:allow-theme",
     "core:window:allow-set-theme",
     "dialog:allow-open",

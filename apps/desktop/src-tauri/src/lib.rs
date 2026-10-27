@@ -22,9 +22,24 @@ use crate::{
     state::AppState,
 };
 
-/// Runs a file-manager invocation: background verbs get a mini progress window, the others are
-/// handed to the main window.
+/// Runs a file-manager invocation: background verbs get a mini progress window, dialog verbs a
+/// standalone dialog window, the others are handed to the main window.
 fn handle_invocation(app: &AppHandle, inv: Invocation, startup: bool) {
+    if inv.verb.is_dialog() {
+        if let Some(req) = launch::to_request(&inv) {
+            let state = app.state::<AppState>();
+            let label = state.next_shell_label();
+            state
+                .shell_requests
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(label.clone(), req);
+            if let Err(e) = windows::shell_window(app, &label) {
+                tracing::error!("dialog window: {e}");
+            }
+        }
+        return;
+    }
     if !inv.verb.is_background() {
         let req = launch::to_request(&inv);
         let state = app.state::<AppState>();
@@ -168,7 +183,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&["mini-*"])
+                .with_denylist(&["mini-*", "shell-*"])
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::SIZE
                         | tauri_plugin_window_state::StateFlags::POSITION
@@ -177,10 +192,23 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::new())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event
+                && let Some(state) = window.try_state::<AppState>()
+            {
+                state
+                    .shell_requests
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(window.label());
+            }
+        })
         .setup(move |app| {
             let handle = app.handle().clone();
             match invocation {
-                Some(inv) if inv.verb.is_background() => handle_invocation(&handle, inv, true),
+                Some(inv) if inv.verb.is_background() || inv.verb.is_dialog() => {
+                    handle_invocation(&handle, inv, true)
+                }
                 Some(inv) => {
                     handle_invocation(&handle, inv, true);
                     windows::main_window(&handle)?;
@@ -234,6 +262,7 @@ pub fn run() {
             commands::window_ready,
             commands::open_default_apps,
             commands::shell_status,
+            commands::shell_request,
             commands::mount_probe,
             commands::shell_register,
             commands::shell_unregister,

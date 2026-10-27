@@ -9,17 +9,18 @@ import { ProgressBar } from './components/ui';
 import { DialogHost } from './features/dialogs/Dialogs';
 import { routePrompt } from './features/tasks/Tasks';
 import { api, events } from './lib/api';
+import { JOB_WINDOW, useFitWindowToDialog } from './lib/fitWindow';
 import { basename } from './lib/format';
 import { useFmt } from './lib/hooks';
 import { applyTheme, onSystemThemeChange } from './lib/theme';
 import type { JobInfo } from './lib/types';
 import { useApp } from './store/app';
 
-export function MiniApp({ jobId }: { jobId: number }) {
+export function MiniApp({ jobId, label: windowLabel }: { jobId: number; label?: string }) {
   const { t } = useTranslation();
   const fmt = useFmt();
   const [job, setJob] = useState<JobInfo | null>(null);
-  const label = `mini-${jobId}`;
+  const label = windowLabel ?? `mini-${jobId}`;
 
   useEffect(() => {
     void api.jobs().then((list) => {
@@ -42,13 +43,21 @@ export function MiniApp({ jobId }: { jobId: number }) {
     return onSystemThemeChange(() => void applyTheme(settings, boot.system, true).then((th) => useApp.getState().setTheme(th)));
   }, []);
 
-  // Grow while a question is open so the dialog fits, then return to the compact size.
+  // The progress view and the questions of the job share one window size and position: a
+  // question fills the window (and only grows downwards when it needs more room), then the
+  // window returns to the progress view at the same place.
   const asking = useApp((s) => s.dialogs.length > 0);
   useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.phase = 'job';
+    return () => void delete root.dataset.phase;
+  }, []);
+  useEffect(() => {
     const w = getCurrentWindow();
-    void w.setSize(asking ? new LogicalSize(640, 430) : new LogicalSize(440, 196)).catch(() => undefined);
     if (asking) void w.setFocus().catch(() => undefined);
+    else void w.setSize(new LogicalSize(JOB_WINDOW.width, JOB_WINDOW.height)).catch(() => undefined);
   }, [asking]);
+  useFitWindowToDialog(asking ? JOB_WINDOW.width : null, { minHeight: JOB_WINDOW.height });
 
   // Close shortly after a clean finish; keep the window open when there is something to read.
   useEffect(() => {
