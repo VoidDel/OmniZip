@@ -1,0 +1,14 @@
+{
+  "name": "omnizip-workspace",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@10.34.9",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm --filter omnizip-desktop tauri dev",
+    "build": "pnpm --filter omnizip-desktop tauri build",
+    "lint": "pnpm --filter omnizip-desktop lint",
+    "test": "pnpm --filter omnizip-desktop test",
+    "i18n-check": "node scripts/i18n-check.mjs"
+  }
+}

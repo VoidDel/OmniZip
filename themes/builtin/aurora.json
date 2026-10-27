@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "aurora",
+  "name": {
+    "zh-CN": "晨光",
+    "zh-TW": "晨光",
+    "en-US": "Aurora",
+    "ja-JP": "オーロラ"
+  },
+  "author": "OmniZip",
+  "appearance": "light",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#F5F7FB",
+    "bg.surface": "#FFFFFF",
+    "bg.elevated": "#FFFFFF",
+    "bg.sidebar": "#EEF2F8",
+    "fg.primary": "#1B2230",
+    "fg.secondary": "#5B6577",
+    "border.default": "#DCE2EC",
+    "accent": "#2F6FED",
+    "success": "#1E9E63",
+    "warning": "#D98A0B",
+    "danger": "#D8434E",
+    "info": "#2A8CD6"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

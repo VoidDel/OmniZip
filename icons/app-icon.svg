@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4C86F5"/>
+      <stop offset="1" stop-color="#2556C6"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#shine)"/>
+  <!-- Zip pull tab: an abstract Z that doubles as a zipper path -->
+  <path d="M330 330 H694 L330 694 H694" fill="none" stroke="#FFFFFF" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#FFFFFF" opacity="0.55">
+    <rect x="480" y="180" width="64" height="40" rx="14"/>
+    <rect x="480" y="804" width="64" height="40" rx="14"/>
+  </g>
+</svg>

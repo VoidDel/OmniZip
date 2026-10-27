@@ -1,0 +1,63 @@
+# Nightly fuzzing of every parser (docs/10-build-release.md §4, §7).
+# Each target runs for an hour; the corpus carries over between nights through the cache.
+# A crash uploads the reproducer and opens an issue.
+name: Nightly fuzz
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        default: "3600"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [detect, zip, sevenz, tar, rar, mount, sanitize, encoding]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: Restore corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Seed corpus from fixtures
+        if: matrix.target == 'rar' || matrix.target == 'detect'
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          cp fixtures/rar/*.rar fuzz/corpus/${{ matrix.target }}/
+      - name: Fuzz
+        run: >
+          cargo +nightly fuzz run ${{ matrix.target }} --
+          -max_total_time=${{ inputs.seconds || 3600 }}
+          -timeout=30 -rss_limit_mb=2048
+      - name: Upload reproducer
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+      - name: Open an issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "fuzz: crash in ${{ matrix.target }} ($(date -u +%F))" \
+            --body "The nightly fuzz run found a crash in \`${{ matrix.target }}\`. Reproducer: artifact \`fuzz-crash-${{ matrix.target }}\` of ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. Reproduce with \`cargo +nightly fuzz run ${{ matrix.target }} <file>\`."

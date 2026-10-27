@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnizip.app/schemas/theme/1.json",
+  "title": "OmniZip theme",
+  "description": "A theme defines the semantic color tokens of docs/05-theming.md §2.1. Only the required tokens must be given; everything else is derived.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "name", "appearance", "colors"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "name": {
+      "description": "Display name per BCP 47 language tag; en-US is used as fallback.",
+      "type": "object",
+      "required": ["en-US"],
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 64 }
+    },
+    "author": { "type": "string", "maxLength": 128 },
+    "appearance": { "enum": ["light", "dark"] },
+    "highContrast": { "type": "boolean" },
+    "colors": {
+      "type": "object",
+      "required": [
+        "bg.canvas", "bg.surface", "bg.elevated", "bg.sidebar",
+        "fg.primary", "fg.secondary", "border.default",
+        "accent", "success", "warning", "danger", "info"
+      ],
+      "patternProperties": {
+        "^(bg|fg|border|accent|success|warning|danger|info|selection|shadow|overlay)(\\.[a-z-]+)?$": {
+          "type": "string",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "components": {
+      "description": "Component token overrides (docs/05-theming.md §2.2).",
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$" }
+    },
+    "shape": {
+      "type": "object",
+      "properties": {
+        "radius.sm": { "type": "integer", "minimum": 0, "maximum": 16 },
+        "radius.md": { "type": "integer", "minimum": 0, "maximum": 24 },
+        "radius.lg": { "type": "integer", "minimum": 0, "maximum": 32 }
+      },
+      "additionalProperties": false
+    },
+    "effects": {
+      "type": "object",
+      "properties": {
+        "material": { "enum": ["auto", "mica", "acrylic", "vibrancy", "none"] }
+      },
+      "additionalProperties": false
+    },
+    "icons": {
+      "type": "object",
+      "properties": {
+        "fileIconTheme": { "enum": ["mono", "duotone"] },
+        "typeColors": { "enum": ["vivid", "muted", "none"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

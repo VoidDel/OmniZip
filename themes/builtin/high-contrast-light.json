@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "high-contrast-light",
+  "name": {
+    "zh-CN": "高对比 · 浅",
+    "zh-TW": "高對比 · 淺",
+    "en-US": "High Contrast Light",
+    "ja-JP": "ハイコントラスト ライト"
+  },
+  "author": "OmniZip",
+  "appearance": "light",
+  "highContrast": true,
+  "colors": {
+    "bg.canvas": "#FFFFFF",
+    "bg.surface": "#FFFFFF",
+    "bg.elevated": "#FFFFFF",
+    "bg.sidebar": "#FFFFFF",
+    "fg.primary": "#000000",
+    "fg.secondary": "#1A1A1A",
+    "border.default": "#000000",
+    "accent": "#0000D6",
+    "success": "#006B2E",
+    "warning": "#8A5A00",
+    "danger": "#B00020",
+    "info": "#004C99"
+  },
+  "effects": {
+    "material": "none"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "none"
+  }
+}

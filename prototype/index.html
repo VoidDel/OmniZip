@@ -1,0 +1,1303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OmniZip 交互原型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 布局概念：桌面背景上的单一应用窗口；材质侧栏贯穿全高，右侧为标题栏 + 命令栏 + 内容 + 状态栏。
+   颜色全部来自设计令牌（docs/05），默认浅色 = 晨光 Aurora，默认深色 = 午夜 Midnight；运行时由 JS 重写。 */
+:root{
+  --bg-canvas:#F5F7FB; --bg-surface:#FFFFFF; --bg-elevated:#FFFFFF; --bg-sidebar:#EEF2F8; --sidebar-material:rgba(238,242,248,.72);
+  --bg-subtle:#F0F2F6; --bg-hover:#E9ECF2; --bg-pressed:#DFE3EB;
+  --fg-primary:#1B2230; --fg-secondary:#5B6577; --fg-muted:rgba(27,34,48,.55); --fg-disabled:rgba(27,34,48,.35);
+  --border-subtle:#EDF0F5; --border-default:#DCE2EC; --border-strong:#B9C2D1; --border-focus:#2F6FED;
+  --accent:#2F6FED; --accent-hover:#2A62D1; --accent-pressed:#2556B6; --accent-subtle:rgba(47,111,237,.14); --accent-fg:#FFFFFF;
+  --success:#1E9E63; --success-subtle:rgba(30,158,99,.14); --warning:#D98A0B; --warning-subtle:rgba(217,138,11,.16);
+  --danger:#D8434E; --danger-subtle:rgba(216,67,78,.14); --info:#2A8CD6; --info-subtle:rgba(42,140,214,.14);
+  --selection-bg:rgba(47,111,237,.22); --selection-fg:#1B2230; --folder-color:#E0A82E;
+  --shadow-1:0 2px 8px rgba(20,30,50,.10); --shadow-2:0 16px 48px rgba(20,30,50,.18); --overlay-scrim:rgba(10,14,22,.4);
+  --desktop:radial-gradient(1100px 700px at 15% 10%,#cfe0ff 0%,transparent 60%),radial-gradient(900px 600px at 90% 95%,#ffd6e6 0%,transparent 60%),#e6ecf6;
+  --radius-sm:4px; --radius-md:8px; --radius-lg:12px; --row-h:32px; --ctrl-h:32px; --dur:160ms; --size-base:14px; --sidebar-w:240px;
+  --font-ui:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC","Noto Sans",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Code","SF Mono","JetBrains Mono",Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg-canvas:#0F1115; --bg-surface:#161922; --bg-elevated:#1C2029; --bg-sidebar:#12151C; --sidebar-material:rgba(18,21,28,.78);
+  --bg-subtle:#1E212A; --bg-hover:#252730; --bg-pressed:#2D3038;
+  --fg-primary:#E6E8EE; --fg-secondary:#A3A9B7; --fg-muted:rgba(230,232,238,.55); --fg-disabled:rgba(230,232,238,.35);
+  --border-subtle:#202431; --border-default:#2A3040; --border-strong:#595E6B; --border-focus:#5B8CFF;
+  --accent:#5B8CFF; --accent-hover:#6C97FD; --accent-pressed:#7AA0FB; --accent-subtle:rgba(91,140,255,.14); --accent-fg:#FFFFFF;
+  --success:#3DD68C; --success-subtle:rgba(61,214,140,.14); --warning:#F5B544; --warning-subtle:rgba(245,181,68,.16);
+  --danger:#FF6B6B; --danger-subtle:rgba(255,107,107,.14); --info:#58B7FF; --info-subtle:rgba(88,183,255,.14);
+  --selection-bg:rgba(91,140,255,.22); --selection-fg:#E6E8EE; --folder-color:#F0C35C;
+  --shadow-1:0 2px 8px rgba(0,0,0,.45); --shadow-2:0 16px 48px rgba(0,0,0,.6); --overlay-scrim:rgba(0,0,0,.55);
+  --desktop:radial-gradient(1100px 700px at 15% 10%,#1d2a4a 0%,transparent 60%),radial-gradient(900px 600px at 90% 95%,#3a1f3d 0%,transparent 60%),#0b0e15;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg-canvas:#0F1115; --bg-surface:#161922; --bg-elevated:#1C2029; --bg-sidebar:#12151C; --sidebar-material:rgba(18,21,28,.78);
+  --bg-subtle:#1E212A; --bg-hover:#252730; --bg-pressed:#2D3038;
+  --fg-primary:#E6E8EE; --fg-secondary:#A3A9B7; --fg-muted:rgba(230,232,238,.55); --fg-disabled:rgba(230,232,238,.35);
+  --border-subtle:#202431; --border-default:#2A3040; --border-strong:#595E6B; --border-focus:#5B8CFF;
+  --accent:#5B8CFF; --accent-hover:#6C97FD; --accent-pressed:#7AA0FB; --accent-subtle:rgba(91,140,255,.14); --accent-fg:#FFFFFF;
+  --success:#3DD68C; --success-subtle:rgba(61,214,140,.14); --warning:#F5B544; --warning-subtle:rgba(245,181,68,.16);
+  --danger:#FF6B6B; --danger-subtle:rgba(255,107,107,.14); --info:#58B7FF; --info-subtle:rgba(88,183,255,.14);
+  --selection-bg:rgba(91,140,255,.22); --selection-fg:#E6E8EE; --folder-color:#F0C35C;
+  --shadow-1:0 2px 8px rgba(0,0,0,.45); --shadow-2:0 16px 48px rgba(0,0,0,.6); --overlay-scrim:rgba(0,0,0,.55);
+  --desktop:radial-gradient(1100px 700px at 15% 10%,#1d2a4a 0%,transparent 60%),radial-gradient(900px 600px at 90% 95%,#3a1f3d 0%,transparent 60%),#0b0e15;
+  color-scheme:dark }
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+html{font-size:var(--size-base)}
+body{margin:0;background:var(--desktop);color:var(--fg-primary);font-family:var(--font-ui);font-size:1rem;line-height:1.45;display:flex;flex-direction:column;gap:12px;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));-webkit-font-smoothing:antialiased;overflow:hidden}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0;text-align:start}
+:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px;border-radius:var(--radius-sm)}
+.ic{flex:none;width:18px;height:18px}
+kbd{font-family:var(--font-mono);font-size:.78rem;color:var(--fg-muted)}
+.mono{font-family:var(--font-mono)}
+.grow{flex:1;min-width:0}
+
+/* 原型控制条 */
+.protobar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;min-height:40px;padding:6px 12px;border-radius:var(--radius-lg);background:var(--sidebar-material);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border-subtle);font-size:.86rem;flex:none}
+.protobar .brand{display:flex;align-items:center;gap:8px;font-weight:600}
+.protobar .brand small{font-weight:400;color:var(--fg-secondary)}
+.protobar .hint{color:var(--fg-muted);font-size:.78rem}
+.seg{display:inline-flex;background:var(--bg-subtle);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:2px;gap:2px}
+.seg button{height:26px;padding:0 10px;border-radius:6px;color:var(--fg-secondary);font-size:.86rem;display:inline-flex;align-items:center;gap:6px;transition:background var(--dur),color var(--dur);white-space:nowrap}
+.seg button:hover{color:var(--fg-primary)}
+.seg button[aria-pressed="true"]{background:var(--bg-surface);color:var(--fg-primary);box-shadow:var(--shadow-1)}
+.seg.lg button{height:30px;padding:0 14px;font-size:.9rem}
+
+/* 窗口 */
+.window{position:relative;flex:1;min-height:0;width:100%;max-width:1320px;margin:0 auto;display:grid;grid-template-columns:var(--sidebar-w) minmax(0,1fr);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-2);border:1px solid var(--border-subtle);transition:grid-template-columns var(--dur)}
+.window[data-platform="win"]{border-radius:8px}
+.window.collapsed{--sidebar-w:52px}
+.window[data-platform="mac"].collapsed{--sidebar-w:96px}
+.sidebar{background:var(--sidebar-material);backdrop-filter:blur(28px) saturate(1.3);-webkit-backdrop-filter:blur(28px) saturate(1.3);border-right:1px solid var(--border-subtle);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.window.no-material .sidebar,.window.no-material .protobar{backdrop-filter:none;-webkit-backdrop-filter:none}
+.window.no-material .sidebar{background:var(--bg-sidebar)}
+.sb-top{height:40px;display:flex;align-items:center;padding:0 10px 0 14px;gap:8px;flex:none}
+.sb-top .brandname{font-weight:600;font-size:.93rem;white-space:nowrap}
+.logo{width:22px;height:22px;flex:none}
+.lights{display:flex;gap:8px;flex:none}
+.lights i{width:12px;height:12px;border-radius:50%;display:block;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.15)}
+.lights .r{background:#ff5f57}.lights .y{background:#febc2e}.lights .g{background:#28c840}
+.sb-nav{padding:4px 8px;display:flex;flex-direction:column;gap:2px;flex:none}
+.nav-item{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--radius-md);color:var(--fg-primary);width:100%;font-size:.93rem;white-space:nowrap;overflow:hidden;transition:background var(--dur)}
+.nav-item:hover{background:var(--bg-hover)}
+.nav-item[aria-current="true"]{background:var(--accent-subtle);color:var(--accent)}
+.nav-item .lbl{overflow:hidden;text-overflow:ellipsis}
+.sb-label{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-muted);padding:12px 18px 4px;white-space:nowrap;flex:none}
+.tree{flex:1;overflow:auto;padding:0 8px 8px;min-height:40px}
+.tree-item{display:flex;align-items:center;gap:6px;height:28px;padding:0 6px;border-radius:6px;font-size:.9rem;width:100%;white-space:nowrap;color:var(--fg-primary)}
+.tree-item .tw{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--fg-muted);flex:none;border-radius:4px}
+.tree-item .tw:hover{background:var(--bg-pressed)}
+.tree-item .tw .ic{width:14px;height:14px}
+.tree-item .lbl{overflow:hidden;text-overflow:ellipsis}
+.tree-item:hover{background:var(--bg-hover)}
+.tree-item[aria-current="true"]{background:var(--accent-subtle);color:var(--accent)}
+.sb-bottom{border-top:1px solid var(--border-subtle);padding:8px;display:flex;flex-direction:column;gap:2px;flex:none}
+.mount-row{display:flex;align-items:center;gap:8px;height:30px;padding:0 6px 0 10px;border-radius:6px;font-size:.86rem;white-space:nowrap}
+.mount-row .pt{font-family:var(--font-mono);color:var(--fg-secondary);font-size:.78rem;overflow:hidden;text-overflow:ellipsis}
+.mount-row .nm{overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.mount-row .iconbtn{width:24px;height:24px}
+.task-sum{display:flex;flex-direction:column;gap:6px;padding:6px 10px;border-radius:var(--radius-md);width:100%;font-size:.86rem}
+.task-sum:hover{background:var(--bg-hover)}
+.task-sum .row{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.task-sum .row span{overflow:hidden;text-overflow:ellipsis}
+.progress{height:4px;background:var(--bg-pressed);border-radius:2px;overflow:hidden;width:100%}
+.progress>i{display:block;height:100%;background:var(--accent);border-radius:2px;transition:width 200ms linear}
+.window.collapsed .lbl,.window.collapsed .sb-label,.window.collapsed .tree,.window.collapsed .brandname,.window.collapsed .task-sum .progress,.window.collapsed .mount-row .pt,.window.collapsed .mount-row .nm{display:none}
+.window.collapsed .nav-item,.window.collapsed .mount-row{justify-content:center;padding:0}
+.window.collapsed .sb-top{justify-content:center;padding:0;gap:4px}
+
+/* 主列 */
+.maincol{display:flex;flex-direction:column;min-width:0;background:var(--bg-canvas)}
+.titlebar{height:40px;display:flex;align-items:center;gap:6px;padding:0 6px 0 12px;flex:none}
+.titlebar .ttl{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:.86rem;color:var(--fg-secondary);overflow:hidden;white-space:nowrap}
+.titlebar .ttl b{color:var(--fg-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.window[data-platform="mac"] .titlebar .ttl{justify-content:center}
+.winctl{display:flex;margin-left:4px}
+.winctl button{width:46px;height:40px;display:inline-flex;align-items:center;justify-content:center;color:var(--fg-secondary);border-radius:0}
+.winctl button .ic{width:14px;height:14px}
+.winctl button:hover{background:var(--bg-hover);color:var(--fg-primary)}
+.winctl .close:hover{background:#e81123;color:#fff}
+.window[data-platform="linux"] .winctl{gap:8px;margin-right:6px}
+.window[data-platform="linux"] .winctl button{width:26px;height:26px;border-radius:50%;background:var(--bg-subtle)}
+.window[data-platform="linux"] .winctl .close:hover{background:var(--bg-pressed);color:var(--fg-primary)}
+.window[data-platform="mac"] .winctl{display:none}
+.searchbox{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 10px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-default);width:min(300px,38vw);transition:border-color var(--dur),box-shadow var(--dur)}
+.searchbox input{border:0;background:none;outline:0;flex:1;min-width:0;font-size:.9rem}
+.searchbox input::placeholder{color:var(--fg-muted)}
+.searchbox:focus-within{border-color:var(--border-focus);box-shadow:0 0 0 3px var(--accent-subtle)}
+.searchbox .ic{color:var(--fg-muted);width:16px;height:16px}
+.iconbtn{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-md);color:var(--fg-secondary);transition:background var(--dur),color var(--dur);flex:none}
+.iconbtn:hover{background:var(--bg-hover);color:var(--fg-primary)}
+.iconbtn[aria-pressed="true"]{background:var(--accent-subtle);color:var(--accent)}
+.iconbtn:disabled{color:var(--fg-disabled);background:none;cursor:default}
+.iconbtn.sm{width:28px;height:28px}
+.cmdbar{height:48px;display:flex;align-items:center;gap:4px;padding:0 12px;border-bottom:1px solid var(--border-subtle);flex:none;overflow:hidden}
+.btn{height:var(--ctrl-h);padding:0 12px;border-radius:var(--radius-md);display:inline-flex;align-items:center;gap:8px;font-size:.93rem;font-weight:500;color:var(--fg-primary);border:1px solid transparent;transition:background var(--dur),border-color var(--dur),color var(--dur),box-shadow var(--dur);white-space:nowrap;flex:none}
+.btn:hover{background:var(--bg-hover)}
+.btn:active{background:var(--bg-pressed)}
+.btn:disabled{color:var(--fg-disabled);cursor:default;background:none}
+.btn.primary{background:var(--accent);color:var(--accent-fg)}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.primary:active{background:var(--accent-pressed)}
+.btn.outline{border-color:var(--border-default);background:var(--bg-surface)}
+.btn.outline:hover{background:var(--bg-hover)}
+.btn.lg{height:40px;padding:0 18px;font-size:.95rem}
+.btn .ic{width:16px;height:16px}
+.crumbs{height:32px;display:flex;align-items:center;gap:2px;padding:0 16px;font-size:.86rem;color:var(--fg-secondary);flex:none;overflow:hidden;white-space:nowrap}
+.crumbs button{height:24px;padding:0 6px;border-radius:4px;color:inherit;display:inline-flex;align-items:center;gap:6px;flex:none}
+.crumbs button:hover{background:var(--bg-hover);color:var(--fg-primary)}
+.crumbs .cur{color:var(--fg-primary);font-weight:500}
+.crumbs .sep{color:var(--fg-muted);padding:0 2px}
+.crumbs .badge{margin-left:4px}
+.content{flex:1;min-height:0;overflow:auto;position:relative;outline:0}
+.statusbar{height:28px;display:flex;align-items:center;gap:12px;padding:0 12px;font-size:.8rem;color:var(--fg-secondary);border-top:1px solid var(--border-subtle);flex:none;white-space:nowrap;overflow:hidden}
+.statusbar .mid{flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.statusbar .lft,.statusbar .rgt{display:flex;align-items:center;gap:8px;flex:none}
+.badge{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font-size:.72rem;font-weight:700;letter-spacing:.04em;color:var(--badge-fg);background:var(--badge-bg);white-space:nowrap}
+.dot{width:4px;height:4px;border-radius:50%;background:var(--fg-muted);display:inline-block}
+
+/* 列表 */
+.thead,.trow{display:grid;grid-template-columns:minmax(200px,1fr) 96px 96px 150px 88px;align-items:center;column-gap:12px}
+.thead{position:sticky;top:0;z-index:2;height:30px;background:var(--bg-canvas);border-bottom:1px solid var(--border-subtle);font-size:.78rem;color:var(--fg-secondary);font-weight:500;padding:0 26px 0 26px;margin:0}
+.thead button{display:inline-flex;align-items:center;gap:4px;color:inherit;height:100%;width:100%;white-space:nowrap;overflow:hidden}
+.thead button:hover{color:var(--fg-primary)}
+.thead button .ic{width:12px;height:12px;opacity:0;transition:opacity var(--dur)}
+.thead button[aria-sort]:not([aria-sort="none"]) .ic{opacity:1}
+.thead .num,.trow .num{text-align:end;justify-content:flex-end;font-variant-numeric:tabular-nums}
+.rows{padding:4px 10px 12px}
+.trow{height:var(--row-h);border-radius:6px;cursor:default;font-size:.93rem;user-select:none;padding:0 16px;transition:background 80ms}
+.trow.srch{height:auto;min-height:var(--row-h);padding-block:5px}
+.trow:hover{background:var(--bg-hover)}
+.trow[aria-selected="true"]{background:var(--selection-bg);color:var(--selection-fg)}
+.trow.focus{box-shadow:inset 0 0 0 1px var(--accent)}
+.trow .nm{display:flex;align-items:center;gap:10px;min-width:0}
+.trow .nm-txt{display:flex;flex-direction:column;min-width:0;line-height:1.3}
+.trow .nm-txt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .sub{font-size:.76rem;color:var(--fg-muted);font-family:var(--font-mono)}
+.trow .dim{color:var(--fg-secondary);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .marks{display:inline-flex;color:var(--warning);margin-left:2px}
+.trow .marks .ic{width:14px;height:14px}
+.fi{width:20px;height:20px;color:var(--fg-secondary);flex:none}
+.fi.folder{color:var(--folder-color)}
+.window[data-icons="duotone"] .fi.image{color:#D4587A}
+.window[data-icons="duotone"] .fi.code{color:#4F8BE0}
+.window[data-icons="duotone"] .fi.text{color:#6E8597}
+.window[data-icons="duotone"] .fi.video{color:#9B59B6}
+.window[data-icons="duotone"] .fi.archive{color:#C98A2E}
+.window[data-icons="duotone"] .fi.font{color:#2E9E8F}
+.window[data-icons="mono"] .fi{color:var(--fg-secondary)}
+.gridv{display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:6px;padding:12px 16px}
+.gcell{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 8px 10px;border-radius:var(--radius-md);text-align:center;font-size:.86rem;cursor:default;user-select:none;min-width:0}
+.gcell .fi{width:44px;height:44px}
+.gcell span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gcell small{color:var(--fg-muted);font-size:.74rem}
+.gcell:hover{background:var(--bg-hover)}
+.gcell[aria-selected="true"]{background:var(--selection-bg)}
+.gcell.focus{box-shadow:inset 0 0 0 1px var(--accent)}
+.emptyst{min-height:60%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--fg-muted);padding:32px;text-align:center}
+.emptyst .ic{width:40px;height:40px;opacity:.6}
+@media (max-width:980px){.thead,.trow{grid-template-columns:minmax(160px,1fr) 90px 150px}.col-packed,.col-type{display:none}}
+@media (max-width:600px){.thead,.trow{grid-template-columns:minmax(120px,1fr) 80px}.col-mtime{display:none}}
+
+/* 开始页 */
+.home{padding:32px 24px;max-width:960px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+.drop{border:1.5px dashed var(--border-strong);border-radius:var(--radius-lg);padding:44px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;background:var(--bg-surface);transition:border-color var(--dur),background var(--dur)}
+.drop.over{border-color:var(--accent);background:var(--accent-subtle)}
+.drop .ic{width:36px;height:36px;color:var(--accent)}
+.drop h2{margin:0;font-size:1.25rem;font-weight:600;text-wrap:balance}
+.drop p{margin:0;color:var(--fg-secondary);font-size:.9rem}
+.home .actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.home .sect{display:flex;align-items:baseline;justify-content:space-between}
+.home h3{margin:0;font-size:.95rem;font-weight:600}
+.home .sect button{color:var(--fg-secondary);font-size:.86rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.card{display:flex;gap:12px;align-items:center;padding:12px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-subtle);transition:border-color var(--dur),box-shadow var(--dur);min-width:0}
+.card:hover{border-color:var(--border-default);box-shadow:var(--shadow-1)}
+.card .ico{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--badge-bg);color:var(--badge-fg);flex:none;font-size:.72rem;font-weight:800;letter-spacing:.04em}
+.card .meta{min-width:0;display:flex;flex-direction:column;gap:2px}
+.card .meta b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.93rem}
+.card .meta span{font-size:.8rem;color:var(--fg-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 设置 */
+.settings{display:grid;grid-template-columns:200px minmax(0,1fr);height:100%}
+.set-nav{border-right:1px solid var(--border-subtle);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow:auto}
+.set-body{overflow:auto;padding:24px 32px 40px;display:flex;flex-direction:column;gap:20px}
+.set-body>*{max-width:760px}
+.set-body h2{margin:0;font-size:1.25rem;font-weight:600}
+.set-group{display:flex;flex-direction:column;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);overflow:hidden}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;min-height:52px;border-top:1px solid var(--border-subtle)}
+.set-row:first-child{border-top:0}
+.set-row .lab{display:flex;flex-direction:column;gap:2px;min-width:0}
+.set-row .lab small{color:var(--fg-secondary);font-size:.8rem}
+.set-row .ctl{display:flex;align-items:center;gap:8px;flex:none;max-width:60%;justify-content:flex-end;flex-wrap:wrap}
+.set-row.col{flex-direction:column;align-items:stretch}
+.set-row.col .ctl{max-width:none;justify-content:flex-start}
+.set-row .status{display:inline-flex;align-items:center;gap:6px;font-size:.86rem;color:var(--success)}
+.set-row .status.warn{color:var(--warning)}
+select.sel,input.inp{height:var(--ctrl-h);padding:0 10px;border-radius:var(--radius-md);border:1px solid var(--border-default);background:var(--bg-surface);font-size:.9rem;min-width:0;max-width:100%}
+select.sel:focus,input.inp:focus{outline:0;border-color:var(--border-focus);box-shadow:0 0 0 3px var(--accent-subtle)}
+input.inp.mono{font-family:var(--font-mono);font-size:.84rem}
+.switch{width:38px;height:22px;border-radius:11px;background:var(--bg-pressed);position:relative;transition:background var(--dur);flex:none;border:0}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform var(--dur)}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(16px)}
+.themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;width:100%}
+.tcard{border:2px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden;background:var(--bg-surface);transition:border-color var(--dur);min-width:0}
+.tcard:hover{border-color:var(--border-strong)}
+.tcard[aria-pressed="true"]{border-color:var(--accent)}
+.tcard .prev{height:70px;display:grid;grid-template-columns:34% 1fr}
+.tcard .prev .ps{display:flex;flex-direction:column;gap:5px;padding:8px 6px}
+.tcard .prev .ps i{height:5px;border-radius:2px;display:block;opacity:.75}
+.tcard .prev .pm{padding:8px;display:flex;flex-direction:column;gap:5px}
+.tcard .prev .pm i{height:6px;border-radius:3px;display:block}
+.tcard .tn{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:8px 10px;font-size:.86rem}
+.tcard .tn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tcard .tn small{color:var(--fg-muted);font-size:.74rem;flex:none}
+.swatches{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sw{width:24px;height:24px;border-radius:50%;border:2px solid transparent;position:relative;flex:none}
+.sw[aria-pressed="true"]{border-color:var(--fg-primary)}
+.sw[aria-pressed="true"]::after{content:"";position:absolute;inset:2px;border-radius:50%;border:2px solid var(--bg-surface)}
+.sw.custom{background:conic-gradient(#f66,#fc6,#6f6,#6cf,#66f,#f6f,#f66)}
+input[type=range]{accent-color:var(--accent);width:160px}
+input[type=color]{width:28px;height:28px;border:1px solid var(--border-default);border-radius:50%;padding:0;background:none}
+.menu-prev{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-elevated);box-shadow:var(--shadow-1);padding:4px;width:min(100%,300px);font-size:.9rem}
+.menu-prev div{padding:6px 10px;border-radius:4px;display:flex;align-items:center;gap:10px;white-space:nowrap;overflow:hidden}
+.menu-prev div.hl{background:var(--bg-hover)}
+.menu-prev div.sub{padding-left:28px;color:var(--fg-secondary)}
+.menu-prev hr{border:0;border-top:1px solid var(--border-subtle);margin:4px 0}
+.fmt-table{width:100%;border-collapse:collapse;font-size:.9rem}
+.fmt-table td{padding:8px 16px;border-top:1px solid var(--border-subtle)}
+.fmt-table tr:first-child td{border-top:0}
+.fmt-table td:last-child{text-align:end}
+.about-logo{display:flex;align-items:center;gap:16px}
+.about-logo .logo{width:56px;height:56px}
+.about-logo b{font-size:1.4rem;font-weight:700}
+.about-logo span{color:var(--fg-secondary);font-size:.9rem}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:12px;background:var(--bg-subtle);font-size:.8rem;color:var(--fg-secondary);font-family:var(--font-mono)}
+@media (max-width:720px){.settings{grid-template-columns:1fr;grid-template-rows:auto 1fr}.set-nav{flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--border-subtle)}.set-nav .nav-item{width:auto;flex:none}.set-body{padding:16px}.set-row .ctl{max-width:50%}}
+
+/* 浮层：模态 / 侧滑 / 抽屉 / 菜单 / 提示 */
+#overlays{display:contents}
+.scrim{position:absolute;inset:0;background:var(--overlay-scrim);display:flex;align-items:center;justify-content:center;z-index:30;padding:16px;animation:fade var(--dur) ease-out}
+.modal{background:var(--bg-elevated);border-radius:var(--radius-lg);box-shadow:var(--shadow-2);border:1px solid var(--border-subtle);width:min(100%,var(--mw,520px));max-height:100%;display:flex;flex-direction:column;animation:pop 200ms ease-out}
+.modal header{display:flex;align-items:center;gap:8px;padding:14px 16px 8px;flex:none}
+.modal header h2{margin:0;font-size:1.05rem;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal .mb{padding:4px 16px 8px;overflow:auto;display:flex;flex-direction:column;gap:14px;min-height:0}
+.modal footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px 16px;flex:none;flex-wrap:wrap}
+.modal footer .grow{flex:1}
+.scrim.sheet{justify-content:flex-end;align-items:stretch;padding:0}
+.scrim.sheet .modal{width:min(100%,460px);height:100%;border-radius:0;animation:slide 220ms ease-out;max-height:none;border-width:0 0 0 1px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:.86rem;color:var(--fg-secondary)}
+.frow{display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:10px 12px}
+.frow>label{font-size:.9rem;color:var(--fg-secondary)}
+.frow .inline{min-width:0}
+.inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.inline .inp,.inline .sel{flex:1;min-width:120px}
+.chk{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer}
+.chk input{width:16px;height:16px;accent-color:var(--accent);margin:0}
+.radios{display:flex;gap:4px;flex-wrap:wrap}
+.pw{display:flex;align-items:center;gap:6px;border:1px solid var(--border-default);border-radius:var(--radius-md);height:var(--ctrl-h);padding:0 4px 0 10px;background:var(--bg-surface);flex:1;min-width:140px}
+.pw:focus-within{border-color:var(--border-focus);box-shadow:0 0 0 3px var(--accent-subtle)}
+.pw input{border:0;outline:0;background:none;flex:1;min-width:0}
+.strength{display:flex;gap:3px;align-items:center}
+.strength i{width:16px;height:4px;border-radius:2px;background:var(--bg-pressed)}
+.strength i.on{background:var(--success)}
+.strength i.on.w{background:var(--warning)}
+.hint{font-size:.8rem;color:var(--fg-secondary)}
+.err{font-size:.84rem;color:var(--danger);display:flex;align-items:center;gap:6px}
+.note{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:var(--radius-md);background:var(--info-subtle);color:var(--fg-primary);font-size:.86rem;line-height:1.4}
+.note .ic{color:var(--info);margin-top:1px}
+.note.warn{background:var(--warning-subtle)}
+.note.warn .ic{color:var(--warning)}
+details.adv summary{cursor:pointer;font-size:.9rem;color:var(--fg-secondary);list-style:none;display:flex;align-items:center;gap:6px}
+details.adv summary::-webkit-details-marker{display:none}
+details.adv summary .ic{width:14px;height:14px;transition:transform var(--dur)}
+details.adv[open] summary .ic{transform:rotate(90deg)}
+details.adv summary .hint{margin-left:4px}
+details.adv .advbody{display:flex;flex-direction:column;gap:12px;padding-top:12px}
+.levels{display:flex;justify-content:space-between;font-size:.72rem;color:var(--fg-muted);padding:0 2px}
+.est{display:flex;align-items:center;gap:8px;font-size:.86rem;color:var(--fg-secondary);font-variant-numeric:tabular-nums}
+.est b{color:var(--fg-primary);font-weight:600}
+.conf{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.conf .side{border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:6px;font-size:.86rem;background:var(--bg-surface)}
+.conf .side h4{margin:0;font-size:.8rem;color:var(--fg-muted);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.conf .side b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conf .side .ic{width:28px;height:28px}
+.conf .side .new{color:var(--success)}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:.9rem}
+.dl dt{color:var(--fg-secondary);margin:0}
+.dl dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dl dd.mono{font-size:.84rem}
+.code{margin:0;font-family:var(--font-mono);font-size:.82rem;line-height:1.55;background:var(--bg-subtle);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:12px 14px;overflow:auto;max-height:50vh;white-space:pre;color:var(--fg-primary)}
+.imgprev{border-radius:var(--radius-md);overflow:hidden;background:var(--bg-subtle);display:flex;align-items:center;justify-content:center}
+.imgprev svg{width:100%;height:auto;display:block}
+.prev-meta{display:flex;gap:12px;font-size:.8rem;color:var(--fg-secondary);flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(100%,380px);background:var(--bg-elevated);border-left:1px solid var(--border-subtle);box-shadow:var(--shadow-2);z-index:25;display:flex;flex-direction:column;animation:slide 220ms ease-out}
+.drawer header{display:flex;align-items:center;gap:8px;padding:10px 12px 10px 16px;border-bottom:1px solid var(--border-subtle);flex:none}
+.drawer header h2{margin:0;font-size:1rem;font-weight:600;flex:1}
+.drawer .list{flex:1;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+.task{padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:8px;font-size:.86rem}
+.task .tt{display:flex;align-items:center;gap:8px}
+.task .tt .ic{color:var(--fg-secondary)}
+.task .tt b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.task .tt .iconbtn{width:26px;height:26px}
+.task .meta{display:flex;justify-content:space-between;color:var(--fg-secondary);font-variant-numeric:tabular-nums;gap:8px}
+.task .meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task.done .progress>i{background:var(--success)}
+.task.cancelled .progress>i{background:var(--fg-disabled)}
+.task.paused .progress>i{background:var(--warning)}
+.task .acts{display:flex;gap:6px;justify-content:flex-end}
+.task .acts .btn{height:26px;padding:0 8px;font-size:.82rem}
+.ctx{position:absolute;z-index:40;min-width:208px;background:var(--bg-elevated);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-2);padding:4px;font-size:.9rem;animation:pop 120ms ease-out}
+.ctx button{display:flex;align-items:center;gap:10px;width:100%;height:30px;padding:0 10px;border-radius:4px;color:var(--fg-primary);white-space:nowrap}
+.ctx button .ic{width:16px;height:16px;color:var(--fg-secondary)}
+.ctx button:hover{background:var(--bg-hover)}
+.ctx button:disabled{color:var(--fg-disabled)}
+.ctx button:disabled .ic{color:var(--fg-disabled)}
+.ctx button.danger{color:var(--danger)}
+.ctx button kbd{margin-left:auto;padding-left:16px}
+.ctx hr{border:0;border-top:1px solid var(--border-subtle);margin:4px 0}
+.toasts{position:absolute;right:16px;bottom:40px;display:flex;flex-direction:column;gap:8px;z-index:50;pointer-events:none;max-width:min(380px,calc(100% - 32px))}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-elevated);border:1px solid var(--border-default);box-shadow:var(--shadow-2);font-size:.9rem;animation:pop 180ms ease-out}
+.toast>.ic{color:var(--success)}
+.toast.err>.ic{color:var(--danger)}
+.toast.info>.ic{color:var(--info)}
+.toast.warn>.ic{color:var(--warning)}
+.toast span{flex:1;min-width:0}
+.toast button.lnk{color:var(--accent);font-weight:500;white-space:nowrap}
+.toast .iconbtn{width:24px;height:24px}
+.miniwin{position:absolute;right:24px;bottom:24px;width:min(400px,calc(100% - 32px));background:var(--bg-elevated);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-2);padding:12px 14px;display:flex;flex-direction:column;gap:8px;font-size:.86rem;z-index:8;animation:pop 200ms}
+.miniwin .tt{display:flex;align-items:center;gap:8px;font-weight:600}
+.miniwin .tt .ic{color:var(--accent)}
+.miniwin .meta{display:flex;gap:10px;color:var(--fg-secondary);font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.miniwin .cur{font-family:var(--font-mono);font-size:.78rem;color:var(--fg-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.miniwin .acts{display:flex;gap:6px;justify-content:flex-end}
+.miniwin .acts .btn{height:28px;padding:0 10px;font-size:.84rem}
+.sb-scrim{position:absolute;inset:0;z-index:19;background:var(--overlay-scrim)}
+.menu-toggle{display:none}
+@keyframes fade{from{opacity:0}}
+@keyframes pop{from{opacity:0;transform:translateY(6px) scale(.98)}}
+@keyframes slide{from{transform:translateX(24px);opacity:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.window[data-density="compact"]{--row-h:28px;--ctrl-h:28px}
+.window[data-density="spacious"]{--row-h:40px;--ctrl-h:36px}
+.window.hc .btn.outline,.window.hc .set-group,.window.hc .card,.window.hc .modal{border-width:2px}
+@media (max-width:720px){
+  .window{grid-template-columns:minmax(0,1fr)}
+  .window.collapsed{--sidebar-w:240px}
+  .sidebar{position:absolute;top:0;bottom:0;left:0;width:260px;z-index:20;transform:translateX(-100%);transition:transform 220ms;background:var(--bg-sidebar);backdrop-filter:none;-webkit-backdrop-filter:none}
+  .window.sb-open .sidebar{transform:none;box-shadow:var(--shadow-2)}
+  .window.collapsed .lbl,.window.collapsed .sb-label,.window.collapsed .tree,.window.collapsed .brandname,.window.collapsed .task-sum .progress,.window.collapsed .mount-row .pt,.window.collapsed .mount-row .nm{display:initial}
+  .window.collapsed .tree{display:block}
+  .window.collapsed .nav-item,.window.collapsed .mount-row{justify-content:flex-start;padding:0 10px}
+  .menu-toggle{display:inline-flex}
+  .cmdbar .btn .lbl{display:none}
+  .cmdbar .btn{padding:0 8px}
+  .home{padding:20px 12px}
+  .searchbox{width:120px}
+  .protobar .hint{display:none}
+  .conf{grid-template-columns:1fr}
+  .frow{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="protobar" id="protobar"></div>
+<div class="window" id="win" data-platform="win" data-density="comfortable" data-icons="duotone">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="maincol">
+    <header class="titlebar" id="titlebar"></header>
+    <div class="grow" id="view" style="display:flex;flex-direction:column;min-height:0"></div>
+    <footer class="statusbar" id="statusbar"></footer>
+  </div>
+  <div class="toasts" id="toasts"></div>
+  <div id="overlays"></div>
+  <div class="miniwin" id="miniwin" hidden></div>
+</div>
+<script>
+(function(){
+'use strict';
+const root=document.documentElement;
+const $=(s,r)=>(r||document).querySelector(s);
+const $$=(s,r)=>Array.from((r||document).querySelectorAll(s));
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let seed=20261027;
+function rnd(a,b){seed=(seed*1103515245+12345)&0x7fffffff;return Math.floor(a+(seed/0x7fffffff)*(b-a+1));}
+
+/* ---------- 图标（24×24 线性，1.6px） ---------- */
+const FILE_BASE='<path d="M6.5 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M13.5 3.5v4h4"/>';
+const EYE='<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/>';
+const ICONS={
+ home:'<path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/>',
+ clock:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+ star:'<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.8L12 16.8l-5.3 2.8 1.1-5.8-4.3-4.1 5.9-.8z"/>',
+ folder:'<path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/>',
+ folderOpen:'<path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H18a1.5 1.5 0 0 1 1.5 1.5V11"/><path d="M3.8 19.5h14.6a1 1 0 0 0 .95-.7l2-6.3a.8.8 0 0 0-.77-1H7.3a1 1 0 0 0-.95.7L3.5 19"/>',
+ file:FILE_BASE,
+ fileText:FILE_BASE+'<path d="M8.5 12h7M8.5 15.5h7"/>',
+ fileCode:FILE_BASE+'<path d="M10 11.5l-2 2 2 2M14 11.5l2 2-2 2"/>',
+ fileImage:FILE_BASE+'<circle cx="9.5" cy="11.5" r="1.2"/><path d="M7 18l3.5-3.5 2 2 2-2.5L17 18"/>',
+ fileVideo:FILE_BASE+'<path d="M10 11.5v5l4.5-2.5z"/>',
+ fileFont:FILE_BASE+'<path d="M9 17l3-7 3 7M10 15h4"/>',
+ archive:'<rect x="4" y="5" width="16" height="4" rx="1"/><path d="M5.5 9v9A1.5 1.5 0 0 0 7 19.5h10a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M10 13h4"/>',
+ lock:'<rect x="5.5" y="10.5" width="13" height="9.5" rx="1.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
+ search:'<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ extract:'<path d="M12 4v11"/><path d="M8 11l4 4 4-4"/><path d="M4.5 16.5V19a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-2.5"/>',
+ upload:'<path d="M12 16V5M8 9l4-4 4 4"/><path d="M4.5 16.5V19a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-2.5"/>',
+ check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+ checkCircle:'<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+ trash:'<path d="M4.5 7h15M9.5 7V4.5h5V7M7 7l.8 12.1a1 1 0 0 0 1 .9h6.4a1 1 0 0 0 1-.9L17 7"/><path d="M10 11v5M14 11v5"/>',
+ info:'<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+ chevronLeft:'<path d="M14.5 6l-6 6 6 6"/>',chevronRight:'<path d="M9.5 6l6 6-6 6"/>',chevronUp:'<path d="M6 14.5l6-6 6 6"/>',chevronDown:'<path d="M6 9.5l6 6 6-6"/>',
+ chevronsLeft:'<path d="M11 6l-6 6 6 6M18 6l-6 6 6 6"/>',chevronsRight:'<path d="M6 6l6 6-6 6M13 6l6 6-6 6"/>',
+ arrowUp:'<path d="M12 19V5M6 11l6-6 6 6"/>',
+ grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+ list:'<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+ x:'<path d="M6 6l12 12M18 6L6 18"/>',minus:'<path d="M5 12h14"/>',square:'<rect x="5.5" y="5.5" width="13" height="13" rx="1"/>',
+ drive:'<rect x="3.5" y="8" width="17" height="8" rx="2"/><path d="M7 12h.01M10 12h.01"/>',
+ eject:'<path d="M5.5 14.5h13L12 6z"/><path d="M5.5 18h13"/>',
+ play:'<path d="M8 5.5v13l10-6.5z"/>',pause:'<path d="M8 5.5v13M16 5.5v13"/>',
+ sliders:'<path d="M5 7h14M5 12h14M5 17h14"/><circle cx="9" cy="7" r="2" fill="var(--bg-elevated)"/><circle cx="15" cy="12" r="2" fill="var(--bg-elevated)"/><circle cx="10" cy="17" r="2" fill="var(--bg-elevated)"/>',
+ moon:'<path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z"/>',
+ sun:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
+ monitor:'<rect x="3.5" y="5" width="17" height="11" rx="1.5"/><path d="M9 19.5h6M12 16v3.5"/>',
+ globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 3 3 14 0 17M12 3.5c-3 3-3 14 0 17"/>',
+ palette:'<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 2-.8 2-1.8 0-1.4-1.5-1.7-1.5-3 0-1 .8-1.7 1.8-1.7H16a4.5 4.5 0 0 0 4.5-4.5c0-3.4-3.8-6-8.5-6z"/><circle cx="8" cy="10" r="1"/><circle cx="11" cy="7" r="1"/><circle cx="15" cy="8" r="1"/>',
+ terminal:'<path d="M5 7l5 5-5 5M12 17h7"/>',
+ more:'<path d="M6 12h.01M12 12h.01M18 12h.01"/>',
+ menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
+ key:'<circle cx="8" cy="14" r="3.5"/><path d="M10.5 11.5L19 3M15 7l2 2M17.5 4.5l2 2"/>',
+ shield:'<path d="M12 3.5l7 2.5v5.5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>',
+ eye:EYE,eyeOff:EYE+'<path d="M4 4l16 16"/>',
+ refresh:'<path d="M20 12a8 8 0 0 1-14.5 4.6M4 12a8 8 0 0 1 14.5-4.6"/><path d="M20 4v4.5h-4.5M4 20v-4.5h4.5"/>',
+ alert:'<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+ copy:'<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+ edit:'<path d="M4 20h4l11-11-4-4L4 16z"/><path d="M13 7l4 4"/>',
+ external:'<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
+ bolt:'<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+ package:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+ hash:'<path d="M5 9h14M5 15h14M10 4l-2 16M16 4l-2 16"/>',
+ bell:'<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+ cpu:'<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+ layout:'<rect x="3.5" y="4" width="17" height="16" rx="1.5"/><path d="M9 4v16M3.5 9h17"/>',
+ wand:'<path d="M15 4l5 5L8 21l-5-5z"/><path d="M13 6l5 5M4 4l1 1M19 15l1 1M7 2l.5 2M2 7l2 .5"/>',
+ download:'<path d="M12 4v11M8 11l4 4 4-4"/><path d="M4.5 16.5V19a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-2.5"/>',
+ history:'<path d="M4 12a8 8 0 1 1 2.3 5.7"/><path d="M4 7v5h5"/><path d="M12 8v4l3 2"/>',
+ sidebar:'<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M9.5 4.5v15"/>',
+ sparkle:'<path d="M12 3l2 5.5L19.5 10.5 14 12.5 12 18l-2-5.5L4.5 10.5 10 8.5z"/>'
+};
+function icon(n,cls){return `<svg class="ic${cls?' '+cls:''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]||ICONS.file}</svg>`;}
+const LOGO='<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="var(--accent)"/><path d="M8 8h8l-8 8h8" fill="none" stroke="var(--accent-fg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/* ---------- 主题（docs/05 §5） ---------- */
+const THEMES={
+ aurora:{n:{'zh-CN':'晨光','zh-TW':'晨光','en-US':'Aurora','ja-JP':'オーロラ'},a:'light',c:{canvas:'#F5F7FB',surface:'#FFFFFF',elevated:'#FFFFFF',sidebar:'#EEF2F8',fg:'#1B2230',fg2:'#5B6577',border:'#DCE2EC',accent:'#2F6FED',success:'#1E9E63',warning:'#D98A0B',danger:'#D8434E',info:'#2A8CD6'}},
+ midnight:{n:{'zh-CN':'午夜','zh-TW':'午夜','en-US':'Midnight','ja-JP':'ミッドナイト'},a:'dark',c:{canvas:'#0F1115',surface:'#161922',elevated:'#1C2029',sidebar:'#12151C',fg:'#E6E8EE',fg2:'#A3A9B7',border:'#2A3040',accent:'#5B8CFF',success:'#3DD68C',warning:'#F5B544',danger:'#FF6B6B',info:'#58B7FF'}},
+ graphite:{n:{'zh-CN':'石墨','zh-TW':'石墨','en-US':'Graphite','ja-JP':'グラファイト'},a:'dark',c:{canvas:'#121212',surface:'#1A1A1A',elevated:'#222222',sidebar:'#161616',fg:'#EDEDED',fg2:'#A8A8A8',border:'#2C2C2C',accent:'#8AB4F8',success:'#6CCB8B',warning:'#E8B64A',danger:'#F28B82',info:'#7FC2F5'}},
+ paper:{n:{'zh-CN':'纸张','zh-TW':'紙張','en-US':'Paper','ja-JP':'ペーパー'},a:'light',c:{canvas:'#F7F3EC',surface:'#FFFDF9',elevated:'#FFFFFF',sidebar:'#F0EAE0',fg:'#2B2620',fg2:'#6B6259',border:'#E3DBCE',accent:'#B8641B',success:'#4E8F4A',warning:'#C48A12',danger:'#C04A3F',info:'#3C78A8'}},
+ nord:{n:{'zh-CN':'北极','zh-TW':'北極','en-US':'Nord','ja-JP':'Nord'},a:'dark',c:{canvas:'#2E3440',surface:'#3B4252',elevated:'#434C5E',sidebar:'#2B303B',fg:'#ECEFF4',fg2:'#B8C0CE',border:'#4C566A',accent:'#88C0D0',success:'#A3BE8C',warning:'#EBCB8B',danger:'#BF616A',info:'#81A1C1'}},
+ 'nord-light':{n:{'zh-CN':'北极 · 浅','zh-TW':'北極 · 淺','en-US':'Nord Light','ja-JP':'Nord ライト'},a:'light',c:{canvas:'#ECEFF4',surface:'#FFFFFF',elevated:'#FFFFFF',sidebar:'#E5E9F0',fg:'#2E3440',fg2:'#4C566A',border:'#D8DEE9',accent:'#5E81AC',success:'#6F9F5A',warning:'#B08A2E',danger:'#BF616A',info:'#5E81AC'}},
+ 'catppuccin-mocha':{n:{'zh-CN':'卡布奇诺 · 摩卡','zh-TW':'卡布奇諾 · 摩卡','en-US':'Catppuccin Mocha','ja-JP':'Catppuccin モカ'},a:'dark',c:{canvas:'#1E1E2E',surface:'#181825',elevated:'#313244',sidebar:'#11111B',fg:'#CDD6F4',fg2:'#A6ADC8',border:'#45475A',accent:'#89B4FA',success:'#A6E3A1',warning:'#F9E2AF',danger:'#F38BA8',info:'#74C7EC'}},
+ 'catppuccin-latte':{n:{'zh-CN':'卡布奇诺 · 拿铁','zh-TW':'卡布奇諾 · 拿鐵','en-US':'Catppuccin Latte','ja-JP':'Catppuccin ラテ'},a:'light',c:{canvas:'#EFF1F5',surface:'#FFFFFF',elevated:'#FFFFFF',sidebar:'#E6E9EF',fg:'#4C4F69',fg2:'#6C6F85',border:'#CCD0DA',accent:'#1E66F5',success:'#40A02B',warning:'#DF8E1D',danger:'#D20F39',info:'#209FB5'}},
+ 'solarized-dark':{n:{'zh-CN':'日光 · 深','zh-TW':'日光 · 深','en-US':'Solarized Dark','ja-JP':'Solarized ダーク'},a:'dark',c:{canvas:'#002B36',surface:'#073642',elevated:'#0B3F4D',sidebar:'#00252F',fg:'#EEE8D5',fg2:'#93A1A1',border:'#1C4A56',accent:'#268BD2',success:'#859900',warning:'#B58900',danger:'#DC322F',info:'#2AA198'}},
+ 'solarized-light':{n:{'zh-CN':'日光 · 浅','zh-TW':'日光 · 淺','en-US':'Solarized Light','ja-JP':'Solarized ライト'},a:'light',c:{canvas:'#FDF6E3',surface:'#FFFCF2',elevated:'#FFFFFF',sidebar:'#EEE8D5',fg:'#073642',fg2:'#586E75',border:'#E0D8C0',accent:'#268BD2',success:'#859900',warning:'#B58900',danger:'#DC322F',info:'#2AA198'}},
+ 'hc-light':{n:{'zh-CN':'高对比 · 浅','zh-TW':'高對比 · 淺','en-US':'High Contrast Light','ja-JP':'ハイコントラスト ライト'},a:'light',hc:true,c:{canvas:'#FFFFFF',surface:'#FFFFFF',elevated:'#FFFFFF',sidebar:'#FFFFFF',fg:'#000000',fg2:'#1A1A1A',border:'#000000',accent:'#0000D6',success:'#006B2E',warning:'#8A5A00',danger:'#B00020',info:'#004C99'}},
+ 'hc-dark':{n:{'zh-CN':'高对比 · 深','zh-TW':'高對比 · 深','en-US':'High Contrast Dark','ja-JP':'ハイコントラスト ダーク'},a:'dark',hc:true,c:{canvas:'#000000',surface:'#000000',elevated:'#0A0A0A',sidebar:'#000000',fg:'#FFFFFF',fg2:'#E6E6E6',border:'#FFFFFF',accent:'#FFD400',success:'#3DFF9A',warning:'#FFC400',danger:'#FF5C5C',info:'#4FC3FF'}}
+};
+const SYS_ACCENT={win:'#0067C0',mac:'#007AFF',linux:'#3584E4'};
+const ACCENT_PRESETS=['#2F6FED','#5B8CFF','#7A5AF8','#C2410C','#B8641B','#D4587A','#DB2777','#0E9F8E','#1E9E63','#4D7C0F','#0891B2','#64748B'];
+const DESKTOP={
+ win:{light:'radial-gradient(1100px 700px at 15% 10%,#cfe0ff 0%,transparent 60%),radial-gradient(900px 600px at 90% 95%,#ffd6e6 0%,transparent 60%),#e6ecf6',dark:'radial-gradient(1100px 700px at 15% 10%,#1d2a4a 0%,transparent 60%),radial-gradient(900px 600px at 90% 95%,#3a1f3d 0%,transparent 60%),#0b0e15'},
+ mac:{light:'linear-gradient(135deg,#f7d9c4 0%,#dcc7f0 45%,#c3d8f5 100%)',dark:'linear-gradient(135deg,#3a2a4f 0%,#1f2440 50%,#0f1a2b 100%)'},
+ linux:{light:'linear-gradient(160deg,#d6e4fb 0%,#eef3f9 100%)',dark:'linear-gradient(160deg,#1c2b4a 0%,#0d1320 100%)'}
+};
+
+/* ---------- 颜色工具 ---------- */
+function hexToRgb(h){h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h,16);return [n>>16&255,n>>8&255,n&255];}
+function rgbToHex(a){return '#'+a.map(v=>Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,'0')).join('');}
+function mix(a,b,t){const A=hexToRgb(a),B=hexToRgb(b);return rgbToHex(A.map((v,i)=>v+(B[i]-v)*t));}
+function alpha(h,a){const [r,g,b]=hexToRgb(h);return `rgba(${r},${g},${b},${a})`;}
+function lum(h){const [r,g,b]=hexToRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*b;}
+function contrast(a,b){const l1=lum(a),l2=lum(b);return (Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05);}
+function onColor(bg){return contrast(bg,'#FFFFFF')>=3?'#FFFFFF':'#111111';}
+
+/* ---------- 文案：zh-CN（源）与 en-US ---------- */
+const L={};
+L['zh-CN']={
+ 'nav.home':'开始','nav.recent':'最近','nav.favorites':'收藏','nav.tree':'压缩包结构','nav.mounts':'已挂载','nav.tasks':'任务','nav.settings':'设置','nav.collapse':'收起侧栏','nav.expand':'展开侧栏',
+ 'title.search':'在压缩包中搜索…','title.theme':'切换明暗','title.settings':'设置','title.menu':'菜单','win.min':'最小化','win.max':'最大化','win.close':'关闭',
+ 'cmd.add':'添加','cmd.extract':'解压到…','cmd.extractSel':'解压所选…','cmd.extractHere':'解压到此处','cmd.mount':'挂载','cmd.test':'测试','cmd.delete':'删除','cmd.props':'属性','cmd.more':'更多','cmd.back':'后退','cmd.forward':'前进','cmd.up':'上级目录','cmd.viewTable':'表格视图','cmd.viewGrid':'网格视图','cmd.rename':'重命名','cmd.preview':'预览','cmd.openWith':'用系统程序打开','cmd.copyPath':'复制路径','cmd.selectAll':'全选','cmd.newFolder':'新建文件夹','cmd.convert':'转换为…','cmd.open':'打开','cmd.hash':'校验哈希','cmd.encoding':'文件名编码',
+ 'col.name':'名称','col.size':'大小','col.packed':'压缩后','col.mtime':'修改时间','col.type':'类型',
+ 'type.folder':'文件夹','type.archive':'压缩包','type.file':'文件','type.nested':'嵌套压缩包',
+ 'status.items':n=>`${n} 项`,'status.selected':(n,s)=>`已选 ${n} 项（${s}）`,'status.ratio':'压缩率','status.solid':'固实','status.readonly':'只读','status.results':n=>`${n} 个结果`,'status.mounted':'已挂载',
+ 'home.dropTitle':'将文件或压缩包拖到此处','home.dropHint':'压缩包 → 打开 · 其他文件 → 新建压缩包','home.open':'打开压缩包','home.new':'新建压缩包','home.extract':'解压到…','home.recent':'最近','home.clear':'清除','home.dropped':'原型：已模拟拖入并打开',
+ 'empty.dir':'此目录为空','empty.search':q=>`没有匹配 “${q}” 的项目`,'empty.clearSearch':'清除搜索','empty.recent':'最近打开的压缩包会显示在这里',
+ 'compress.title':'新建压缩包','compress.format':'格式','compress.more':'更多','compress.saveTo':'保存到','compress.level':'压缩级别','compress.levels':['存储','最快','快速','标准','较好','最好','极限'],'compress.estimate':(a,b,d)=>`预计 ${a} → 约 ${b} · 约 ${d}`,'compress.password':'密码','compress.strength':'强度','compress.encryptNames':'同时加密文件名（7z）','compress.volume':'分卷','compress.volumes':['不分卷','FAT32（4 GiB）','邮件（25 MB）','自定义…'],'compress.preset':'预设','compress.presets':['默认','快速分享','归档','最大压缩'],'compress.savePreset':'保存为预设','compress.advanced':'高级','compress.advancedHint':'方法 · 字典 · 线程 · 固实 · 过滤规则 · 注释 · 元数据','compress.method':'方法','compress.dict':'字典大小','compress.threads':'线程','compress.solid':'固实压缩','compress.comment':'注释','compress.deleteSrc':'完成后删除源文件','compress.verify':'完成后校验','compress.openAfter':'完成后打开所在位置','compress.start':'开始压缩','compress.auto':'自动','compress.sources':n=>`${n} 个项目`,
+ 'extract.title':n=>`解压 ${n}`,'extract.to':'解压到','extract.pathMode':'路径','extract.smart':'智能','extract.full':'完整路径','extract.flat':'不保留路径','extract.overwrite':'覆盖','extract.overwrites':['询问','跳过','覆盖','仅覆盖较旧','重命名'],'extract.password':'密码','extract.passwordHint':'（若需要）','extract.more':'更多','extract.moreHint':'文件名编码 · 符号链接 · 保留损坏文件 · 元数据','extract.encoding':'文件名编码','extract.symlink':'符号链接','extract.keepBroken':'保留损坏文件','extract.openAfter':'完成后打开目标文件夹','extract.deleteAfter':'完成后删除压缩包','extract.start':'解压','extract.dest.sameDir':'压缩包所在目录','extract.dest.desktop':'桌面','extract.dest.downloads':'下载','extract.scope':(n)=>`将解压所选的 ${n} 项`,'extract.scopeAll':'将解压全部内容',
+ 'mount.title':n=>`挂载 ${n}`,'mount.as':'挂载为','mount.letter':'盘符','mount.folder':'文件夹','mount.volume':'卷（/Volumes）','mount.media':'媒体目录','mount.label':'卷标','mount.access':'访问','mount.ro':'只读','mount.rw':'可写（ZIP，卸载时保存）','mount.keep':'退出 OmniZip 后保持挂载','mount.warm':'后台预热（固实包）','mount.more':'更多','mount.moreHint':'缓存上限 · 离线属性 · 文件名编码','mount.classA':f=>`此压缩包为 ${f}，随机访问极佳`,'mount.classB':f=>`此压缩包为 ${f}，随机访问良好；反复回退时自动落盘缓存`,'mount.classC':(f,tm)=>`此压缩包为固实 ${f}，首次访问每个固实块需先解压（预计 ${tm}），建议预热`,'mount.classD':(f,tm)=>`此压缩包为 ${f}，首次挂载将后台建立寻址索引（约 ${tm}）`,'mount.start':'挂载','mount.mounted':p=>`已挂载到 ${p}`,'mount.open':'打开','mount.eject':'卸载','mount.ejected':n=>`已卸载 ${n}`,'mount.cache':'缓存','mount.point':'挂载点','mount.none':'没有已挂载的压缩包','mount.all':'卸载全部',
+ 'pwd.title':'需要密码','pwd.desc':n=>`${n} 中的所选文件已加密。`,'pwd.remember':'记住本次会话','pwd.saved':'尝试已保存的密码','pwd.error':'密码不能为空','pwd.wrong':'密码错误，请检查大小写与键盘布局','pwd.remembered':'已记住本次会话的密码',
+ 'conflict.title':n=>`${n} 已存在`,'conflict.existing':'已存在的文件','conflict.incoming':'压缩包内','conflict.applyAll':'对剩余冲突应用相同操作','conflict.overwrite':'覆盖','conflict.skip':'跳过','conflict.keepBoth':'保留两者','conflict.older':'仅覆盖较旧','conflict.newer':'较新',
+ 'task.title':'任务','task.none':'没有进行中的任务','task.extract':'解压','task.compress':'压缩','task.test':'测试','task.add':'添加','task.warm':'预热','task.remaining':s=>`剩余 ${s}`,'task.done':'已完成','task.cancelled':'已取消','task.paused':'已暂停','task.pause':'暂停','task.resume':'继续','task.cancel':'取消','task.openFolder':'打开文件夹','task.clear':'清除已完成','task.background':'后台','task.summary':n=>`${n} 个任务`,'task.running':n=>`${n} 个任务进行中`,
+ 'toast.extracted':(n,d)=>`已解压 ${n} 项到 ${d}`,'toast.compressed':n=>`已创建 ${n}`,'toast.tested':'测试通过，没有错误','toast.deleted':n=>`已从压缩包删除 ${n} 项`,'toast.undo':'撤销','toast.copied':'已复制路径','toast.opened':n=>`已打开 ${n}`,'toast.proto':'原型：此操作已模拟','toast.renameUnsupported':f=>`${f} 不支持原地重命名，需要重建压缩包`,'toast.openWith':'已提取到缓存并用系统程序打开（模拟）','toast.readonly':f=>`${f} 为只读格式，修改前请转换为 ZIP / 7z`,'toast.added':n=>`已添加 ${n} 个文件`,'toast.cancelled':'任务已取消','toast.folderOpened':'已打开文件夹（模拟）','toast.renamed':'已重命名','toast.winctl':'原型：窗口控制已模拟','toast.restored':'已恢复删除的项目','toast.show':'查看',
+ 'props.title':'属性','props.path':'路径','props.crc':'CRC32','props.method':'方法','props.encrypted':'已加密','props.yes':'是','props.no':'否','props.ratio':'压缩率','props.items':'项目数','props.size':'大小','props.packed':'压缩后','props.mtime':'修改时间','props.type':'类型',
+ 'preview.title':'预览','preview.unsupported':'此类型暂不支持预览','preview.openWith':'用系统程序打开','preview.encrypted':'此文件已加密，请输入密码后预览','preview.dims':'尺寸',
+ 'rename.title':'重命名','rename.label':'新名称',
+ 'settings.title':'设置','settings.general':'常规','settings.appearance':'外观','settings.language':'语言','settings.formats':'格式与关联','settings.shell':'右键菜单与集成','settings.security':'安全','settings.mount':'挂载','settings.advanced':'高级','settings.about':'关于',
+ 'set.mode':'模式','set.light':'浅色','set.dark':'深色','set.system':'跟随系统','set.themeLight':'浅色主题','set.themeDark':'深色主题','set.themeHint':'跟随系统时在两者之间自动切换','set.accent':'强调色','set.accentTheme':'主题默认','set.accentSystem':'跟随系统','set.accentCustom':'自定义','set.material':'窗口材质','set.materialHint':'Windows 11 Mica / macOS Vibrancy；Linux 与高对比主题下不可用','set.density':'密度','set.compact':'紧凑','set.comfortable':'舒适','set.spacious':'宽松','set.iconStyle':'文件图标','set.mono':'单色','set.duotone':'双色','set.fontScale':'字体大小','set.contrast':'对比度','set.contrastOk':'达标',
+ 'set.lang':'界面语言','set.sizeUnit':'文件大小单位','set.unitAuto':'跟随平台','set.unitKb':'KB（1000）','set.unitKib':'KiB（1024）','set.dateFormat':'日期格式示例','set.encoding':'默认文件名编码','set.encAuto':'自动检测',
+ 'set.startup':'启动页','set.startupHome':'开始页','set.startupLast':'上次的压缩包','set.extractTo':'默认解压位置','set.extractAsk':'每次询问','set.extractSame':'压缩包所在目录','set.extractDownloads':'下载文件夹','set.close':'关闭窗口时','set.closeExit':'退出','set.closeTray':'保留任务并最小化到托盘','set.notify':'完成后发送系统通知','set.notifyHint':'仅在窗口不在前台时',
+ 'set.assoc':'关联','set.default':'设为默认压缩软件','set.defaultHint':'将打开系统“默认应用”设置并高亮 OmniZip','set.defaultBtn':'打开系统设置',
+ 'set.shellStyle':'菜单样式','set.cascade':'级联','set.flat':'平铺','set.shellItems':'显示的菜单项','set.shellIcons':'显示图标','set.shellStatus':'状态','set.registered':'已注册','set.shellPreview':'预览（选中一个压缩包时）','set.cli':'将 omnizip 加入 PATH','set.completions':'安装 Shell 补全','set.repair':'修复集成',
+ 'set.ratio':'压缩炸弹阈值（膨胀比）','set.motw':'传播来源标记','set.motwHint':'Windows MOTW / macOS quarantine，与 SmartScreen、Gatekeeper 协同','set.symlink':'符号链接策略','set.symInside':'仅创建目标在目标目录内的链接','set.symFile':'作为普通文件','set.symSkip':'跳过','set.keychain':'允许将密码保存到系统钥匙串',
+ 'set.backend':'后端','set.backendWin':'WinFsp 2.x','set.backendMac':'FSKit 文件系统扩展','set.backendLinux':'FUSE3（fusermount3）','set.ready':'就绪','set.needEnable':'需在系统设置中启用','set.mountLoc':'默认挂载位置','set.mountLetter':'可用盘符（从 Z: 向前）','set.mountVolumes':'/Volumes/<卷标>','set.mountMedia':'/run/media/<用户>/<卷标>','set.cacheLimit':'磁盘缓存上限','set.autoUnmount':'退出时自动卸载','set.restore':'启动时恢复挂载','set.warmDefault':'固实包默认后台预热','set.offline':'设置离线属性','set.offlineHint':'避免资源管理器为生成缩略图读取整个文件','set.enableBtn':'打开系统设置',
+ 'set.threads':'线程数','set.auto':'自动','set.cacheDir':'缓存目录','set.log':'日志级别','set.diag':'导出诊断包','set.diagHint':'脱敏日志、配置、系统信息、集成状态','set.diagDone':'诊断包已导出（模拟）','set.export':'导出',
+ 'about.version':'版本','about.channel':'更新渠道','about.stable':'稳定','about.license':'许可证','about.components':'第三方组件','about.check':'检查更新','about.latest':'已是最新版本','about.tagline':'跨平台压缩 · 多格式 · 可挂载',
+ 'proto.title':'OmniZip 交互原型','proto.subtitle':'基于 docs/04 与 docs/05','proto.platform':'平台','proto.shellDemo':'右键“解压到此处”演示','proto.reset':'重置','proto.hint':'Ctrl+F 搜索 · Ctrl+E 解压 · Ctrl+M 挂载 · Ctrl+Shift+D 明暗 · Ctrl+, 设置',
+ 'mini.title':n=>`正在解压 ${n}`,'mini.background':'后台',
+ 'common.ok':'确定','common.cancel':'取消','common.close':'关闭','common.browse':'浏览','common.on':'开','common.off':'关',
+ 'dur.s':n=>`${n} 秒`,'dur.ms':(m,s)=>`${m} 分 ${s} 秒`,'dur.hm':(h,m)=>`${h} 小时 ${m} 分`,
+ 'fmt.update':'原地增删','fmt.readonly':'只读','fmt.rw':'读写'
+};
+L['en-US']={
+ 'nav.home':'Home','nav.recent':'Recent','nav.favorites':'Favorites','nav.tree':'Archive tree','nav.mounts':'Mounted','nav.tasks':'Tasks','nav.settings':'Settings','nav.collapse':'Collapse sidebar','nav.expand':'Expand sidebar',
+ 'title.search':'Search in archive…','title.theme':'Toggle light/dark','title.settings':'Settings','title.menu':'Menu','win.min':'Minimize','win.max':'Maximize','win.close':'Close',
+ 'cmd.add':'Add','cmd.extract':'Extract to…','cmd.extractSel':'Extract selected…','cmd.extractHere':'Extract here','cmd.mount':'Mount','cmd.test':'Test','cmd.delete':'Delete','cmd.props':'Properties','cmd.more':'More','cmd.back':'Back','cmd.forward':'Forward','cmd.up':'Up one level','cmd.viewTable':'Table view','cmd.viewGrid':'Grid view','cmd.rename':'Rename','cmd.preview':'Preview','cmd.openWith':'Open with system app','cmd.copyPath':'Copy path','cmd.selectAll':'Select all','cmd.newFolder':'New folder','cmd.convert':'Convert to…','cmd.open':'Open','cmd.hash':'Verify hash','cmd.encoding':'Filename encoding',
+ 'col.name':'Name','col.size':'Size','col.packed':'Packed','col.mtime':'Modified','col.type':'Type',
+ 'type.folder':'Folder','type.archive':'Archive','type.file':'File','type.nested':'Nested archive',
+ 'status.items':n=>n===1?'1 item':`${n} items`,'status.selected':(n,s)=>`${n} selected (${s})`,'status.ratio':'Ratio','status.solid':'Solid','status.readonly':'Read-only','status.results':n=>n===1?'1 result':`${n} results`,'status.mounted':'Mounted',
+ 'home.dropTitle':'Drop files or archives here','home.dropHint':'Archive → open · Other files → new archive','home.open':'Open archive','home.new':'New archive','home.extract':'Extract to…','home.recent':'Recent','home.clear':'Clear','home.dropped':'Prototype: simulated a drop and opened the archive',
+ 'empty.dir':'This folder is empty','empty.search':q=>`No items match “${q}”`,'empty.clearSearch':'Clear search','empty.recent':'Recently opened archives appear here',
+ 'compress.title':'New archive','compress.format':'Format','compress.more':'More','compress.saveTo':'Save to','compress.level':'Compression level','compress.levels':['Store','Fastest','Fast','Normal','Better','Best','Ultra'],'compress.estimate':(a,b,d)=>`Estimated ${a} → about ${b} · about ${d}`,'compress.password':'Password','compress.strength':'Strength','compress.encryptNames':'Also encrypt file names (7z)','compress.volume':'Split','compress.volumes':['No split','FAT32 (4 GiB)','Email (25 MB)','Custom…'],'compress.preset':'Preset','compress.presets':['Default','Quick share','Archive','Maximum'],'compress.savePreset':'Save as preset','compress.advanced':'Advanced','compress.advancedHint':'Method · dictionary · threads · solid · filters · comment · metadata','compress.method':'Method','compress.dict':'Dictionary size','compress.threads':'Threads','compress.solid':'Solid compression','compress.comment':'Comment','compress.deleteSrc':'Delete source files when done','compress.verify':'Verify when done','compress.openAfter':'Open location when done','compress.start':'Start','compress.auto':'Auto','compress.sources':n=>n===1?'1 item':`${n} items`,
+ 'extract.title':n=>`Extract ${n}`,'extract.to':'Extract to','extract.pathMode':'Paths','extract.smart':'Smart','extract.full':'Full paths','extract.flat':'No paths','extract.overwrite':'Overwrite','extract.overwrites':['Ask','Skip','Overwrite','Overwrite older','Rename'],'extract.password':'Password','extract.passwordHint':'(if needed)','extract.more':'More','extract.moreHint':'Filename encoding · symlinks · keep broken files · metadata','extract.encoding':'Filename encoding','extract.symlink':'Symbolic links','extract.keepBroken':'Keep broken files','extract.openAfter':'Open folder when done','extract.deleteAfter':'Delete archive when done','extract.start':'Extract','extract.dest.sameDir':'Archive folder','extract.dest.desktop':'Desktop','extract.dest.downloads':'Downloads','extract.scope':n=>`Extracts ${n} selected item${n===1?'':'s'}`,'extract.scopeAll':'Extracts the whole archive',
+ 'mount.title':n=>`Mount ${n}`,'mount.as':'Mount as','mount.letter':'Drive letter','mount.folder':'Folder','mount.volume':'Volume (/Volumes)','mount.media':'Media directory','mount.label':'Volume label','mount.access':'Access','mount.ro':'Read-only','mount.rw':'Writable (ZIP, saved on unmount)','mount.keep':'Keep mounted after OmniZip quits','mount.warm':'Warm up in background (solid archives)','mount.more':'More','mount.moreHint':'Cache limit · offline attribute · filename encoding','mount.classA':f=>`${f} archive: excellent random access`,'mount.classB':f=>`${f} archive: good random access; repeated rewinds are cached to disk automatically`,'mount.classC':(f,tm)=>`Solid ${f}: first access to each solid block requires decompressing it (about ${tm}). Warm-up recommended`,'mount.classD':(f,tm)=>`${f} archive: a seek index is built in the background on first mount (about ${tm})`,'mount.start':'Mount','mount.mounted':p=>`Mounted at ${p}`,'mount.open':'Open','mount.eject':'Unmount','mount.ejected':n=>`Unmounted ${n}`,'mount.cache':'Cache','mount.point':'Mount point','mount.none':'No mounted archives','mount.all':'Unmount all',
+ 'pwd.title':'Password required','pwd.desc':n=>`The selected files in ${n} are encrypted.`,'pwd.remember':'Remember for this session','pwd.saved':'Try saved passwords','pwd.error':'Password cannot be empty','pwd.wrong':'Wrong password. Check case and keyboard layout','pwd.remembered':'Password remembered for this session',
+ 'conflict.title':n=>`${n} already exists`,'conflict.existing':'Existing file','conflict.incoming':'In archive','conflict.applyAll':'Apply to remaining conflicts','conflict.overwrite':'Overwrite','conflict.skip':'Skip','conflict.keepBoth':'Keep both','conflict.older':'Overwrite older','conflict.newer':'newer',
+ 'task.title':'Tasks','task.none':'No tasks running','task.extract':'Extract','task.compress':'Compress','task.test':'Test','task.add':'Add','task.warm':'Warm up','task.remaining':s=>`${s} left`,'task.done':'Done','task.cancelled':'Cancelled','task.paused':'Paused','task.pause':'Pause','task.resume':'Resume','task.cancel':'Cancel','task.openFolder':'Open folder','task.clear':'Clear finished','task.background':'Background','task.summary':n=>n===1?'1 task':`${n} tasks`,'task.running':n=>n===1?'1 task running':`${n} tasks running`,
+ 'toast.extracted':(n,d)=>`Extracted ${n} item${n===1?'':'s'} to ${d}`,'toast.compressed':n=>`Created ${n}`,'toast.tested':'Test passed, no errors','toast.deleted':n=>`Deleted ${n} item${n===1?'':'s'} from archive`,'toast.undo':'Undo','toast.copied':'Path copied','toast.opened':n=>`Opened ${n}`,'toast.proto':'Prototype: this action is simulated','toast.renameUnsupported':f=>`${f} does not support in-place rename; the archive must be rebuilt`,'toast.openWith':'Extracted to cache and opened with the system app (simulated)','toast.readonly':f=>`${f} is read-only. Convert to ZIP / 7z to modify`,'toast.added':n=>`Added ${n} files`,'toast.cancelled':'Task cancelled','toast.folderOpened':'Folder opened (simulated)','toast.renamed':'Renamed','toast.winctl':'Prototype: window controls are simulated','toast.restored':'Deleted items restored','toast.show':'Show',
+ 'props.title':'Properties','props.path':'Path','props.crc':'CRC32','props.method':'Method','props.encrypted':'Encrypted','props.yes':'Yes','props.no':'No','props.ratio':'Ratio','props.items':'Items','props.size':'Size','props.packed':'Packed','props.mtime':'Modified','props.type':'Type',
+ 'preview.title':'Preview','preview.unsupported':'Preview is not available for this type','preview.openWith':'Open with system app','preview.encrypted':'This file is encrypted. Enter the password to preview','preview.dims':'Dimensions',
+ 'rename.title':'Rename','rename.label':'New name',
+ 'settings.title':'Settings','settings.general':'General','settings.appearance':'Appearance','settings.language':'Language','settings.formats':'Formats & associations','settings.shell':'Context menu & integration','settings.security':'Security','settings.mount':'Mounting','settings.advanced':'Advanced','settings.about':'About',
+ 'set.mode':'Mode','set.light':'Light','set.dark':'Dark','set.system':'System','set.themeLight':'Light theme','set.themeDark':'Dark theme','set.themeHint':'System mode switches between the two automatically','set.accent':'Accent color','set.accentTheme':'Theme default','set.accentSystem':'System','set.accentCustom':'Custom','set.material':'Window material','set.materialHint':'Windows 11 Mica / macOS Vibrancy; unavailable on Linux and in high-contrast themes','set.density':'Density','set.compact':'Compact','set.comfortable':'Comfortable','set.spacious':'Spacious','set.iconStyle':'File icons','set.mono':'Mono','set.duotone':'Duotone','set.fontScale':'Font size','set.contrast':'Contrast','set.contrastOk':'passes',
+ 'set.lang':'Interface language','set.sizeUnit':'File size units','set.unitAuto':'Follow platform','set.unitKb':'KB (1000)','set.unitKib':'KiB (1024)','set.dateFormat':'Date format sample','set.encoding':'Default filename encoding','set.encAuto':'Auto-detect',
+ 'set.startup':'Start page','set.startupHome':'Home','set.startupLast':'Last archive','set.extractTo':'Default extract location','set.extractAsk':'Ask every time','set.extractSame':'Archive folder','set.extractDownloads':'Downloads folder','set.close':'When closing the window','set.closeExit':'Quit','set.closeTray':'Keep tasks and minimize to tray','set.notify':'Send system notification when done','set.notifyHint':'Only when the window is not in front',
+ 'set.assoc':'Associate','set.default':'Set as default archiver','set.defaultHint':'Opens the system Default apps settings and highlights OmniZip','set.defaultBtn':'Open system settings',
+ 'set.shellStyle':'Menu style','set.cascade':'Cascading','set.flat':'Flat','set.shellItems':'Menu items shown','set.shellIcons':'Show icons','set.shellStatus':'Status','set.registered':'Registered','set.shellPreview':'Preview (one archive selected)','set.cli':'Add omnizip to PATH','set.completions':'Install shell completions','set.repair':'Repair integration',
+ 'set.ratio':'Zip bomb threshold (expansion ratio)','set.motw':'Propagate origin mark','set.motwHint':'Windows MOTW / macOS quarantine, works with SmartScreen and Gatekeeper','set.symlink':'Symbolic link policy','set.symInside':'Create only when the target stays inside the destination','set.symFile':'Extract as regular file','set.symSkip':'Skip','set.keychain':'Allow saving passwords to the system keychain',
+ 'set.backend':'Backend','set.backendWin':'WinFsp 2.x','set.backendMac':'FSKit file system extension','set.backendLinux':'FUSE3 (fusermount3)','set.ready':'Ready','set.needEnable':'Needs enabling in System Settings','set.mountLoc':'Default mount location','set.mountLetter':'Free drive letter (from Z: downwards)','set.mountVolumes':'/Volumes/<label>','set.mountMedia':'/run/media/<user>/<label>','set.cacheLimit':'Disk cache limit','set.autoUnmount':'Unmount all on quit','set.restore':'Restore mounts on launch','set.warmDefault':'Warm up solid archives by default','set.offline':'Set offline attribute','set.offlineHint':'Keeps Explorer from reading whole files to build thumbnails','set.enableBtn':'Open System Settings',
+ 'set.threads':'Threads','set.auto':'Auto','set.cacheDir':'Cache folder','set.log':'Log level','set.diag':'Export diagnostics','set.diagHint':'Redacted logs, config, system info, integration status','set.diagDone':'Diagnostics exported (simulated)','set.export':'Export',
+ 'about.version':'Version','about.channel':'Update channel','about.stable':'Stable','about.license':'License','about.components':'Third-party components','about.check':'Check for updates','about.latest':'You are up to date','about.tagline':'Cross-platform archiver · many formats · mountable',
+ 'proto.title':'OmniZip interactive prototype','proto.subtitle':'from docs/04 and docs/05','proto.platform':'Platform','proto.shellDemo':'Demo: right-click “Extract here”','proto.reset':'Reset','proto.hint':'Ctrl+F search · Ctrl+E extract · Ctrl+M mount · Ctrl+Shift+D theme · Ctrl+, settings',
+ 'mini.title':n=>`Extracting ${n}`,'mini.background':'Background',
+ 'common.ok':'OK','common.cancel':'Cancel','common.close':'Close','common.browse':'Browse','common.on':'On','common.off':'Off',
+ 'dur.s':n=>`${n} s`,'dur.ms':(m,s)=>`${m} min ${s} s`,'dur.hm':(h,m)=>`${h} h ${m} min`,
+ 'fmt.update':'In-place update','fmt.readonly':'Read-only','fmt.rw':'Read / write'
+};
+L['zh-TW']={
+ 'nav.home':'開始','nav.recent':'最近','nav.favorites':'收藏','nav.tree':'壓縮檔結構','nav.mounts':'已掛載','nav.tasks':'工作','nav.settings':'設定','nav.collapse':'收合側欄','nav.expand':'展開側欄',
+ 'title.search':'在壓縮檔中搜尋…','title.theme':'切換明暗','title.settings':'設定','title.menu':'選單','win.min':'最小化','win.max':'最大化','win.close':'關閉',
+ 'cmd.add':'加入','cmd.extract':'解壓縮到…','cmd.extractSel':'解壓縮所選…','cmd.extractHere':'解壓縮到此處','cmd.mount':'掛載','cmd.test':'測試','cmd.delete':'刪除','cmd.props':'屬性','cmd.more':'更多','cmd.back':'上一步','cmd.forward':'下一步','cmd.up':'上層目錄','cmd.viewTable':'表格檢視','cmd.viewGrid':'格狀檢視','cmd.rename':'重新命名','cmd.preview':'預覽','cmd.openWith':'以系統程式開啟','cmd.copyPath':'複製路徑','cmd.selectAll':'全選','cmd.newFolder':'新增資料夾','cmd.convert':'轉換為…','cmd.open':'開啟','cmd.hash':'驗證雜湊','cmd.encoding':'檔名編碼',
+ 'col.name':'名稱','col.size':'大小','col.packed':'壓縮後','col.mtime':'修改時間','col.type':'類型',
+ 'type.folder':'資料夾','type.archive':'壓縮檔','type.file':'檔案','type.nested':'巢狀壓縮檔',
+ 'status.items':n=>`${n} 項`,'status.selected':(n,s)=>`已選 ${n} 項（${s}）`,'status.ratio':'壓縮率','status.solid':'固實','status.readonly':'唯讀','status.results':n=>`${n} 個結果`,'status.mounted':'已掛載',
+ 'home.dropTitle':'將檔案或壓縮檔拖曳到此處','home.dropHint':'壓縮檔 → 開啟 · 其他檔案 → 新增壓縮檔','home.open':'開啟壓縮檔','home.new':'新增壓縮檔','home.extract':'解壓縮到…','home.recent':'最近','home.clear':'清除','home.dropped':'原型：已模擬拖入並開啟',
+ 'empty.dir':'此目錄為空','empty.search':q=>`沒有符合「${q}」的項目`,'empty.clearSearch':'清除搜尋','empty.recent':'最近開啟的壓縮檔會顯示在這裡',
+ 'compress.title':'新增壓縮檔','compress.format':'格式','compress.more':'更多','compress.saveTo':'儲存到','compress.level':'壓縮等級','compress.levels':['儲存','最快','快速','標準','較好','最佳','極限'],'compress.estimate':(a,b,d)=>`預估 ${a} → 約 ${b} · 約 ${d}`,'compress.password':'密碼','compress.strength':'強度','compress.encryptNames':'同時加密檔名（7z）','compress.volume':'分割','compress.volumes':['不分割','FAT32（4 GiB）','郵件（25 MB）','自訂…'],'compress.preset':'預設組合','compress.presets':['預設','快速分享','封存','最大壓縮'],'compress.savePreset':'儲存為預設組合','compress.advanced':'進階','compress.advancedHint':'方法 · 字典 · 執行緒 · 固實 · 篩選規則 · 註解 · 中繼資料','compress.method':'方法','compress.dict':'字典大小','compress.threads':'執行緒','compress.solid':'固實壓縮','compress.comment':'註解','compress.deleteSrc':'完成後刪除來源檔案','compress.verify':'完成後驗證','compress.openAfter':'完成後開啟所在位置','compress.start':'開始壓縮','compress.auto':'自動','compress.sources':n=>`${n} 個項目`,
+ 'extract.title':n=>`解壓縮 ${n}`,'extract.to':'解壓縮到','extract.pathMode':'路徑','extract.smart':'智慧','extract.full':'完整路徑','extract.flat':'不保留路徑','extract.overwrite':'覆寫','extract.overwrites':['詢問','略過','覆寫','僅覆寫較舊','重新命名'],'extract.password':'密碼','extract.passwordHint':'（若需要）','extract.more':'更多','extract.moreHint':'檔名編碼 · 符號連結 · 保留損毀檔案 · 中繼資料','extract.encoding':'檔名編碼','extract.symlink':'符號連結','extract.keepBroken':'保留損毀檔案','extract.openAfter':'完成後開啟目標資料夾','extract.deleteAfter':'完成後刪除壓縮檔','extract.start':'解壓縮','extract.dest.sameDir':'壓縮檔所在目錄','extract.dest.desktop':'桌面','extract.dest.downloads':'下載','extract.scope':n=>`將解壓縮所選的 ${n} 項`,'extract.scopeAll':'將解壓縮全部內容',
+ 'mount.title':n=>`掛載 ${n}`,'mount.as':'掛載為','mount.letter':'磁碟機代號','mount.folder':'資料夾','mount.volume':'卷宗（/Volumes）','mount.media':'媒體目錄','mount.label':'卷宗標籤','mount.access':'存取','mount.ro':'唯讀','mount.rw':'可寫（ZIP，卸載時儲存）','mount.keep':'結束 OmniZip 後保持掛載','mount.warm':'背景預熱（固實壓縮檔）','mount.more':'更多','mount.moreHint':'快取上限 · 離線屬性 · 檔名編碼','mount.classA':f=>`此壓縮檔為 ${f}，隨機存取極佳`,'mount.classB':f=>`此壓縮檔為 ${f}，隨機存取良好；反覆回捲時自動寫入磁碟快取`,'mount.classC':(f,tm)=>`此壓縮檔為固實 ${f}，首次存取每個固實區塊需先解壓（預估 ${tm}），建議預熱`,'mount.classD':(f,tm)=>`此壓縮檔為 ${f}，首次掛載將在背景建立定位索引（約 ${tm}）`,'mount.start':'掛載','mount.mounted':p=>`已掛載到 ${p}`,'mount.open':'開啟','mount.eject':'卸載','mount.ejected':n=>`已卸載 ${n}`,'mount.cache':'快取','mount.point':'掛載點','mount.none':'沒有已掛載的壓縮檔','mount.all':'全部卸載',
+ 'pwd.title':'需要密碼','pwd.desc':n=>`${n} 中的所選檔案已加密。`,'pwd.remember':'記住本次工作階段','pwd.saved':'嘗試已儲存的密碼','pwd.error':'密碼不能為空','pwd.wrong':'密碼錯誤，請檢查大小寫與鍵盤配置','pwd.remembered':'已記住本次工作階段的密碼',
+ 'conflict.title':n=>`${n} 已存在`,'conflict.existing':'已存在的檔案','conflict.incoming':'壓縮檔內','conflict.applyAll':'對其餘衝突套用相同操作','conflict.overwrite':'覆寫','conflict.skip':'略過','conflict.keepBoth':'保留兩者','conflict.older':'僅覆寫較舊','conflict.newer':'較新',
+ 'task.title':'工作','task.none':'沒有進行中的工作','task.extract':'解壓縮','task.compress':'壓縮','task.test':'測試','task.add':'加入','task.warm':'預熱','task.remaining':s=>`剩餘 ${s}`,'task.done':'已完成','task.cancelled':'已取消','task.paused':'已暫停','task.pause':'暫停','task.resume':'繼續','task.cancel':'取消','task.openFolder':'開啟資料夾','task.clear':'清除已完成','task.background':'背景','task.summary':n=>`${n} 個工作`,'task.running':n=>`${n} 個工作進行中`,
+ 'toast.extracted':(n,d)=>`已解壓縮 ${n} 項到 ${d}`,'toast.compressed':n=>`已建立 ${n}`,'toast.tested':'測試通過，沒有錯誤','toast.deleted':n=>`已從壓縮檔刪除 ${n} 項`,'toast.undo':'復原','toast.copied':'已複製路徑','toast.opened':n=>`已開啟 ${n}`,'toast.proto':'原型：此操作已模擬','toast.renameUnsupported':f=>`${f} 不支援就地重新命名，需要重建壓縮檔`,'toast.openWith':'已擷取到快取並以系統程式開啟（模擬）','toast.readonly':f=>`${f} 為唯讀格式，修改前請轉換為 ZIP / 7z`,'toast.added':n=>`已加入 ${n} 個檔案`,'toast.cancelled':'工作已取消','toast.folderOpened':'已開啟資料夾（模擬）','toast.renamed':'已重新命名','toast.winctl':'原型：視窗控制已模擬','toast.restored':'已復原刪除的項目','toast.show':'檢視',
+ 'props.title':'屬性','props.path':'路徑','props.crc':'CRC32','props.method':'方法','props.encrypted':'已加密','props.yes':'是','props.no':'否','props.ratio':'壓縮率','props.items':'項目數','props.size':'大小','props.packed':'壓縮後','props.mtime':'修改時間','props.type':'類型',
+ 'preview.title':'預覽','preview.unsupported':'此類型暫不支援預覽','preview.openWith':'以系統程式開啟','preview.encrypted':'此檔案已加密，請輸入密碼後預覽','preview.dims':'尺寸',
+ 'rename.title':'重新命名','rename.label':'新名稱',
+ 'settings.title':'設定','settings.general':'一般','settings.appearance':'外觀','settings.language':'語言','settings.formats':'格式與關聯','settings.shell':'右鍵選單與整合','settings.security':'安全性','settings.mount':'掛載','settings.advanced':'進階','settings.about':'關於',
+ 'set.mode':'模式','set.light':'淺色','set.dark':'深色','set.system':'跟隨系統','set.themeLight':'淺色主題','set.themeDark':'深色主題','set.themeHint':'跟隨系統時在兩者之間自動切換','set.accent':'強調色','set.accentTheme':'主題預設','set.accentSystem':'跟隨系統','set.accentCustom':'自訂','set.material':'視窗材質','set.materialHint':'Windows 11 Mica / macOS Vibrancy；Linux 與高對比主題下無法使用','set.density':'密度','set.compact':'緊湊','set.comfortable':'舒適','set.spacious':'寬鬆','set.iconStyle':'檔案圖示','set.mono':'單色','set.duotone':'雙色','set.fontScale':'字型大小','set.contrast':'對比度','set.contrastOk':'達標',
+ 'set.lang':'介面語言','set.sizeUnit':'檔案大小單位','set.unitAuto':'跟隨平台','set.unitKb':'KB（1000）','set.unitKib':'KiB（1024）','set.dateFormat':'日期格式範例','set.encoding':'預設檔名編碼','set.encAuto':'自動偵測',
+ 'set.startup':'啟動頁','set.startupHome':'開始頁','set.startupLast':'上次的壓縮檔','set.extractTo':'預設解壓縮位置','set.extractAsk':'每次詢問','set.extractSame':'壓縮檔所在目錄','set.extractDownloads':'下載資料夾','set.close':'關閉視窗時','set.closeExit':'結束','set.closeTray':'保留工作並最小化到系統匣','set.notify':'完成後傳送系統通知','set.notifyHint':'僅在視窗不在前景時',
+ 'set.assoc':'關聯','set.default':'設為預設壓縮軟體','set.defaultHint':'將開啟系統「預設應用程式」設定並標示 OmniZip','set.defaultBtn':'開啟系統設定',
+ 'set.shellStyle':'選單樣式','set.cascade':'階層','set.flat':'平鋪','set.shellItems':'顯示的選單項目','set.shellIcons':'顯示圖示','set.shellStatus':'狀態','set.registered':'已註冊','set.shellPreview':'預覽（選取一個壓縮檔時）','set.cli':'將 omnizip 加入 PATH','set.completions':'安裝 Shell 自動完成','set.repair':'修復整合',
+ 'set.ratio':'壓縮炸彈門檻（膨脹比）','set.motw':'傳遞來源標記','set.motwHint':'Windows MOTW / macOS quarantine，與 SmartScreen、Gatekeeper 協同','set.symlink':'符號連結策略','set.symInside':'僅建立目標位於目標目錄內的連結','set.symFile':'作為一般檔案','set.symSkip':'略過','set.keychain':'允許將密碼儲存到系統鑰匙圈',
+ 'set.backend':'後端','set.backendWin':'WinFsp 2.x','set.backendMac':'FSKit 檔案系統延伸功能','set.backendLinux':'FUSE3（fusermount3）','set.ready':'就緒','set.needEnable':'需在系統設定中啟用','set.mountLoc':'預設掛載位置','set.mountLetter':'可用磁碟機代號（從 Z: 向前）','set.mountVolumes':'/Volumes/<標籤>','set.mountMedia':'/run/media/<使用者>/<標籤>','set.cacheLimit':'磁碟快取上限','set.autoUnmount':'結束時自動卸載','set.restore':'啟動時恢復掛載','set.warmDefault':'固實壓縮檔預設背景預熱','set.offline':'設定離線屬性','set.offlineHint':'避免檔案總管為產生縮圖而讀取整個檔案','set.enableBtn':'開啟系統設定',
+ 'set.threads':'執行緒數','set.auto':'自動','set.cacheDir':'快取目錄','set.log':'日誌層級','set.diag':'匯出診斷套件','set.diagHint':'去識別化日誌、設定、系統資訊、整合狀態','set.diagDone':'診斷套件已匯出（模擬）','set.export':'匯出',
+ 'about.version':'版本','about.channel':'更新頻道','about.stable':'穩定','about.license':'授權','about.components':'第三方元件','about.check':'檢查更新','about.latest':'已是最新版本','about.tagline':'跨平台壓縮 · 多格式 · 可掛載',
+ 'proto.title':'OmniZip 互動原型','proto.subtitle':'基於 docs/04 與 docs/05','proto.platform':'平台','proto.shellDemo':'右鍵「解壓縮到此處」示範','proto.reset':'重設','proto.hint':'Ctrl+F 搜尋 · Ctrl+E 解壓縮 · Ctrl+M 掛載 · Ctrl+Shift+D 明暗 · Ctrl+, 設定',
+ 'mini.title':n=>`正在解壓縮 ${n}`,'mini.background':'背景',
+ 'common.ok':'確定','common.cancel':'取消','common.close':'關閉','common.browse':'瀏覽','common.on':'開','common.off':'關',
+ 'dur.s':n=>`${n} 秒`,'dur.ms':(m,s)=>`${m} 分 ${s} 秒`,'dur.hm':(h,m)=>`${h} 小時 ${m} 分`,
+ 'fmt.update':'就地增刪','fmt.readonly':'唯讀','fmt.rw':'讀寫'
+};
+L['ja-JP']={
+ 'nav.home':'ホーム','nav.recent':'最近','nav.favorites':'お気に入り','nav.tree':'アーカイブ構造','nav.mounts':'マウント済み','nav.tasks':'タスク','nav.settings':'設定','nav.collapse':'サイドバーを折りたたむ','nav.expand':'サイドバーを展開',
+ 'title.search':'アーカイブ内を検索…','title.theme':'外観を切り替え','title.settings':'設定','title.menu':'メニュー','win.min':'最小化','win.max':'最大化','win.close':'閉じる',
+ 'cmd.add':'追加','cmd.extract':'展開先…','cmd.extractSel':'選択項目を展開…','cmd.extractHere':'ここに展開','cmd.mount':'マウント','cmd.test':'テスト','cmd.delete':'削除','cmd.props':'プロパティ','cmd.more':'その他','cmd.back':'戻る','cmd.forward':'進む','cmd.up':'上のフォルダー','cmd.viewTable':'表ビュー','cmd.viewGrid':'グリッドビュー','cmd.rename':'名前の変更','cmd.preview':'プレビュー','cmd.openWith':'システムのアプリで開く','cmd.copyPath':'パスをコピー','cmd.selectAll':'すべて選択','cmd.newFolder':'新しいフォルダー','cmd.convert':'形式を変換…','cmd.open':'開く','cmd.hash':'ハッシュを検証','cmd.encoding':'ファイル名エンコーディング',
+ 'col.name':'名前','col.size':'サイズ','col.packed':'圧縮後','col.mtime':'更新日時','col.type':'種類',
+ 'type.folder':'フォルダー','type.archive':'アーカイブ','type.file':'ファイル','type.nested':'ネストされたアーカイブ',
+ 'status.items':n=>`${n} 項目`,'status.selected':(n,s)=>`${n} 項目を選択（${s}）`,'status.ratio':'圧縮率','status.solid':'ソリッド','status.readonly':'読み取り専用','status.results':n=>`${n} 件`,'status.mounted':'マウント済み',
+ 'home.dropTitle':'ファイルやアーカイブをここにドロップ','home.dropHint':'アーカイブ → 開く · その他 → 新しいアーカイブ','home.open':'アーカイブを開く','home.new':'新しいアーカイブ','home.extract':'展開先…','home.recent':'最近','home.clear':'クリア','home.dropped':'プロトタイプ：ドロップをシミュレートして開きました',
+ 'empty.dir':'このフォルダーは空です','empty.search':q=>`「${q}」に一致する項目はありません`,'empty.clearSearch':'検索をクリア','empty.recent':'最近開いたアーカイブがここに表示されます',
+ 'compress.title':'新しいアーカイブ','compress.format':'形式','compress.more':'その他','compress.saveTo':'保存先','compress.level':'圧縮レベル','compress.levels':['無圧縮','最速','高速','標準','高圧縮','最高','極限'],'compress.estimate':(a,b,d)=>`予想 ${a} → 約 ${b} · 約 ${d}`,'compress.password':'パスワード','compress.strength':'強度','compress.encryptNames':'ファイル名も暗号化（7z）','compress.volume':'分割','compress.volumes':['分割しない','FAT32（4 GiB）','メール（25 MB）','カスタム…'],'compress.preset':'プリセット','compress.presets':['既定','すばやく共有','アーカイブ','最大圧縮'],'compress.savePreset':'プリセットとして保存','compress.advanced':'詳細','compress.advancedHint':'アルゴリズム · 辞書 · スレッド · ソリッド · フィルター · コメント · メタデータ','compress.method':'アルゴリズム','compress.dict':'辞書サイズ','compress.threads':'スレッド','compress.solid':'ソリッド圧縮','compress.comment':'コメント','compress.deleteSrc':'完了後に元ファイルを削除','compress.verify':'完了後に検証','compress.openAfter':'完了後に保存先を開く','compress.start':'圧縮を開始','compress.auto':'自動','compress.sources':n=>`${n} 項目`,
+ 'extract.title':n=>`${n} を展開`,'extract.to':'展開先','extract.pathMode':'パス','extract.smart':'スマート','extract.full':'フルパス','extract.flat':'パスを無視','extract.overwrite':'上書き','extract.overwrites':['確認する','スキップ','上書き','古い場合のみ上書き','名前を変更'],'extract.password':'パスワード','extract.passwordHint':'（必要な場合）','extract.more':'その他','extract.moreHint':'ファイル名エンコーディング · シンボリックリンク · 破損ファイルの保持 · メタデータ','extract.encoding':'ファイル名エンコーディング','extract.symlink':'シンボリックリンク','extract.keepBroken':'破損ファイルを保持','extract.openAfter':'完了後にフォルダーを開く','extract.deleteAfter':'完了後にアーカイブを削除','extract.start':'展開','extract.dest.sameDir':'アーカイブと同じフォルダー','extract.dest.desktop':'デスクトップ','extract.dest.downloads':'ダウンロード','extract.scope':n=>`選択した ${n} 項目を展開します`,'extract.scopeAll':'アーカイブ全体を展開します',
+ 'mount.title':n=>`${n} をマウント`,'mount.as':'マウント先','mount.letter':'ドライブ文字','mount.folder':'フォルダー','mount.volume':'ボリューム（/Volumes）','mount.media':'メディアディレクトリ','mount.label':'ボリューム名','mount.access':'アクセス','mount.ro':'読み取り専用','mount.rw':'書き込み可（ZIP、アンマウント時に保存）','mount.keep':'OmniZip 終了後もマウントを維持','mount.warm':'バックグラウンドで事前展開（ソリッド）','mount.more':'その他','mount.moreHint':'キャッシュ上限 · オフライン属性 · ファイル名エンコーディング','mount.classA':f=>`${f} 形式：ランダムアクセスは最高です`,'mount.classB':f=>`${f} 形式：ランダムアクセスは良好。頻繁な巻き戻し時は自動でディスクにキャッシュ`,'mount.classC':(f,tm)=>`ソリッド ${f}：各ソリッドブロックの初回アクセスで展開が必要（約 ${tm}）。事前展開を推奨`,'mount.classD':(f,tm)=>`${f} 形式：初回マウント時にバックグラウンドでシーク索引を作成（約 ${tm}）`,'mount.start':'マウント','mount.mounted':p=>`${p} にマウントしました`,'mount.open':'開く','mount.eject':'アンマウント','mount.ejected':n=>`${n} をアンマウントしました`,'mount.cache':'キャッシュ','mount.point':'マウント先','mount.none':'マウント中のアーカイブはありません','mount.all':'すべてアンマウント',
+ 'pwd.title':'パスワードが必要です','pwd.desc':n=>`${n} 内の選択したファイルは暗号化されています。`,'pwd.remember':'このセッションで記憶','pwd.saved':'保存済みのパスワードを試す','pwd.error':'パスワードを入力してください','pwd.wrong':'パスワードが違います。大文字小文字とキーボード配列を確認してください','pwd.remembered':'パスワードをこのセッションで記憶しました',
+ 'conflict.title':n=>`${n} は既に存在します`,'conflict.existing':'既存のファイル','conflict.incoming':'アーカイブ内','conflict.applyAll':'残りの競合にも同じ操作を適用','conflict.overwrite':'上書き','conflict.skip':'スキップ','conflict.keepBoth':'両方を保持','conflict.older':'古い場合のみ上書き','conflict.newer':'新しい',
+ 'task.title':'タスク','task.none':'実行中のタスクはありません','task.extract':'展開','task.compress':'圧縮','task.test':'テスト','task.add':'追加','task.warm':'事前展開','task.remaining':s=>`残り ${s}`,'task.done':'完了','task.cancelled':'キャンセル済み','task.paused':'一時停止中','task.pause':'一時停止','task.resume':'再開','task.cancel':'キャンセル','task.openFolder':'フォルダーを開く','task.clear':'完了済みを消去','task.background':'バックグラウンド','task.summary':n=>`${n} 件のタスク`,'task.running':n=>`${n} 件のタスクを実行中`,
+ 'toast.extracted':(n,d)=>`${n} 項目を ${d} に展開しました`,'toast.compressed':n=>`${n} を作成しました`,'toast.tested':'テスト完了。エラーはありません','toast.deleted':n=>`${n} 項目をアーカイブから削除しました`,'toast.undo':'元に戻す','toast.copied':'パスをコピーしました','toast.opened':n=>`${n} を開きました`,'toast.proto':'プロトタイプ：この操作はシミュレーションです','toast.renameUnsupported':f=>`${f} はその場での名前変更に対応していません。アーカイブの再構築が必要です`,'toast.openWith':'キャッシュに展開してシステムのアプリで開きました（シミュレーション）','toast.readonly':f=>`${f} は読み取り専用です。変更するには ZIP / 7z に変換してください`,'toast.added':n=>`${n} 個のファイルを追加しました`,'toast.cancelled':'タスクをキャンセルしました','toast.folderOpened':'フォルダーを開きました（シミュレーション）','toast.renamed':'名前を変更しました','toast.winctl':'プロトタイプ：ウィンドウ操作はシミュレーションです','toast.restored':'削除した項目を復元しました','toast.show':'表示',
+ 'props.title':'プロパティ','props.path':'パス','props.crc':'CRC32','props.method':'アルゴリズム','props.encrypted':'暗号化','props.yes':'はい','props.no':'いいえ','props.ratio':'圧縮率','props.items':'項目数','props.size':'サイズ','props.packed':'圧縮後','props.mtime':'更新日時','props.type':'種類',
+ 'preview.title':'プレビュー','preview.unsupported':'この種類のファイルはプレビューできません','preview.openWith':'システムのアプリで開く','preview.encrypted':'このファイルは暗号化されています。パスワードを入力してください','preview.dims':'寸法',
+ 'rename.title':'名前の変更','rename.label':'新しい名前',
+ 'settings.title':'設定','settings.general':'一般','settings.appearance':'外観','settings.language':'言語','settings.formats':'形式と関連付け','settings.shell':'コンテキストメニューと統合','settings.security':'セキュリティ','settings.mount':'マウント','settings.advanced':'詳細','settings.about':'このアプリについて',
+ 'set.mode':'モード','set.light':'ライト','set.dark':'ダーク','set.system':'システムに従う','set.themeLight':'ライトテーマ','set.themeDark':'ダークテーマ','set.themeHint':'システムに従う場合は 2 つを自動で切り替えます','set.accent':'アクセントカラー','set.accentTheme':'テーマ既定','set.accentSystem':'システムに従う','set.accentCustom':'カスタム','set.material':'ウィンドウ素材','set.materialHint':'Windows 11 Mica / macOS Vibrancy。Linux とハイコントラストでは無効','set.density':'密度','set.compact':'コンパクト','set.comfortable':'標準','set.spacious':'ゆったり','set.iconStyle':'ファイルアイコン','set.mono':'モノクロ','set.duotone':'2 色','set.fontScale':'文字サイズ','set.contrast':'コントラスト','set.contrastOk':'基準達成',
+ 'set.lang':'表示言語','set.sizeUnit':'ファイルサイズの単位','set.unitAuto':'プラットフォームに従う','set.unitKb':'KB（1000）','set.unitKib':'KiB（1024）','set.dateFormat':'日付形式の例','set.encoding':'既定のファイル名エンコーディング','set.encAuto':'自動検出',
+ 'set.startup':'起動時のページ','set.startupHome':'ホーム','set.startupLast':'前回のアーカイブ','set.extractTo':'既定の展開先','set.extractAsk':'毎回確認','set.extractSame':'アーカイブと同じフォルダー','set.extractDownloads':'ダウンロードフォルダー','set.close':'ウィンドウを閉じるとき','set.closeExit':'終了','set.closeTray':'タスクを維持してトレイに最小化','set.notify':'完了時にシステム通知を送る','set.notifyHint':'ウィンドウが前面にないときのみ',
+ 'set.assoc':'関連付け','set.default':'既定のアーカイバーに設定','set.defaultHint':'システムの「既定のアプリ」設定を開き OmniZip を強調表示します','set.defaultBtn':'システム設定を開く',
+ 'set.shellStyle':'メニュー形式','set.cascade':'階層','set.flat':'フラット','set.shellItems':'表示する項目','set.shellIcons':'アイコンを表示','set.shellStatus':'状態','set.registered':'登録済み','set.shellPreview':'プレビュー（アーカイブを 1 つ選択時）','set.cli':'omnizip を PATH に追加','set.completions':'シェル補完をインストール','set.repair':'統合を修復',
+ 'set.ratio':'Zip 爆弾のしきい値（膨張率）','set.motw':'出所マークを伝播','set.motwHint':'Windows MOTW / macOS quarantine。SmartScreen、Gatekeeper と連携','set.symlink':'シンボリックリンクの方針','set.symInside':'リンク先が展開先の内側にある場合のみ作成','set.symFile':'通常のファイルとして展開','set.symSkip':'スキップ','set.keychain':'パスワードをシステムのキーチェーンに保存することを許可',
+ 'set.backend':'バックエンド','set.backendWin':'WinFsp 2.x','set.backendMac':'FSKit ファイルシステム拡張','set.backendLinux':'FUSE3（fusermount3）','set.ready':'準備完了','set.needEnable':'システム設定で有効化が必要','set.mountLoc':'既定のマウント先','set.mountLetter':'空きドライブ文字（Z: から順）','set.mountVolumes':'/Volumes/<ラベル>','set.mountMedia':'/run/media/<ユーザー>/<ラベル>','set.cacheLimit':'ディスクキャッシュ上限','set.autoUnmount':'終了時にすべてアンマウント','set.restore':'起動時にマウントを復元','set.warmDefault':'ソリッドアーカイブを既定で事前展開','set.offline':'オフライン属性を設定','set.offlineHint':'エクスプローラーがサムネイル生成のためにファイル全体を読むのを防ぎます','set.enableBtn':'システム設定を開く',
+ 'set.threads':'スレッド数','set.auto':'自動','set.cacheDir':'キャッシュフォルダー','set.log':'ログレベル','set.diag':'診断情報を書き出す','set.diagHint':'匿名化したログ、設定、システム情報、統合状態','set.diagDone':'診断情報を書き出しました（シミュレーション）','set.export':'書き出す',
+ 'about.version':'バージョン','about.channel':'更新チャネル','about.stable':'安定版','about.license':'ライセンス','about.components':'サードパーティ コンポーネント','about.check':'更新を確認','about.latest':'最新版です','about.tagline':'クロスプラットフォーム · 多形式 · マウント対応',
+ 'proto.title':'OmniZip インタラクティブ プロトタイプ','proto.subtitle':'docs/04 と docs/05 に基づく','proto.platform':'プラットフォーム','proto.shellDemo':'右クリック「ここに展開」デモ','proto.reset':'リセット','proto.hint':'Ctrl+F 検索 · Ctrl+E 展開 · Ctrl+M マウント · Ctrl+Shift+D 外観 · Ctrl+, 設定',
+ 'mini.title':n=>`${n} を展開中`,'mini.background':'バックグラウンド',
+ 'common.ok':'OK','common.cancel':'キャンセル','common.close':'閉じる','common.browse':'参照','common.on':'オン','common.off':'オフ',
+ 'dur.s':n=>`${n} 秒`,'dur.ms':(m,s)=>`${m} 分 ${s} 秒`,'dur.hm':(h,m)=>`${h} 時間 ${m} 分`,
+ 'fmt.update':'その場で追加・削除','fmt.readonly':'読み取り専用','fmt.rw':'読み書き'
+};
+const LANGS=[['zh-CN','简体中文'],['zh-TW','繁體中文'],['en-US','English'],['ja-JP','日本語']];
+function t(k,...a){const d=L[state.lang]||L['zh-CN'];let v=d[k];if(v==null)v=L['zh-CN'][k];if(v==null)return k;return typeof v==='function'?v(...a):v;}
+
+/* ---------- 状态 ---------- */
+function detectPlatform(){const u=navigator.userAgent||'';if(/Mac|iPhone|iPad/.test(u))return 'mac';if(/Windows/.test(u))return 'win';return 'linux';}
+const PREF_KEYS=['platform','lang','appearance','themeLight','themeDark','accent','material','density','iconStyle','fontScale','sizeUnit','shellStyle','sbCollapsed'];
+const state={
+ platform:detectPlatform(),lang:'zh-CN',appearance:'system',themeLight:'aurora',themeDark:'midnight',accent:'theme',material:true,density:'comfortable',iconStyle:'duotone',fontScale:14,sizeUnit:'auto',shellStyle:'cascade',
+ view:'home',settingsTab:'appearance',archive:null,cwd:null,hist:[],histIdx:-1,sel:new Set(),focusId:null,anchorId:null,sort:{key:'name',dir:1},vm:'table',query:'',expanded:new Set(),
+ tasks:[],mounts:[],sbCollapsed:false,sbOpen:false,drawer:false,ctx:null,modals:[],sessionPw:null,
+ prefs:{startup:'home',extractTo:'ask',closeBehavior:'exit',notify:true,motw:true,symlink:'inside',keychain:false,ratio:1000,autoUnmount:true,restoreMounts:false,warm:true,offline:false,cacheGB:2,threads:'auto',logLevel:'info',cliPath:true,completions:true,shellIcons:true,shellItems:{open:true,here:true,smart:true,to:true,mount:true,test:true,convert:false,hash:false},assoc:{zip:true,'7z':true,rar:true,tar:true,gz:true,xz:true,zst:true,iso:false,cab:false}}
+};
+try{const s=JSON.parse(localStorage.getItem('omnizip-proto')||'{}');PREF_KEYS.forEach(k=>{if(s[k]!=null)state[k]=s[k];});}catch(e){}
+function persist(){try{const o={};PREF_KEYS.forEach(k=>o[k]=state[k]);localStorage.setItem('omnizip-proto',JSON.stringify(o));}catch(e){}}
+
+/* ---------- 格式化 ---------- */
+function unitInfo(){const u=state.sizeUnit==='auto'?(state.platform==='mac'?'kb':state.platform==='linux'?'kib':'winkb'):state.sizeUnit;if(u==='kb')return {base:1000,l:['B','KB','MB','GB','TB']};if(u==='kib')return {base:1024,l:['B','KiB','MiB','GiB','TiB']};return {base:1024,l:['B','KB','MB','GB','TB']};}
+function fmtSize(b){if(b==null||isNaN(b))return '—';const {base,l}=unitInfo();let i=0,v=b;while(v>=base&&i<4){v/=base;i++;}const s=i===0?String(Math.round(v)):v.toFixed(v<10?2:v<100?1:0);return s+' '+l[i];}
+function fmtSpeed(bps){return fmtSize(bps)+'/s';}
+function fmtDate(ms){try{return new Intl.DateTimeFormat(state.lang,{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(ms));}catch(e){return new Date(ms).toISOString().slice(0,16).replace('T',' ');}}
+function fmtRel(ms){const d=Math.round((ms-Date.now())/864e5);try{return new Intl.RelativeTimeFormat(state.lang,{numeric:'auto'}).format(d,'day');}catch(e){return d+'d';}}
+function fmtDur(s){s=Math.max(1,Math.round(s));if(s<60)return t('dur.s',s);if(s<3600)return t('dur.ms',Math.floor(s/60),s%60);return t('dur.hm',Math.floor(s/3600),Math.floor(s%3600/60));}
+function fmtPct(a,b){if(!b)return '0%';return Math.round(a/b*100)+'%';}
+const SEP=()=>state.platform==='win'?'\\':'/';
+function homeDir(){return state.platform==='win'?'C:\\Users\\xiafeng':state.platform==='mac'?'/Users/xiafeng':'/home/xiafeng';}
+function downloadsDir(){return state.platform==='win'?'D:\\Downloads':homeDir()+'/Downloads';}
+function desktopDir(){return homeDir()+SEP()+'Desktop';}
+function stripExt(n){return n.replace(/\.(part\d+\.)?(7z|zip|rar|tar\.zst|tar\.gz|tar\.xz|tgz|tar|iso|img|cab)$/i,'');}
+function safeName(n){return stripExt(n).replace(/[\\/:*?"<>|]/g,'_');}
+
+/* ---------- 格式元数据与模拟数据 ---------- */
+const FORMATS={
+ '7z':{label:'7Z',color:'#7A5AF8',cls:'C',rename:false,update:true,enc:'AES-256'},
+ zip:{label:'ZIP',color:'#2F6FED',cls:'B',rename:true,update:true,enc:'AES-256'},
+ rar:{label:'RAR',color:'#C0392B',cls:'C',readonly:true,enc:'AES-256'},
+ tar:{label:'TAR.ZST',color:'#8A6D3B',cls:'D',rename:false,update:true},
+ iso:{label:'ISO',color:'#0E9F8E',cls:'A',readonly:true}
+};
+function badgeStyle(fmt){const c=FORMATS[fmt].color;const dark=root.dataset.appearance==='dark';return `--badge-bg:${alpha(c,dark?.22:.14)};--badge-fg:${dark?mix(c,'#FFFFFF',.35):mix(c,'#000000',.15)}`;}
+const DAY=864e5,NOW=Date.now();
+const NODES=new Map();let NID=1;
+const RATIO={jpg:.985,jpeg:.985,png:.97,webp:.99,gif:.99,mp4:.995,mkv:.995,mov:.995,zip:.99,'7z':.995,rar:.995,woff2:.98,squashfs:.999,deb:.99,svg:.32,md:.36,txt:.35,ts:.28,tsx:.28,js:.3,rs:.27,c:.26,h:.3,json:.18,css:.25,html:.22,toml:.4,yaml:.2,yml:.2,env:.6,lock:.12,srt:.3,cfg:.35,def:.4,efi:.6,img:.7,ico:.5,icns:.6,plist:.3,xml:.2,sh:.4};
+function ratioFor(e){return RATIO[e]!=null?RATIO[e]:.45;}
+function F(name,size,days,x){const ext=(name.match(/\.([a-z0-9]+)$/i)||[,''])[1].toLowerCase();const n=Object.assign({id:NID++,name,kind:'file',size,ext,mtime:NOW-(days==null?5:days)*DAY},x||{});if(n.packed==null)n.packed=Math.round(size*ratioFor(ext));NODES.set(n.id,n);return n;}
+function D(name,children,days,x){const n=Object.assign({id:NID++,name,kind:'dir',children,mtime:NOW-(days==null?3:days)*DAY},x||{});children.forEach(c=>c.parent=n);NODES.set(n.id,n);return n;}
+function many(count,fn){const a=[];for(let i=1;i<=count;i++)a.push(fn(i));return a;}
+const pad=(n,w)=>String(n).padStart(w,'0');
+const MB=1048576,KB=1024;
+function stats(n){if(n.kind!=='dir')return {size:n.size,packed:n.packed,files:1};if(n._st)return n._st;let s=0,p=0,f=0;for(const c of n.children){const st=stats(c);s+=st.size;p+=st.packed;f+=st.files;}return (n._st={size:s,packed:p,files:f});}
+function invalidate(n){while(n){n._st=null;n=n.parent;}}
+function filesOf(nodes){const out=[];(function walk(list){for(const n of list){if(n.kind==='dir')walk(n.children);else out.push(n);}})(nodes);return out;}
+function pathOf(n){const parts=[];while(n&&n.parent){parts.unshift(n.name);n=n.parent;}return parts.join('/');}
+function ancestors(n){const a=[];while(n){a.unshift(n);n=n.parent;}return a;}
+const ARCHIVES=[
+ {id:'a1',name:'backup-2026.7z',fmt:'7z',method:'LZMA2',solid:true,enc:true,days:0,build(){
+  const comps=['AppShell','Sidebar','CommandBar','FileList','Breadcrumb','StatusBar','TaskCenter','ThemePicker','MountPanel','Toast'].map((c,i)=>F(c+'.tsx',rnd(3,14)*KB,i%4));
+  const hooks=['useArchive','useSelection','useTheme','useI18n','useTasks'].map((c,i)=>F(c+'.ts',rnd(2,6)*KB,i%3+1));
+  const i18n=['zh-CN','zh-TW','en-US','ja-JP','ko-KR','de-DE'].map(c=>F(c+'.json',rnd(18,26)*KB,2));
+  return D('backup-2026.7z',[
+   D('assets',[D('icons',many(24,i=>F('icon-'+pad(i,2)+'.svg',rnd(1,4)*KB,20)),20),D('fonts',[F('Inter-Variable.woff2',312*KB,60),F('NotoSansCJKsc-Regular.woff2',4.8*MB,60),F('CascadiaCode.woff2',420*KB,60)],60),F('logo.png',86*KB,30),F('app.icns',1.2*MB,30)],20),
+   D('src',[D('app',[D('components',comps,0),D('hooks',hooks,1),D('i18n',i18n,2),F('App.tsx',4.2*KB,1),F('main.tsx',0.8*KB,1)],0),D('lib',['tauri','format','query','shortcuts'].map(c=>F(c+'.ts',rnd(2,9)*KB,3)),3),D('styles',['tokens','base','components'].map(c=>F(c+'.css',rnd(4,18)*KB,2)),2)],0),
+   D('docs',many(6,i=>F(pad(i,2)+'-'+['overview','architecture','formats','ui-design','theming','i18n'][i-1]+'.md',rnd(6,22)*KB,1)),1),
+   D('photos',[D('2026-10',many(180,i=>F('IMG_'+(2040+i)+'.jpg',rnd(2,9)*MB,i%12)),0),D('2026-09',many(120,i=>F('IMG_'+(1900+i)+'.jpg',rnd(2,9)*MB,30+i%12)),30)],0),
+   D('vendor.zip',many(12,i=>F('lib-'+pad(i,2)+'.min.js',rnd(20,180)*KB,40)),40,{archive:true,fmt:'zip'}),
+   F('Cargo.toml',1.2*KB,1),F('package.json',2.4*KB,1),F('pnpm-lock.yaml',420*KB,1),F('README.md',8.4*KB,0),F('CHANGELOG.md',14*KB,0),F('LICENSE',1.1*KB,90),F('.env.production',0.3*KB,0,{enc:true})
+  ],0);
+ }},
+ {id:'a2',name:'photos-2026.zip',fmt:'zip',method:'Deflate',days:1,build(){return D('photos-2026.zip',['2026-05','2026-06','2026-07','2026-08','2026-09','2026-10'].map((m,k)=>D(m,many(200,i=>F('DSC'+pad(k*200+i,5)+'.jpg',rnd(3,12)*MB,(5-k)*30+i%20)),(5-k)*30)).concat([F('index.html',12*KB,1),F('thumbs.db',96*KB,1)]),1);}},
+ {id:'a3',name:'movie-collection.part1.rar',fmt:'rar',method:'RAR5',solid:true,enc:true,readonly:true,days:3,build(){return D('movie-collection.part1.rar',[D('Movies',[F('Inception.2010.2160p.mkv',4.2*1024*MB,200),F('Interstellar.2014.2160p.mkv',5.1*1024*MB,200),F('Dune.Part.Two.2024.2160p.mkv',6.3*1024*MB,120)],120),D('Subtitles',['zh-CN','zh-TW','en','ja','ko','de'].map(l=>F('Inception.'+l+'.srt',rnd(60,120)*KB,200)),200),F('README.txt',2*KB,120)],3);}},
+ {id:'a4',name:'linux-6.12.tar.zst',fmt:'tar',method:'Zstandard',days:6,build(){const dirs=(names,per,ext)=>names.map(n=>D(n,many(per,i=>F(n+'-'+pad(i,3)+'.'+ext,rnd(2,60)*KB,40)),40));return D('linux-6.12.tar.zst',[D('linux-6.12',[D('arch',dirs(['x86','arm64','riscv','powerpc','s390','mips'],20,'c'),40),D('drivers',dirs(['gpu','net','usb','block','input','media','pci','tty'],30,'c'),40),D('fs',many(40,i=>F('fs-'+pad(i,3)+'.c',rnd(8,90)*KB,40)),40),D('include',many(30,i=>F('linux-'+pad(i,3)+'.h',rnd(1,20)*KB,40)),40),D('kernel',many(50,i=>F('kernel-'+pad(i,3)+'.c',rnd(8,120)*KB,40)),40),F('Makefile',66*KB,40),F('README',0.7*KB,40),F('COPYING',0.5*KB,40),F('Kconfig',0.6*KB,40)],40)],6);}},
+ {id:'a5',name:'ubuntu-24.04-desktop-amd64.iso',fmt:'iso',method:'Store',readonly:true,days:12,build(){return D('ubuntu-24.04-desktop-amd64.iso',[D('boot',[D('grub',[F('grub.cfg',2*KB,180),F('loopback.cfg',0.6*KB,180),F('font.pf2',2.3*MB,180),F('efi.img',10*MB,180)],180)],180),D('casper',[F('vmlinuz',14.6*MB,180),F('initrd',104*MB,180),F('filesystem.squashfs',2.6*1024*MB,180),F('filesystem.size',0.1*KB,180)],180),D('EFI',[D('boot',[F('bootx64.efi',960*KB,180),F('grubx64.efi',2.5*MB,180),F('mmx64.efi',850*KB,180)],180)],180),D('pool',[D('main',many(20,i=>F('package-'+pad(i,2)+'_amd64.deb',rnd(200,9000)*KB,180)),180)],180),F('md5sum.txt',24*KB,180),F('README.diskdefines',0.2*KB,180),F('.disk',0.1*KB,180)],12);}}
+];
+ARCHIVES.forEach(a=>{a.root=null;a.get=function(){if(!this.root){this.root=this.build();this.root.archiveEntry=this;}return this.root;};});
+function archiveOf(n){while(n.parent)n=n.parent;return n.archiveEntry;}
+function fmtOfNode(n){const a=archiveOf(n);let x=n;while(x){if(x.kind==='dir'&&x.archive)return x.fmt;x=x.parent;}return a.fmt;}
+function nodeIcon(n){if(n.kind==='dir')return n.archive?['archive','archive']:['folder','folder'];const e=n.ext;if(/^(jpe?g|png|gif|webp|svg|bmp|heic|ico|icns)$/.test(e))return ['fileImage','image'];if(/^(mp4|mkv|mov|avi|webm|mp3|flac|wav)$/.test(e))return ['fileVideo','video'];if(/^(woff2?|ttf|otf|pf2)$/.test(e))return ['fileFont','font'];if(/^(ts|tsx|js|jsx|rs|c|h|py|go|java|css|html|json|toml|ya?ml|lock|cfg|def|sh|xml|plist)$/.test(e))return ['fileCode','code'];if(/^(md|txt|env|srt|log|csv|diskdefines|size|disk)$/.test(e)||!e)return ['fileText','text'];if(/^(zip|7z|rar|tar|gz|xz|zst|iso|deb|squashfs|efi|img)$/.test(e))return ['archive','archive'];return ['file','file'];}
+function typeOf(n){if(n.kind==='dir')return n.archive?t('type.nested'):t('type.folder');return n.ext?n.ext.toUpperCase():t('type.file');}
+function crcOf(n){let h=2166136261;const s=n.name+n.size;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=(h*16777619)>>>0;}return h.toString(16).toUpperCase().padStart(8,'0');}
+/* ---------- 主题应用（docs/05 §4、§8） ---------- */
+function isDark(){if(state.appearance==='dark')return true;if(state.appearance==='light')return false;const h=root.getAttribute('data-theme');if(h==='dark')return true;if(h==='light')return false;return !!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);}
+function currentTheme(){const dark=isDark();return THEMES[dark?state.themeDark:state.themeLight]||THEMES[dark?'midnight':'aurora'];}
+function currentAccent(th){th=th||currentTheme();return state.accent==='theme'?th.c.accent:state.accent==='system'?SYS_ACCENT[state.platform]:state.accent;}
+function materialOn(th){th=th||currentTheme();return state.material&&!th.hc&&state.platform!=='linux';}
+function resolveTokens(th){
+ const c=th.c,dark=th.a==='dark',hc=!!th.hc,fg=c.fg,sf=c.surface,bd=c.border,accent=currentAccent(th),mat=materialOn(th);
+ return {
+  'bg-canvas':c.canvas,'bg-surface':sf,'bg-elevated':c.elevated,'bg-sidebar':c.sidebar,'sidebar-material':mat?alpha(c.sidebar,dark?.78:.72):c.sidebar,
+  'bg-subtle':mix(sf,fg,.04),'bg-hover':mix(sf,fg,hc?.12:.07),'bg-pressed':mix(sf,fg,hc?.2:.11),
+  'fg-primary':fg,'fg-secondary':c.fg2,'fg-muted':alpha(fg,hc?.8:.55),'fg-disabled':alpha(fg,hc?.5:.35),
+  'border-subtle':hc?bd:mix(bd,sf,.5),'border-default':bd,'border-strong':mix(bd,fg,.25),'border-focus':accent,
+  'accent':accent,'accent-hover':mix(accent,fg,.12),'accent-pressed':mix(accent,fg,.22),'accent-subtle':alpha(accent,hc?.28:.14),'accent-fg':onColor(accent),
+  'success':c.success,'success-subtle':alpha(c.success,.14),'warning':c.warning,'warning-subtle':alpha(c.warning,.16),'danger':c.danger,'danger-subtle':alpha(c.danger,.14),'info':c.info,'info-subtle':alpha(c.info,.14),
+  'selection-bg':alpha(accent,hc?.35:.22),'selection-fg':fg,'folder-color':dark?'#F0C35C':'#E0A82E',
+  'shadow-1':dark?'0 2px 8px rgba(0,0,0,.45)':'0 2px 8px rgba(20,30,50,.10)','shadow-2':dark?'0 16px 48px rgba(0,0,0,.6)':'0 16px 48px rgba(20,30,50,.18)',
+  'overlay-scrim':dark?'rgba(0,0,0,.55)':'rgba(10,14,22,.4)','desktop':DESKTOP[state.platform][dark?'dark':'light']
+ };
+}
+function applyTheme(){
+ const th=currentTheme(),T=resolveTokens(th),dark=th.a==='dark';
+ for(const k in T)root.style.setProperty('--'+k,T[k]);
+ root.style.colorScheme=dark?'dark':'light';
+ root.style.setProperty('--size-base',state.fontScale+'px');
+ root.dataset.appearance=dark?'dark':'light';
+ const w=$('#win');w.classList.toggle('no-material',!materialOn(th));w.classList.toggle('hc',!!th.hc);
+}
+function applyChrome(){
+ const w=$('#win');w.dataset.platform=state.platform;w.dataset.density=state.density;w.dataset.icons=state.iconStyle;
+ w.classList.toggle('collapsed',state.sbCollapsed);w.classList.toggle('sb-open',state.sbOpen);
+ root.lang=state.lang;
+ const fonts={win:'"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif',mac:'-apple-system,"SF Pro Text","PingFang SC","Hiragino Sans GB",system-ui,sans-serif',linux:'Inter,"Noto Sans","Noto Sans CJK SC",Cantarell,system-ui,sans-serif'};
+ root.style.setProperty('--font-ui',fonts[state.platform]);
+}
+
+/* ---------- 渲染 ---------- */
+let LIST=[];
+function render(){applyChrome();applyTheme();renderProtobar();renderSidebar();renderTitlebar();renderView();renderStatus();}
+function renderProtobar(){
+ const seg=(items,cur,act)=>`<div class="seg">${items.map(([v,l])=>`<button data-action="${act}" data-val="${v}" aria-pressed="${cur===v}">${l}</button>`).join('')}</div>`;
+ $('#protobar').innerHTML=`<div class="brand">${LOGO}<span>${t('proto.title')}</span><small>${t('proto.subtitle')}</small></div>
+  <span class="hint grow">${t('proto.hint')}</span>
+  ${seg([['win','Windows'],['mac','macOS'],['linux','Linux']],state.platform,'platform')}
+  <select class="sel" style="height:30px" data-set="lang" aria-label="${t('set.lang')}">${LANGS.map(([v,l])=>`<option value="${v}" ${state.lang===v?'selected':''}>${l}</option>`).join('')}</select>
+  <button class="iconbtn" data-action="theme-toggle" title="${t('title.theme')}" aria-label="${t('title.theme')}">${icon(root.dataset.appearance==='dark'?'sun':'moon')}</button>
+  <button class="btn outline" style="height:30px" data-action="shell-demo">${icon('terminal')}<span>${t('proto.shellDemo')}</span></button>
+  <button class="btn" style="height:30px" data-action="proto-reset">${icon('refresh')}<span>${t('proto.reset')}</span></button>`;
+}
+function renderSidebar(){
+ const a=state.archive,col=state.sbCollapsed;
+ const top=state.platform==='mac'
+  ?`<div class="lights" role="group" aria-label="Window"><i class="r" data-action="win-ctl" data-val="close"></i><i class="y" data-action="win-ctl" data-val="min"></i><i class="g" data-action="win-ctl" data-val="max"></i></div><span class="grow"></span><button class="iconbtn sm" data-action="toggle-sb" title="${t(col?'nav.expand':'nav.collapse')}" aria-label="${t(col?'nav.expand':'nav.collapse')}">${icon('sidebar')}</button>`
+  :`${LOGO}<span class="brandname grow">OmniZip</span><button class="iconbtn sm" data-action="toggle-sb" title="${t(col?'nav.expand':'nav.collapse')}" aria-label="${t(col?'nav.expand':'nav.collapse')}">${icon('sidebar')}</button>`;
+ const nav=(id,ic,label,cur)=>`<button class="nav-item" data-action="nav" data-val="${id}" aria-current="${cur}" title="${label}">${icon(ic)}<span class="lbl">${label}</span></button>`;
+ let tree='';
+ if(a){tree=`<div class="sb-label">${t('nav.tree')}</div><div class="tree" role="tree">${treeHtml(a.get(),0)}</div>`;}
+ else tree='<div class="grow"></div>';
+ const mounts=state.mounts.length?`<div class="sb-label">${t('nav.mounts')}</div>${state.mounts.map(m=>`<div class="mount-row" title="${esc(m.point)}">${icon('drive')}<span class="nm">${esc(m.label)}</span><span class="pt">${esc(m.point)}</span><button class="iconbtn" data-action="mount-eject" data-val="${m.id}" title="${t('mount.eject')}" aria-label="${t('mount.eject')}">${icon('eject')}</button></div>`).join('')}`:'';
+ $('#sidebar').innerHTML=`<div class="sb-top">${top}</div>
+  <nav class="sb-nav">${nav('home','home',t('nav.home'),state.view==='home')}${nav('recent','clock',t('nav.recent'),false)}${nav('favorites','star',t('nav.favorites'),false)}</nav>
+  ${tree}
+  <div class="sb-bottom">${mounts}<div id="sb-tasks"></div>${nav('settings','sliders',t('nav.settings'),state.view==='settings')}</div>`;
+ renderSbTasks();
+}
+function treeHtml(n,depth){
+ const dirs=n.children.filter(c=>c.kind==='dir');
+ const open=depth===0||state.expanded.has(n.id);
+ const cur=state.cwd===n&&state.view==='browser'&&!state.query;
+ const tw=dirs.length?`<span class="tw" data-action="expand" data-val="${n.id}">${icon(open?'chevronDown':'chevronRight')}</span>`:'<span class="tw"></span>';
+ let h=`<button class="tree-item" role="treeitem" aria-expanded="${open}" aria-current="${cur}" data-action="tree" data-val="${n.id}" style="padding-left:${6+depth*14}px" title="${esc(n.name)}">${tw}${icon(n.archive||depth===0?'archive':(open?'folderOpen':'folder'),'fi '+(n.archive||depth===0?'archive':'folder'))}<span class="lbl">${esc(n.name)}</span></button>`;
+ if(open&&depth<6)h+=dirs.map(d=>treeHtml(d,depth+1)).join('');
+ return h;
+}
+function renderSbTasks(){
+ const el=$('#sb-tasks');if(!el)return;
+ const run=state.tasks.filter(x=>x.state==='running'||x.state==='paused');
+ if(!state.tasks.length){el.innerHTML='';return;}
+ const tot=run.reduce((s,x)=>s+x.total,0),done=run.reduce((s,x)=>s+x.done,0);
+ const label=run.length?t('task.running',run.length):t('task.summary',state.tasks.length);
+ el.innerHTML=`<button class="task-sum" data-action="tasks" title="${label}"><div class="row">${icon('history')}<span class="lbl grow">${label}</span>${run.length?`<span class="lbl mono" style="font-size:.78rem;color:var(--fg-secondary)">${fmtPct(done,tot)}</span>`:''}</div>${run.length?`<div class="progress"><i style="width:${fmtPct(done,tot)}"></i></div>`:''}</button>`;
+}
+function renderTitlebar(){
+ let title='';
+ if(state.view==='home')title=`<b>${t('nav.home')}</b>`;
+ else if(state.view==='settings')title=`<b>${t('settings.title')}</b>`;
+ else if(state.archive)title=`${icon('archive','fi archive')}<b>${esc(state.archive.name)}</b>`;
+ const search=state.view==='browser'?`<label class="searchbox"><span class="ic">${icon('search')}</span><input id="search" type="search" placeholder="${t('title.search')}" value="${esc(state.query)}" aria-label="${t('title.search')}"></label>`:'';
+ const ctl=`<div class="winctl"><button data-action="win-ctl" data-val="min" aria-label="${t('win.min')}">${icon('minus')}</button><button data-action="win-ctl" data-val="max" aria-label="${t('win.max')}">${icon('square')}</button><button class="close" data-action="win-ctl" data-val="close" aria-label="${t('win.close')}">${icon('x')}</button></div>`;
+ $('#titlebar').innerHTML=`<button class="iconbtn menu-toggle" data-action="sb-open" aria-label="${t('title.menu')}">${icon('menu')}</button><div class="ttl">${title}</div>${search}<button class="iconbtn" data-action="theme-toggle" title="${t('title.theme')}" aria-label="${t('title.theme')}">${icon(root.dataset.appearance==='dark'?'sun':'moon')}</button><button class="iconbtn" data-action="nav" data-val="settings" title="${t('title.settings')}" aria-label="${t('title.settings')}" aria-pressed="${state.view==='settings'}">${icon('sliders')}</button>${ctl}`;
+ const s=$('#search');if(s){s.addEventListener('input',e=>{state.query=e.target.value;state.sel.clear();renderContent();renderStatus();renderCmdbar();});s.addEventListener('keydown',e=>{if(e.key==='Escape'){state.query='';renderTitlebar();renderContent();renderStatus();}if(e.key==='Enter'){$('#content')&&$('#content').focus();}});}
+}
+function renderView(){
+ const v=$('#view');
+ if(state.view==='home')v.innerHTML=homeHtml();
+ else if(state.view==='settings')v.innerHTML=settingsHtml();
+ else{v.innerHTML=`<div class="cmdbar" id="cmdbar"></div><div class="crumbs" id="crumbs"></div><div class="content" id="content" tabindex="0" role="grid" aria-label="${t('nav.tree')}"></div>`;renderCmdbar();renderCrumbs();renderContent();}
+}
+function homeHtml(){
+ const cards=ARCHIVES.map(a=>{const r=a.get(),st=stats(r);return `<button class="card" data-action="open" data-val="${a.id}" style="${badgeStyle(a.fmt)}"><span class="ico">${FORMATS[a.fmt].label}</span><span class="meta"><b>${esc(a.name)}</b><span>${fmtSize(st.size)} · ${fmtRel(NOW-a.days*DAY)}</span></span></button>`;}).join('');
+ return `<div class="content"><div class="home">
+  <div class="drop" id="drop">${icon('upload')}<h2>${t('home.dropTitle')}</h2><p>${t('home.dropHint')}</p></div>
+  <div class="actions"><button class="btn primary lg" data-action="open" data-val="a1">${icon('archive')}<span>${t('home.open')}</span></button><button class="btn outline lg" data-action="cmd" data-val="new">${icon('plus')}<span>${t('home.new')}</span></button><button class="btn outline lg" data-action="cmd" data-val="home-extract">${icon('extract')}<span>${t('home.extract')}</span></button></div>
+  <div><div class="sect"><h3>${t('home.recent')}</h3><button data-action="toast" data-val="toast.proto">${t('home.clear')}</button></div><div class="cards" style="margin-top:12px">${cards}</div></div>
+ </div></div>`;
+}
+function renderCmdbar(){
+ const el=$('#cmdbar');if(!el)return;
+ const a=state.archive,f=FORMATS[a.fmt],n=state.sel.size,ro=!!f.readonly;
+ const b=(act,ic,label,opts)=>{opts=opts||{};return `<button class="btn${opts.primary?' primary':''}" data-action="cmd" data-val="${act}" ${opts.disabled?'disabled':''} title="${label}">${icon(ic)}<span class="lbl">${label}</span></button>`;};
+ el.innerHTML=`${b('add','plus',t('cmd.add'),{disabled:ro})}${b('extract','extract',n?t('cmd.extractSel'):t('cmd.extract'),{primary:true})}${b('mount','drive',t('cmd.mount'))}${b('test','checkCircle',t('cmd.test'))}${n?b('delete','trash',t('cmd.delete'),{disabled:ro}):''}${n===1?b('props','info',t('cmd.props')):''}<button class="iconbtn" data-action="cmd" data-val="more" title="${t('cmd.more')}" aria-label="${t('cmd.more')}">${icon('more')}</button>
+  <span class="grow"></span>
+  <button class="iconbtn" data-action="hist" data-val="back" ${state.histIdx<=0?'disabled':''} title="${t('cmd.back')}" aria-label="${t('cmd.back')}">${icon('chevronLeft')}</button><button class="iconbtn" data-action="hist" data-val="fwd" ${state.histIdx>=state.hist.length-1?'disabled':''} title="${t('cmd.forward')}" aria-label="${t('cmd.forward')}">${icon('chevronRight')}</button><button class="iconbtn" data-action="hist" data-val="up" ${!state.cwd.parent?'disabled':''} title="${t('cmd.up')}" aria-label="${t('cmd.up')}">${icon('arrowUp')}</button>
+  <span style="width:8px"></span>
+  <button class="iconbtn" data-action="vm" data-val="table" aria-pressed="${state.vm==='table'}" title="${t('cmd.viewTable')}" aria-label="${t('cmd.viewTable')}">${icon('list')}</button><button class="iconbtn" data-action="vm" data-val="grid" aria-pressed="${state.vm==='grid'}" title="${t('cmd.viewGrid')}" aria-label="${t('cmd.viewGrid')}">${icon('grid')}</button>`;
+}
+function renderCrumbs(){
+ const el=$('#crumbs');if(!el)return;
+ if(state.query){el.innerHTML=`<span>${icon('search')}</span><span class="cur" style="margin-left:6px">${esc(state.query)}</span><span class="sep">·</span><span>${t('status.results',LIST.length)}</span><span class="grow"></span><button data-action="cmd" data-val="clear-search">${t('empty.clearSearch')}</button>`;return;}
+ const chain=ancestors(state.cwd);
+ el.innerHTML=chain.map((n,i)=>{const last=i===chain.length-1;const badge=n.archive?`<span class="badge" style="${badgeStyle(n.fmt)}">${FORMATS[n.fmt].label}</span>`:'';return `${i?'<span class="sep">›</span>':''}<button class="${last?'cur':''}" data-action="crumb" data-val="${n.id}">${i===0?icon('archive','fi archive'):''}${esc(n.name)}${badge}</button>`;}).join('');
+}
+function sortNodes(arr){const {key,dir}=state.sort;let col;try{col=new Intl.Collator(state.lang,{numeric:true,sensitivity:'base'});}catch(e){col={compare:(a,b)=>a<b?-1:a>b?1:0};}
+ arr.sort((a,b)=>{const ad=a.kind==='dir',bd=b.kind==='dir';if(ad!==bd)return ad?-1:1;let r=0;if(key==='size')r=stats(a).size-stats(b).size;else if(key==='packed')r=stats(a).packed-stats(b).packed;else if(key==='mtime')r=a.mtime-b.mtime;else if(key==='type')r=col.compare(typeOf(a),typeOf(b));else r=col.compare(a.name,b.name);if(r===0)r=col.compare(a.name,b.name);return r*dir;});return arr;}
+function searchAll(rootNode,q){const out=[],ql=q.toLowerCase();(function walk(n){for(const c of n.children){if(out.length>=500)return;if(c.name.toLowerCase().includes(ql))out.push(c);if(c.kind==='dir')walk(c);}})(rootNode);return sortNodes(out);}
+function listing(){return state.query?searchAll(state.archive.get(),state.query):sortNodes(state.cwd.children.slice());}
+function renderContent(){
+ const el=$('#content');if(!el)return;const top=el.scrollTop;
+ LIST=listing();
+ if(!LIST.length){el.innerHTML=`<div class="emptyst">${icon(state.query?'search':'folderOpen')}<div>${state.query?t('empty.search',state.query):t('empty.dir')}</div>${state.query?`<button class="btn outline" data-action="cmd" data-val="clear-search">${t('empty.clearSearch')}</button>`:''}</div>`;renderCrumbs();return;}
+ if(state.vm==='grid'){
+  el.innerHTML=`<div class="gridv">${LIST.map(n=>{const [ic,cls]=nodeIcon(n);return `<div class="gcell${n.id===state.focusId?' focus':''}" role="gridcell" aria-selected="${state.sel.has(n.id)}" data-id="${n.id}" title="${esc(n.name)}">${icon(ic,'fi '+cls)}<span>${esc(n.name)}</span><small>${n.kind==='dir'?t('status.items',n.children.length):fmtSize(n.size)}</small></div>`;}).join('')}</div>`;
+ }else{
+  const th=(k,label,cls)=>`<button data-action="sort" data-val="${k}" class="${cls||''}" aria-sort="${state.sort.key===k?(state.sort.dir>0?'ascending':'descending'):'none'}">${label}${icon(state.sort.dir>0?'chevronUp':'chevronDown')}</button>`;
+  el.innerHTML=`<div class="thead" role="row">${th('name',t('col.name'))}${th('size',t('col.size'),'num col-size')}${th('packed',t('col.packed'),'num col-packed')}${th('mtime',t('col.mtime'),'col-mtime')}${th('type',t('col.type'),'col-type')}</div><div class="rows">${LIST.map(rowHtml).join('')}</div>`;
+ }
+ el.scrollTop=top;renderCrumbs();
+}
+function rowHtml(n){
+ const [ic,cls]=nodeIcon(n),st=stats(n),sub=state.query?`<span class="sub">${esc(pathOf(n.parent)||'/')}</span>`:'';
+ return `<div class="trow${n.id===state.focusId?' focus':''}${state.query?' srch':''}" role="row" aria-selected="${state.sel.has(n.id)}" data-id="${n.id}"><div class="nm" role="gridcell">${icon(ic,'fi '+cls)}<span class="nm-txt"><span>${esc(n.name)}</span>${sub}</span>${n.enc?`<span class="marks" title="${t('props.encrypted')}">${icon('lock')}</span>`:''}</div><div class="num dim col-size" role="gridcell">${n.kind==='dir'?'—':fmtSize(st.size)}</div><div class="num dim col-packed" role="gridcell">${n.kind==='dir'?'—':fmtSize(st.packed)}</div><div class="dim col-mtime" role="gridcell">${fmtDate(n.mtime)}</div><div class="dim col-type" role="gridcell">${esc(typeOf(n))}</div></div>`;
+}
+function renderStatus(){
+ const el=$('#statusbar');
+ if(state.view!=='browser'||!state.archive){const m=state.mounts.length;el.innerHTML=`<span class="lft">OmniZip 0.1.0-proto</span><span class="mid"></span><span class="rgt">${m?`${icon('drive')} ${t('status.mounted')} ${m}`:''}</span>`;return;}
+ const a=state.archive,f=FORMATS[a.fmt],st=stats(a.get()),n=state.sel.size;
+ let selSize=0;state.sel.forEach(id=>{const x=NODES.get(id);if(x)selSize+=stats(x).size;});
+ const mounted=state.mounts.some(m=>m.archiveId===a.id);
+ el.innerHTML=`<span class="lft"><span class="badge" style="${badgeStyle(a.fmt)}">${f.label}</span><span>${a.method}</span>${a.solid?`<span class="dot"></span><span>${t('status.solid')}</span>`:''}${a.enc?`<span class="dot"></span><span>${f.enc}</span>`:''}${f.readonly?`<span class="dot"></span><span>${t('status.readonly')}</span>`:''}${mounted?`<span class="dot"></span><span style="color:var(--accent)">${t('status.mounted')}</span>`:''}</span>
+  <span class="mid">${t('status.items',st.files)}${n?` · ${t('status.selected',n,fmtSize(selSize))}`:''}</span>
+  <span class="rgt">${t('status.ratio')} ${fmtPct(st.packed,st.size)}</span>`;
+}
+
+/* ---------- 设置页 ---------- */
+const SET_TABS=[['general','layout'],['appearance','palette'],['language','globe'],['formats','archive'],['shell','terminal'],['security','shield'],['mount','drive'],['advanced','cpu'],['about','info']];
+function settingsHtml(){
+ return `<div class="settings"><nav class="set-nav">${SET_TABS.map(([id,ic])=>`<button class="nav-item" data-action="settings-tab" data-val="${id}" aria-current="${state.settingsTab===id}">${icon(ic)}<span class="lbl">${t('settings.'+id)}</span></button>`).join('')}</nav><div class="set-body" id="set-body">${settingsBody()}</div></div>`;
+}
+const row=(label,ctl,hint,cls)=>`<div class="set-row${cls?' '+cls:''}"><div class="lab"><span>${label}</span>${hint?`<small>${hint}</small>`:''}</div><div class="ctl">${ctl}</div></div>`;
+const group=(...rows)=>`<div class="set-group">${rows.join('')}</div>`;
+const sw=(key,on,extra)=>`<button class="switch" role="switch" aria-checked="${!!on}" ${extra||`data-action="pref-toggle" data-val="${key}"`} aria-label="${key}"></button>`;
+const segc=(act,items,cur)=>`<div class="seg">${items.map(([v,l])=>`<button data-action="${act}" data-val="${v}" aria-pressed="${cur===v}">${l}</button>`).join('')}</div>`;
+const sel=(key,items,cur,attr)=>`<select class="sel" ${attr||`data-pref="${key}"`}>${items.map(([v,l])=>`<option value="${v}" ${String(cur)===String(v)?'selected':''}>${l}</option>`).join('')}</select>`;
+function settingsBody(){
+ const p=state.prefs,tab=state.settingsTab;
+ if(tab==='appearance'){
+  const th=currentTheme(),acc=currentAccent(th);
+  const card=(id,key)=>{const T=THEMES[id],c=T.c,cr=contrast(c.fg,c.canvas).toFixed(1);return `<button class="tcard" data-action="set" data-set="${key}" data-val="${id}" aria-pressed="${state[key]===id}" title="${esc(T.n[state.lang]||T.n['en-US'])}"><div class="prev" style="background:${c.canvas}"><div class="ps" style="background:${c.sidebar}"><i style="background:${c.accent};width:70%"></i><i style="background:${c.fg2};width:55%"></i><i style="background:${c.fg2};width:62%"></i></div><div class="pm"><i style="background:${c.surface};border:1px solid ${c.border}"></i><i style="background:${c.fg};width:46%;opacity:.85"></i><i style="background:${c.fg2};width:70%;opacity:.6"></i><i style="background:${c.accent};width:28%"></i></div></div><div class="tn"><span>${esc(T.n[state.lang]||T.n['en-US'])}</span><small>${cr}:1</small></div></button>`;};
+  const lights=Object.keys(THEMES).filter(k=>THEMES[k].a==='light'),darks=Object.keys(THEMES).filter(k=>THEMES[k].a==='dark');
+  return `<h2>${t('settings.appearance')}</h2>${group(
+   row(t('set.mode'),segc('set-appearance',[['light',t('set.light')],['dark',t('set.dark')],['system',t('set.system')]],state.appearance)),
+   `<div class="set-row col"><div class="lab"><span>${t('set.themeLight')}</span><small>${t('set.themeHint')}</small></div><div class="themes">${lights.map(k=>card(k,'themeLight')).join('')}</div></div>`,
+   `<div class="set-row col"><div class="lab"><span>${t('set.themeDark')}</span></div><div class="themes">${darks.map(k=>card(k,'themeDark')).join('')}</div></div>`,
+   `<div class="set-row col"><div class="lab"><span>${t('set.accent')}</span><small>${t('set.contrast')} ${contrast(onColor(acc),acc).toFixed(1)}:1 · ${t('set.contrastOk')}</small></div><div class="ctl swatches">${segc('set-accent',[['theme',t('set.accentTheme')],['system',t('set.accentSystem')]],['theme','system'].includes(state.accent)?state.accent:'')}<span style="width:8px"></span>${ACCENT_PRESETS.map(c=>`<button class="sw" style="background:${c}" data-action="set-accent" data-val="${c}" aria-pressed="${state.accent===c}" aria-label="${c}"></button>`).join('')}<input type="color" id="accent-custom" value="${/^#/.test(state.accent)?state.accent:acc}" data-set="accent" aria-label="${t('set.accentCustom')}"></div></div>`,
+   row(t('set.material'),sw('material',state.material,`data-action="set" data-set="material" data-val="toggle"`),t('set.materialHint')),
+   row(t('set.density'),segc('set-density',[['compact',t('set.compact')],['comfortable',t('set.comfortable')],['spacious',t('set.spacious')]],state.density)),
+   row(t('set.iconStyle'),segc('set-icons',[['mono',t('set.mono')],['duotone',t('set.duotone')]],state.iconStyle)),
+   row(t('set.fontScale'),`<span class="mono" style="font-size:.84rem;color:var(--fg-secondary)">${state.fontScale}px</span><input type="range" min="12" max="20" step="1" value="${state.fontScale}" data-set="fontScale" aria-label="${t('set.fontScale')}">`)
+  )}`;
+ }
+ if(tab==='language'){
+  return `<h2>${t('settings.language')}</h2>${group(
+   row(t('set.lang'),sel('lang',LANGS,state.lang,'data-set="lang"')),
+   row(t('set.sizeUnit'),sel('sizeUnit',[['auto',t('set.unitAuto')],['kb',t('set.unitKb')],['kib',t('set.unitKib')]],state.sizeUnit,'data-set="sizeUnit"'),fmtSize(1536000)+' · '+fmtSize(4.2*1024*MB)),
+   row(t('set.dateFormat'),`<span class="mono" style="font-size:.86rem">${fmtDate(NOW)}</span>`),
+   row(t('set.encoding'),sel('encoding',[['auto',t('set.encAuto')],['gb18030','GB18030'],['big5','Big5'],['shift_jis','Shift_JIS'],['euc-kr','EUC-KR'],['cp437','CP437'],['cp866','CP866']],'auto'))
+  )}`;
+ }
+ if(tab==='general'){
+  return `<h2>${t('settings.general')}</h2>${group(
+   row(t('set.startup'),sel('startup',[['home',t('set.startupHome')],['last',t('set.startupLast')]],p.startup)),
+   row(t('set.extractTo'),sel('extractTo',[['ask',t('set.extractAsk')],['same',t('set.extractSame')],['downloads',t('set.extractDownloads')]],p.extractTo)),
+   row(t('set.close'),sel('closeBehavior',[['exit',t('set.closeExit')],['tray',t('set.closeTray')]],p.closeBehavior)),
+   row(t('set.notify'),sw('notify',p.notify),t('set.notifyHint'))
+  )}`;
+ }
+ if(tab==='formats'){
+  const rows=[['zip','ZIP','rw'],['7z','7Z','rw'],['rar','RAR','readonly'],['tar','TAR / TAR.GZ / TAR.ZST','rw'],['gz','GZ / BZ2 / XZ','rw'],['xz','LZ4 / BR','rw'],['zst','ZST','rw'],['iso','ISO / IMG','readonly'],['cab','CAB / ARJ / LZH','readonly']];
+  return `<h2>${t('settings.formats')}</h2><div class="set-group"><table class="fmt-table">${rows.map(([k,l,cap])=>`<tr><td><b>${l}</b></td><td style="color:var(--fg-secondary)">${t('fmt.'+cap)}</td><td><label class="chk"><input type="checkbox" data-assoc="${k}" ${p.assoc[k]?'checked':''}> ${t('set.assoc')}</label></td></tr>`).join('')}</table></div>${group(row(t('set.default'),`<button class="btn outline" data-action="toast" data-val="toast.proto">${icon('external')}<span>${t('set.defaultBtn')}</span></button>`,t('set.defaultHint')))}`;
+ }
+ if(tab==='shell'){
+  const items=[['open','cmd.open'],['here','cmd.extractHere'],['smart','cmd.extract'],['to','cmd.extractSel'],['mount','cmd.mount'],['test','cmd.test'],['convert','cmd.convert'],['hash','cmd.hash']];
+  const on=items.filter(([k])=>p.shellItems[k]);
+  const line=(ic,label,cls)=>`<div class="${cls||''}">${p.shellIcons?icon(ic):'<i class="ic"></i>'}<span>${label}</span></div>`;
+  const prev=state.shellStyle==='cascade'
+   ?`${line('folderOpen',t('cmd.open'))}<hr>${line('archive','OmniZip','hl')}${on.map(([k,key])=>line(k==='mount'?'drive':k==='test'?'checkCircle':k==='hash'?'hash':k==='convert'?'refresh':'extract',t(key),'sub')).join('')}<hr>${line('copy',t('cmd.copyPath'))}`
+   :`${line('folderOpen',t('cmd.open'))}<hr>${on.slice(0,4).map(([k,key])=>line(k==='mount'?'drive':k==='test'?'checkCircle':'extract',t(key))).join('')}${on.length>4?line('archive','OmniZip ›','sub'):''}<hr>${line('copy',t('cmd.copyPath'))}`;
+  return `<h2>${t('settings.shell')}</h2>${group(
+   row(t('set.shellStatus'),`<span class="status">${icon('checkCircle')} ${t('set.registered')}</span><button class="btn outline" data-action="toast" data-val="toast.proto">${t('set.repair')}</button>`,state.platform==='win'?'IExplorerCommand · MSIX':state.platform==='mac'?'Services · Finder Sync':'Dolphin · Nautilus · Thunar · Nemo'),
+   row(t('set.shellStyle'),segc('set-shell',[['cascade',t('set.cascade')],['flat',t('set.flat')]],state.shellStyle)),
+   `<div class="set-row col"><div class="lab"><span>${t('set.shellItems')}</span></div><div class="ctl">${items.map(([k,key])=>`<label class="chk"><input type="checkbox" data-shellitem="${k}" ${p.shellItems[k]?'checked':''}> ${t(key)}</label>`).join('')}</div></div>`,
+   row(t('set.shellIcons'),sw('shellIcons',p.shellIcons)),
+   `<div class="set-row col"><div class="lab"><span>${t('set.shellPreview')}</span></div><div class="menu-prev">${prev}</div></div>`
+  )}${group(row(t('set.cli'),sw('cliPath',p.cliPath),'omnizip · oz'),row(t('set.completions'),sw('completions',p.completions),state.platform==='win'?'PowerShell':'bash · zsh · fish'))}`;
+ }
+ if(tab==='security'){
+  return `<h2>${t('settings.security')}</h2>${group(
+   row(t('set.ratio'),sel('ratio',[['100','1 : 100'],['1000','1 : 1000'],['10000','1 : 10 000']],p.ratio)),
+   row(t('set.motw'),sw('motw',p.motw),t('set.motwHint')),
+   row(t('set.symlink'),sel('symlink',[['inside',t('set.symInside')],['file',t('set.symFile')],['skip',t('set.symSkip')]],p.symlink)),
+   row(t('set.keychain'),sw('keychain',p.keychain))
+  )}`;
+ }
+ if(tab==='mount'){
+  const be={win:['set.backendWin',true],mac:['set.backendMac',false],linux:['set.backendLinux',true]}[state.platform];
+  const loc={win:'set.mountLetter',mac:'set.mountVolumes',linux:'set.mountMedia'}[state.platform];
+  return `<h2>${t('settings.mount')}</h2>${group(
+   row(t('set.backend'),be[1]?`<span class="status">${icon('checkCircle')} ${t('set.ready')}</span>`:`<span class="status warn">${icon('alert')} ${t('set.needEnable')}</span><button class="btn outline" data-action="toast" data-val="toast.proto">${t('set.enableBtn')}</button>`,t(be[0])),
+   row(t('set.mountLoc'),`<span class="mono" style="font-size:.86rem;color:var(--fg-secondary)">${t(loc)}</span>`),
+   row(t('set.cacheLimit'),`<span class="mono" style="font-size:.84rem;color:var(--fg-secondary)">${p.cacheGB} GB</span><input type="range" min="1" max="32" value="${p.cacheGB}" data-pref="cacheGB" aria-label="${t('set.cacheLimit')}">`),
+   row(t('set.autoUnmount'),sw('autoUnmount',p.autoUnmount)),
+   row(t('set.restore'),sw('restoreMounts',p.restoreMounts)),
+   row(t('set.warmDefault'),sw('warm',p.warm)),
+   state.platform==='win'?row(t('set.offline'),sw('offline',p.offline),t('set.offlineHint')):''
+  )}${state.mounts.length?`<h2 style="font-size:1rem">${t('nav.mounts')}</h2>${group(...state.mounts.map(m=>row(esc(m.label),`<span class="mono" style="font-size:.84rem;color:var(--fg-secondary)">${esc(m.point)}</span><button class="iconbtn" data-action="mount-eject" data-val="${m.id}" title="${t('mount.eject')}">${icon('eject')}</button>`,`${t('mount.cache')} ${fmtSize(m.cache)}`)))}`:''}`;
+ }
+ if(tab==='advanced'){
+  return `<h2>${t('settings.advanced')}</h2>${group(
+   row(t('set.threads'),sel('threads',[['auto',t('set.auto')],['2','2'],['4','4'],['8','8'],['16','16']],p.threads)),
+   row(t('set.cacheDir'),`<input class="inp mono" readonly value="${esc(state.platform==='win'?'C:\\Users\\xiafeng\\AppData\\Local\\OmniZip\\cache':state.platform==='mac'?'~/Library/Caches/OmniZip':'~/.cache/omnizip')}" style="width:min(320px,100%)">`),
+   row(t('set.log'),sel('logLevel',[['error','error'],['warn','warn'],['info','info'],['debug','debug'],['trace','trace']],p.logLevel)),
+   row(t('set.diag'),`<button class="btn outline" data-action="toast" data-val="set.diagDone">${icon('download')}<span>${t('set.export')}</span></button>`,t('set.diagHint'))
+  )}`;
+ }
+ return `<h2>${t('settings.about')}</h2><div class="about-logo">${LOGO}<div><b>OmniZip</b><br><span>${t('about.tagline')}</span></div></div>${group(
+  row(t('about.version'),`<span class="mono">0.1.0-proto</span><button class="btn outline" data-action="toast" data-val="about.latest">${t('about.check')}</button>`),
+  row(t('about.channel'),`<span>${t('about.stable')}</span>`),
+  row(t('about.license'),`<span>MIT</span>`),
+  `<div class="set-row col"><div class="lab"><span>${t('about.components')}</span></div><div class="chips">${['Tauri 2','React 19','zip','sevenz-rust2','tar','flate2 (zlib-rs)','liblzma','zstd','lz4_flex','brotli','unrar','libarchive','WinFsp','fuser','i18next','ICU4X','Radix UI','Lucide'].map(c=>`<span class="chip">${c}</span>`).join('')}</div></div>`
+ )}`;
+}
+/* ---------- 提示 ---------- */
+function toast(msg,o){o=o||{};const el=document.createElement('div');el.className='toast '+(o.type||'');el.setAttribute('role','status');
+ el.innerHTML=`${icon(o.type==='err'||o.type==='warn'?'alert':o.type==='info'?'info':'checkCircle')}<span>${msg}</span>${o.action?`<button class="lnk">${o.action.label}</button>`:''}<button class="iconbtn" aria-label="${t('common.close')}">${icon('x')}</button>`;
+ const box=$('#toasts');box.appendChild(el);const close=()=>{if(el.parentNode)el.remove();};const tm=setTimeout(close,o.ms||(o.action?6000:3200));
+ el.querySelector('.iconbtn').addEventListener('click',()=>{clearTimeout(tm);close();});
+ if(o.action)el.querySelector('.lnk').addEventListener('click',()=>{clearTimeout(tm);close();o.action.fn();});
+ while(box.children.length>4)box.firstChild.remove();}
+
+/* ---------- 模态 / 侧滑 ---------- */
+let MID=1;
+function openModal(o){const id='m'+(MID++);const scrim=document.createElement('div');scrim.className='scrim'+(o.sheet?' sheet':'');
+ scrim.innerHTML=`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${id}" style="--mw:${o.width||520}px"><header><h2 id="${id}">${o.title}</h2><button class="iconbtn" data-mclose aria-label="${t('common.close')}">${icon('x')}</button></header><div class="mb">${o.body}</div>${o.footer?`<footer>${o.footer}</footer>`:''}</div>`;
+ $('#overlays').appendChild(scrim);
+ const m={el:scrim,closed:false,close(){if(m.closed)return;m.closed=true;scrim.remove();state.modals=state.modals.filter(x=>x!==m);if(o.onClose)o.onClose();}};
+ state.modals.push(m);
+ scrim.addEventListener('mousedown',e=>{if(e.target===scrim&&!o.sticky)m.close();});
+ scrim.querySelector('[data-mclose]').addEventListener('click',()=>m.close());
+ if(o.onOpen)o.onOpen(scrim.firstElementChild,m);
+ setTimeout(()=>{const f=scrim.querySelector('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([readonly]),select')||scrim.querySelector('button.primary');if(f)f.focus();},40);
+ return m;}
+function closeTopModal(){const m=state.modals[state.modals.length-1];if(m)m.close();}
+
+/* ---------- 右键菜单 ---------- */
+function openCtx(x,y,items){closeCtx();const el=document.createElement('div');el.className='ctx';el.setAttribute('role','menu');
+ el.innerHTML=items.map((it,i)=>it.sep?'<hr>':`<button role="menuitem" class="${it.cls||''}" data-ctx="${i}" ${it.disabled?'disabled':''}>${it.icon?icon(it.icon):'<i class="ic"></i>'}<span>${it.label}</span>${it.kbd?`<kbd>${it.kbd}</kbd>`:''}</button>`).join('');
+ $('#overlays').appendChild(el);const wr=$('#win').getBoundingClientRect(),r=el.getBoundingClientRect();let lx=x-wr.left,ly=y-wr.top;if(lx+r.width>wr.width-8)lx=Math.max(8,wr.width-r.width-8);if(ly+r.height>wr.height-8)ly=Math.max(8,ly-r.height);el.style.left=lx+'px';el.style.top=ly+'px';
+ el.addEventListener('click',e=>{const b=e.target.closest('[data-ctx]');if(!b||b.disabled)return;const it=items[+b.dataset.ctx];closeCtx();if(it.fn)it.fn();});state.ctx=el;}
+function closeCtx(){if(state.ctx){state.ctx.remove();state.ctx=null;}}
+
+/* ---------- 任务 ---------- */
+let TID=1,tickTimer=null;state.miniTask=null;
+const SPEED={extract:280*MB,compress:95*MB,test:420*MB,add:120*MB,warm:200*MB};
+function ensureTick(){if(!tickTimer)tickTimer=setInterval(tick,120);}
+function startTask(o){const tk=Object.assign({id:TID++,state:'running',done:0,speed:SPEED[o.kind]||200*MB,cur:'',asked:false,files:[],t0:Date.now()},o);tk.total=Math.max(1,tk.total||1);state.tasks.unshift(tk);ensureTick();renderTasks();return tk;}
+function tick(){let running=false;for(const tk of state.tasks){if(tk.state!=='running')continue;running=true;const base=SPEED[tk.kind]||200*MB;tk.speed=tk.speed*0.85+base*(0.85+Math.random()*0.3)*0.15;tk.done=Math.min(tk.total,tk.done+tk.speed*0.12);
+  if(tk.files.length){const fi=Math.min(tk.files.length-1,Math.floor(tk.done/tk.total*tk.files.length));tk.cur=tk.files[fi].name;}
+  if(tk.overwrite==='ask'&&!tk.asked&&tk.done/tk.total>=0.4){tk.asked=true;tk.state='paused';openConflict(tk);}
+  if(tk.done>=tk.total)finishTask(tk);}
+ if(!running){clearInterval(tickTimer);tickTimer=null;}renderTasks();}
+function finishTask(tk){tk.state='done';tk.done=tk.total;
+ if(tk.kind==='extract')toast(t('toast.extracted',tk.files.length,tk.dest),{action:{label:t('task.openFolder'),fn:()=>toast(t('toast.folderOpened'),{type:'info'})}});
+ else if(tk.kind==='compress')toast(t('toast.compressed',tk.name));else if(tk.kind==='test')toast(t('toast.tested'));else if(tk.kind==='add')toast(t('toast.added',tk.files.length));
+ if(tk.mini)setTimeout(()=>{if(state.miniTask===tk){state.miniTask=null;renderMini();}},900);}
+function renderTasks(){renderSbTasks();renderDrawer();renderMini();}
+function renderDrawer(){let d=$('#drawer');if(!state.drawer){if(d)d.remove();return;}
+ if(!d){d=document.createElement('aside');d.id='drawer';d.className='drawer';d.setAttribute('aria-label',t('task.title'));$('#overlays').appendChild(d);}
+ const list=state.tasks.map(taskHtml).join('')||`<div class="emptyst">${icon('history')}<div>${t('task.none')}</div></div>`;
+ d.innerHTML=`<header><h2>${t('task.title')}</h2><button class="btn" data-action="tasks-clear" ${state.tasks.some(x=>x.state==='done'||x.state==='cancelled')?'':'disabled'}>${t('task.clear')}</button><button class="iconbtn" data-action="drawer-close" aria-label="${t('common.close')}">${icon('x')}</button></header><div class="list">${list}</div>`;}
+function taskHtml(tk){const pct=fmtPct(tk.done,tk.total),eta=tk.state==='running'?fmtDur((tk.total-tk.done)/Math.max(1,tk.speed)):'';const st=tk.state==='done'?t('task.done'):tk.state==='cancelled'?t('task.cancelled'):tk.state==='paused'?t('task.paused'):'';
+ const acts=(tk.state==='running'||tk.state==='paused')?`<button class="btn outline" data-action="task" data-val="${tk.state==='running'?'pause':'resume'}:${tk.id}">${t(tk.state==='running'?'task.pause':'task.resume')}</button><button class="btn" data-action="task" data-val="cancel:${tk.id}">${t('task.cancel')}</button>`:(tk.state==='done'&&tk.kind==='extract')?`<button class="btn outline" data-action="toast" data-val="toast.folderOpened">${t('task.openFolder')}</button>`:'';
+ return `<div class="task ${tk.state}"><div class="tt">${icon(tk.kind==='compress'||tk.kind==='add'?'package':tk.kind==='test'?'checkCircle':tk.kind==='warm'?'bolt':'extract')}<b>${t('task.'+tk.kind)} · ${esc(tk.name)}</b><span class="mono" style="font-size:.8rem">${pct}</span></div><div class="progress"><i style="width:${pct}"></i></div><div class="meta"><span>${tk.state==='running'?fmtSpeed(tk.speed):st}</span><span>${tk.state==='running'?t('task.remaining',eta):fmtSize(tk.total)}</span></div>${tk.state==='running'&&tk.cur?`<div class="meta"><span class="mono" style="font-size:.76rem">${esc(tk.cur)}</span></div>`:''}${acts?`<div class="acts">${acts}</div>`:''}</div>`;}
+function renderMini(){const m=$('#miniwin'),tk=state.miniTask;if(!tk){m.hidden=true;return;}m.hidden=false;const pct=fmtPct(tk.done,tk.total),run=tk.state==='running';
+ m.innerHTML=`<div class="tt">${icon(tk.state==='done'?'checkCircle':'extract')}<span class="grow">${tk.state==='done'?t('task.done'):t('mini.title',esc(tk.name))}</span><span class="mono">${pct}</span></div><div class="progress"><i style="width:${pct}"></i></div><div class="meta"><span>${run?fmtSpeed(tk.speed):''}</span><span>${run?t('task.remaining',fmtDur((tk.total-tk.done)/Math.max(1,tk.speed))):''}</span></div><div class="cur">${esc(tk.cur)}</div><div class="acts"><button class="btn" data-action="mini-bg">${t('mini.background')}</button><button class="btn outline" data-action="task" data-val="${run?'pause':'resume'}:${tk.id}" ${tk.state==='done'?'disabled':''}>${t(run?'task.pause':'task.resume')}</button><button class="btn" data-action="task" data-val="cancel:${tk.id}" ${tk.state==='done'?'disabled':''}>${t('task.cancel')}</button></div>`;}
+
+/* ---------- 对话框 ---------- */
+function selectionNodes(){return Array.from(state.sel).map(id=>NODES.get(id)).filter(Boolean);}
+function askPassword(archiveName,cb){if(state.sessionPw){cb(state.sessionPw);return;}
+ const m=openModal({title:t('pwd.title'),width:420,sticky:true,body:`<p class="hint" style="margin:0">${t('pwd.desc',esc(archiveName))}</p><div class="pw"><input id="pw-in" type="password" autocomplete="off" aria-label="${t('pwd.title')}"><button class="iconbtn sm" id="pw-eye" aria-label="${t('cmd.preview')}">${icon('eye')}</button></div><div class="err" id="pw-err" hidden>${icon('alert')}<span></span></div><label class="chk"><input type="checkbox" id="pw-rem" checked> ${t('pwd.remember')}</label>`,
+  footer:`<button class="btn" id="pw-saved">${icon('key')}<span>${t('pwd.saved')}</span></button><span class="grow"></span><button class="btn" data-mcancel>${t('common.cancel')}</button><button class="btn primary" id="pw-ok">${t('common.ok')}</button>`,
+  onOpen(el){const inp=$('#pw-in',el),err=$('#pw-err',el);
+   const submit=()=>{const v=inp.value;if(!v){err.hidden=false;err.querySelector('span').textContent=t('pwd.error');inp.focus();return;}if(v.toLowerCase()==='wrong'){err.hidden=false;err.querySelector('span').textContent=t('pwd.wrong');inp.select();return;}if($('#pw-rem',el).checked){state.sessionPw=v;toast(t('pwd.remembered'),{type:'info',ms:1800});}m.close();cb(v);};
+   $('#pw-ok',el).addEventListener('click',submit);inp.addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
+   $('#pw-eye',el).addEventListener('click',()=>{inp.type=inp.type==='password'?'text':'password';$('#pw-eye',el).innerHTML=icon(inp.type==='password'?'eye':'eyeOff');});
+   $('#pw-saved',el).addEventListener('click',()=>{inp.value='omnizip-2026';submit();});
+   el.querySelector('[data-mcancel]').addEventListener('click',()=>m.close());}});}
+function openConflict(tk){const f=tk.files[Math.floor(tk.files.length*0.4)]||tk.files[0]||{name:'file',size:1,mtime:NOW,ext:''};const [ic,cls]=nodeIcon(f);
+ const m=openModal({title:t('conflict.title',esc(f.name)),width:560,sticky:true,body:`<div class="conf"><div class="side"><h4>${t('conflict.existing')}</h4>${icon(ic,'fi '+cls)}<b>${esc(f.name)}</b><span>${fmtSize(Math.round(f.size*0.97))}</span><span>${fmtDate(f.mtime-3*DAY)}</span></div><div class="side"><h4>${t('conflict.incoming')}</h4>${icon(ic,'fi '+cls)}<b>${esc(f.name)}</b><span>${fmtSize(f.size)}</span><span>${fmtDate(f.mtime)} <span class="new">· ${t('conflict.newer')}</span></span></div></div><label class="chk"><input type="checkbox" id="cf-all" checked> ${t('conflict.applyAll')}</label>`,
+  footer:`<button class="btn" data-res="skip">${t('conflict.skip')}</button><button class="btn" data-res="both">${t('conflict.keepBoth')}</button><button class="btn" data-res="older">${t('conflict.older')}</button><button class="btn primary" data-res="over">${t('conflict.overwrite')}</button>`,
+  onOpen(el){$$('[data-res]',el).forEach(b=>b.addEventListener('click',()=>m.close()));},
+  onClose(){if(tk.state==='paused'){tk.state='running';ensureTick();renderTasks();}}});}
+function destOptions(a){return [[downloadsDir()+SEP()+safeName(a.name)+SEP(),t('extract.dest.downloads')],[(state.platform==='win'?'D:\\Downloads':homeDir()+'/Downloads')+SEP(),t('extract.dest.sameDir')],[desktopDir()+SEP(),t('extract.dest.desktop')]];}
+function openExtract(archive,nodes){archive=archive||state.archive||ARCHIVES[0];const rootN=archive.get();nodes=nodes&&nodes.length?nodes:[rootN];const files=filesOf(nodes);const total=files.reduce((s,f)=>s+f.size,0)||1;
+ const needPw=!!archive.enc&&(files.some(f=>f.enc)||archive.fmt==='rar');const dests=destOptions(archive);
+ const m=openModal({title:t('extract.title',esc(archive.name)),width:540,body:`
+  <div class="frow"><label>${t('extract.to')}</label><div class="inline"><input class="inp mono grow" id="ex-dest" value="${esc(dests[0][0])}" list="ex-dests"><datalist id="ex-dests">${dests.map(d=>`<option value="${esc(d[0])}">${d[1]}</option>`).join('')}</datalist><button class="btn outline" data-action="toast" data-val="toast.proto">${t('common.browse')}</button></div></div>
+  <div class="frow"><label>${t('extract.pathMode')}</label><div class="seg" id="ex-path">${[['smart',t('extract.smart')],['full',t('extract.full')],['flat',t('extract.flat')]].map(([v,l],i)=>`<button type="button" data-v="${v}" aria-pressed="${i===0}">${l}</button>`).join('')}</div></div>
+  <div class="frow"><label>${t('extract.overwrite')}</label><select class="sel" id="ex-ow" style="max-width:220px">${t('extract.overwrites').map((l,i)=>`<option value="${['ask','skip','over','older','rename'][i]}">${l}</option>`).join('')}</select></div>
+  ${needPw?`<div class="frow"><label>${t('extract.password')}</label><div class="pw"><input id="ex-pw" type="password" placeholder="${t('extract.passwordHint')}" autocomplete="off"></div></div>`:''}
+  <details class="adv"><summary>${icon('chevronRight')}${t('extract.more')}<span class="hint">${t('extract.moreHint')}</span></summary><div class="advbody"><div class="frow"><label>${t('extract.encoding')}</label><select class="sel"><option>${t('set.encAuto')}</option><option>GB18030</option><option>Big5</option><option>Shift_JIS</option><option>CP437</option></select></div><div class="frow"><label>${t('extract.symlink')}</label><select class="sel"><option>${t('set.symInside')}</option><option>${t('set.symFile')}</option><option>${t('set.symSkip')}</option></select></div><label class="chk"><input type="checkbox"> ${t('extract.keepBroken')}</label></div></details>
+  <div class="inline"><label class="chk"><input type="checkbox" id="ex-open" checked> ${t('extract.openAfter')}</label><label class="chk"><input type="checkbox" id="ex-del"> ${t('extract.deleteAfter')}</label></div>
+  <div class="hint">${nodes[0]===rootN?t('extract.scopeAll'):t('extract.scope',nodes.length)} · ${fmtSize(total)}</div>`,
+  footer:`<button class="btn" data-mcancel>${t('common.cancel')}</button><button class="btn primary" id="ex-go">${icon('extract')}<span>${t('extract.start')}</span></button>`,
+  onOpen(el){const seg=$('#ex-path',el);seg.addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(!b)return;$$('button',seg).forEach(x=>x.setAttribute('aria-pressed',x===b));});
+   el.querySelector('[data-mcancel]').addEventListener('click',()=>m.close());
+   $('#ex-go',el).addEventListener('click',()=>{const dest=$('#ex-dest',el).value,ow=$('#ex-ow',el).value,pw=needPw?$('#ex-pw',el).value:'';m.close();const go=()=>startTask({kind:'extract',name:archive.name,files,total,dest,overwrite:ow});if(needPw&&!pw&&!state.sessionPw)askPassword(archive.name,go);else go();});}});}
+const LEVEL_RATIO=[1,.72,.6,.5,.44,.4,.37],LEVEL_SPEED=[900,320,180,110,70,40,22];
+function openCompress(nodes){nodes=nodes||[];const base=nodes.length?filesOf(nodes).reduce((s,f)=>s+f.size,0)||1:1.2*1024*MB;const count=nodes.length||3;let fmt='7z';
+ const m=openModal({title:t('compress.title'),sheet:true,body:`
+  <div class="field"><label>${t('compress.format')}</label><div class="seg lg" id="cf-fmt">${[['zip','ZIP'],['7z','7Z'],['tar','TAR.ZST']].map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${v===fmt}">${l}</button>`).join('')}<button type="button" data-v="more">${t('compress.more')} ▾</button></div></div>
+  <div class="field"><label>${t('compress.saveTo')}</label><div class="inline"><input class="inp mono grow" id="cf-path" value=""><button class="btn outline" data-action="toast" data-val="toast.proto">${t('common.browse')}</button></div><div class="hint">${t('compress.sources',count)} · ${fmtSize(base)}</div></div>
+  <div class="field"><label>${t('compress.level')} · <b id="cf-lvname" style="color:var(--fg-primary)"></b></label><input type="range" id="cf-level" min="0" max="6" value="3" style="width:100%" aria-label="${t('compress.level')}"><div class="levels">${t('compress.levels').map(l=>`<span>${l}</span>`).join('')}</div><div class="est" id="cf-est"></div></div>
+  <div class="field"><label>${t('compress.password')}</label><div class="inline"><div class="pw"><input id="cf-pw" type="password" autocomplete="off" aria-label="${t('compress.password')}"><button class="iconbtn sm" id="cf-eye" aria-label="${t('cmd.preview')}">${icon('eye')}</button></div><span class="hint">${t('compress.strength')}</span><span class="strength" id="cf-str"><i></i><i></i><i></i><i></i></span></div><label class="chk" id="cf-encn-row"><input type="checkbox" id="cf-encn"> ${t('compress.encryptNames')}</label></div>
+  <div class="frow"><label>${t('compress.volume')}</label><select class="sel" id="cf-vol">${t('compress.volumes').map(l=>`<option>${l}</option>`).join('')}</select></div>
+  <div class="frow"><label>${t('compress.preset')}</label><div class="inline"><select class="sel" id="cf-preset">${t('compress.presets').map(l=>`<option>${l}</option>`).join('')}</select><button class="btn outline" data-action="toast" data-val="toast.proto">${t('compress.savePreset')}</button></div></div>
+  <details class="adv"><summary>${icon('chevronRight')}${t('compress.advanced')}<span class="hint">${t('compress.advancedHint')}</span></summary><div class="advbody"><div class="frow"><label>${t('compress.method')}</label><select class="sel" id="cf-method"></select></div><div class="frow"><label>${t('compress.dict')}</label><select class="sel"><option>${t('compress.auto')}</option><option>16 MB</option><option>64 MB</option><option>256 MB</option><option>1 GB</option></select></div><div class="frow"><label>${t('compress.threads')}</label><select class="sel"><option>${t('compress.auto')}</option><option>2</option><option>4</option><option>8</option><option>16</option></select></div><label class="chk" id="cf-solid-row"><input type="checkbox" checked> ${t('compress.solid')}</label><div class="frow"><label>${t('compress.comment')}</label><input class="inp" type="text" aria-label="${t('compress.comment')}"></div></div></details>
+  <div class="inline"><label class="chk"><input type="checkbox"> ${t('compress.deleteSrc')}</label><label class="chk"><input type="checkbox" checked> ${t('compress.verify')}</label><label class="chk"><input type="checkbox"> ${t('compress.openAfter')}</label></div>`,
+  footer:`<button class="btn" data-mcancel>${t('common.cancel')}</button><button class="btn primary" id="cf-go">${icon('package')}<span>${t('compress.start')}</span></button>`,
+  onOpen(el){const path=$('#cf-path',el),lv=$('#cf-level',el),est=$('#cf-est',el),lvn=$('#cf-lvname',el),meth=$('#cf-method',el);
+   const baseName=nodes.length===1?safeName(nodes[0].name):'project';const ext={zip:'.zip','7z':'.7z',tar:'.tar.zst'};
+   const methods={zip:['Deflate','BZip2','LZMA','Zstandard','Store'],'7z':['LZMA2','LZMA','PPMd','BZip2','Zstandard'],tar:['Zstandard','gzip','xz','bzip2','lz4']};
+   const upd=()=>{const level=+lv.value;lvn.textContent=t('compress.levels')[level];const factor=fmt==='zip'?1.1:fmt==='tar'?1.05:1;const out=Math.round(base*LEVEL_RATIO[level]*factor);est.innerHTML=t('compress.estimate',`<b>${fmtSize(base)}</b>`,`<b>${fmtSize(out)}</b>`,fmtDur(base/(LEVEL_SPEED[level]*MB)));path.value=downloadsDir()+SEP()+baseName+ext[fmt];$('#cf-encn-row',el).hidden=fmt!=='7z';$('#cf-solid-row',el).hidden=fmt!=='7z';meth.innerHTML=methods[fmt].map(x=>`<option>${x}</option>`).join('');};
+   const setFmt=v=>{fmt=v;$$('button[data-v]',$('#cf-fmt',el)).forEach(x=>x.setAttribute('aria-pressed',x.dataset.v===v));upd();};
+   $('#cf-fmt',el).addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(!b)return;if(b.dataset.v==='more'){openCtx(e.clientX,e.clientY,[{label:'TAR.GZ',icon:'archive',fn:()=>setFmt('tar')},{label:'TAR.XZ',icon:'archive',fn:()=>setFmt('tar')},{label:'WIM (v1.x)',icon:'archive',disabled:true},{label:'SFX EXE (v1.x)',icon:'archive',disabled:true}]);return;}setFmt(b.dataset.v);});
+   lv.addEventListener('input',upd);
+   const pw=$('#cf-pw',el),str=$('#cf-str',el);pw.addEventListener('input',()=>{const v=pw.value;let s=0;if(v.length>=8)s++;if(/[A-Z]/.test(v)&&/[a-z]/.test(v))s++;if(/\d/.test(v))s++;if(/[^\w]/.test(v)||v.length>=14)s++;$$('i',str).forEach((i,k)=>{i.className=k<s?('on'+(s<=2?' w':'')):'';});});
+   $('#cf-eye',el).addEventListener('click',()=>{pw.type=pw.type==='password'?'text':'password';$('#cf-eye',el).innerHTML=icon(pw.type==='password'?'eye':'eyeOff');});
+   el.querySelector('[data-mcancel]').addEventListener('click',()=>m.close());
+   $('#cf-go',el).addEventListener('click',()=>{const name=path.value.split(/[\\/]/).pop();m.close();const files=nodes.length?filesOf(nodes):many(count,i=>({name:'file-'+i+'.bin',size:base/count}));startTask({kind:'compress',name,files,total:base,dest:path.value});});
+   upd();}});}
+function nextMountPoint(label){if(state.platform==='win'){const used=new Set(state.mounts.map(m=>m.point[0]));for(let c=90;c>=68;c--){const l=String.fromCharCode(c);if(!used.has(l))return l+':';}return 'Z:';}if(state.platform==='mac')return '/Volumes/'+label;return '/run/media/xiafeng/'+label;}
+function openMount(archive){archive=archive||state.archive;if(!archive)return;const f=FORMATS[archive.fmt],st=stats(archive.get()),label=safeName(archive.name),cls=f.cls;
+ const tm=cls==='C'?fmtDur(Math.min(st.size,1024*MB)/(150*MB)):fmtDur(st.size/(400*MB));
+ const note=cls==='A'?t('mount.classA',f.label):cls==='B'?t('mount.classB',f.label):cls==='C'?t('mount.classC',f.label,tm):t('mount.classD',f.label,tm);
+ const asOpts=state.platform==='win'?[['letter',t('mount.letter')],['folder',t('mount.folder')]]:state.platform==='mac'?[['volume',t('mount.volume')],['folder',t('mount.folder')]]:[['media',t('mount.media')],['folder',t('mount.folder')]];
+ const letters=[];if(state.platform==='win'){const used=new Set(state.mounts.map(m=>m.point[0]));for(let c=90;c>=68;c--){const l=String.fromCharCode(c);if(!used.has(l))letters.push(l+':');}}
+ const m=openModal({title:t('mount.title',esc(archive.name)),width:560,body:`
+  <div class="frow"><label>${t('mount.as')}</label><div class="inline"><div class="seg" id="mt-as">${asOpts.map(([v,l],i)=>`<button type="button" data-v="${v}" aria-pressed="${i===0}">${l}</button>`).join('')}</div>${state.platform==='win'?`<select class="sel" id="mt-letter" style="width:84px;flex:none;min-width:0">${letters.map(l=>`<option>${l}</option>`).join('')}</select>`:''}<input class="inp mono grow" id="mt-folder" value="${esc(state.platform==='win'?'D:\\Mounts\\'+label:homeDir()+'/mnt/'+label)}" hidden aria-label="${t('mount.folder')}"></div></div>
+  <div class="frow"><label>${t('mount.label')}</label><input class="inp" id="mt-label" value="${esc(label)}" aria-label="${t('mount.label')}"></div>
+  <div class="frow"><label>${t('mount.access')}</label><div class="radios"><label class="chk"><input type="radio" name="mt-acc" checked> ${t('mount.ro')}</label><label class="chk"><input type="radio" name="mt-acc" ${archive.fmt==='zip'?'':'disabled'}> ${t('mount.rw')}</label></div></div>
+  <div class="inline"><label class="chk"><input type="checkbox" id="mt-keep" checked> ${t('mount.keep')}</label>${cls==='C'?`<label class="chk"><input type="checkbox" id="mt-warm" ${state.prefs.warm?'checked':''}> ${t('mount.warm')}</label>`:''}</div>
+  <details class="adv"><summary>${icon('chevronRight')}${t('mount.more')}<span class="hint">${t('mount.moreHint')}</span></summary><div class="advbody"><div class="frow"><label>${t('set.cacheLimit')}</label><select class="sel"><option>2 GB</option><option>8 GB</option><option>32 GB</option></select></div>${state.platform==='win'?`<label class="chk"><input type="checkbox" ${state.prefs.offline?'checked':''}> ${t('set.offline')}</label>`:''}</div></details>
+  <div class="note${cls==='C'||cls==='D'?' warn':''}">${icon(cls==='C'||cls==='D'?'alert':'info')}<span>${note}</span></div>`,
+  footer:`<button class="btn" data-mcancel>${t('common.cancel')}</button><button class="btn primary" id="mt-go">${icon('drive')}<span>${t('mount.start')}</span></button>`,
+  onOpen(el){const seg=$('#mt-as',el);seg.addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(!b)return;$$('button',seg).forEach(x=>x.setAttribute('aria-pressed',x===b));const folder=b.dataset.v==='folder';$('#mt-folder',el).hidden=!folder;const ls=$('#mt-letter',el);if(ls)ls.hidden=folder;});
+   el.querySelector('[data-mcancel]').addEventListener('click',()=>m.close());
+   $('#mt-go',el).addEventListener('click',()=>{const lab=$('#mt-label',el).value.trim()||label;const folder=$('#mt-as button[aria-pressed="true"]',el).dataset.v==='folder';const point=folder?$('#mt-folder',el).value:(state.platform==='win'?$('#mt-letter',el).value:nextMountPoint(lab));
+    const mt={id:'m'+Date.now(),archiveId:archive.id,label:lab,point,cache:cls==='A'?0:rnd(12,340)*MB};state.mounts.push(mt);m.close();
+    const warm=$('#mt-warm',el);if(warm&&warm.checked)startTask({kind:'warm',name:archive.name,files:filesOf([archive.get()]),total:st.size,dest:point});
+    renderSidebar();renderStatus();toast(t('mount.mounted',esc(point)),{action:{label:t('mount.open'),fn:()=>toast(t('toast.folderOpened'),{type:'info'})}});});}});}
+function openProps(n){const st=stats(n),a=state.archive,[ic,cls]=nodeIcon(n);
+ openModal({title:t('props.title'),width:460,body:`<div class="inline" style="gap:12px;flex-wrap:nowrap">${icon(ic,'fi '+cls)}<b style="font-size:1.05rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.name)}</b></div><dl class="dl"><dt>${t('props.type')}</dt><dd>${esc(typeOf(n))}</dd><dt>${t('props.path')}</dt><dd class="mono" title="${esc(pathOf(n))}">${esc(pathOf(n)||'/')}</dd><dt>${t('props.size')}</dt><dd>${fmtSize(st.size)}</dd><dt>${t('props.packed')}</dt><dd>${fmtSize(st.packed)}</dd><dt>${t('props.ratio')}</dt><dd>${fmtPct(st.packed,st.size)}</dd>${n.kind==='dir'?`<dt>${t('props.items')}</dt><dd>${st.files}</dd>`:`<dt>${t('props.crc')}</dt><dd class="mono">${crcOf(n)}</dd>`}<dt>${t('props.method')}</dt><dd>${a.method}</dd><dt>${t('props.mtime')}</dt><dd>${fmtDate(n.mtime)}</dd><dt>${t('props.encrypted')}</dt><dd>${n.enc?t('props.yes'):t('props.no')}</dd></dl>`,
+  footer:`<button class="btn primary" data-mok>${t('common.ok')}</button>`,onOpen(el,m){el.querySelector('[data-mok]').addEventListener('click',()=>m.close());}});}
+const SAMPLES={
+ md:'# OmniZip\n\n> 面向 Windows / macOS / Linux 的现代化压缩软件。\n\n## 特性\n\n- 统一的 Rust 核心，GUI / CLI / Shell 扩展共享\n- ZIP · 7z · TAR.* · RAR（只读）· ISO …\n- 任意压缩包可挂载为虚拟磁盘\n- 12 套主题，4 种语言起步\n\n## 快速开始\n\n```bash\nomnizip x backup.7z -o ./out\nomnizip mount photos.zip\n```\n',
+ tsx:'import { useArchive } from "../hooks/useArchive";\nimport { FileList } from "./FileList";\n\nexport function AppShell() {\n  const { archive, cwd, navigate } = useArchive();\n  return (\n    <main className="maincol">\n      <CommandBar archive={archive} />\n      <Breadcrumb path={cwd} onNavigate={navigate} />\n      <FileList entries={cwd.children} />\n    </main>\n  );\n}\n',
+ toml:'[package]\nname = "omnizip-core"\nversion = "0.1.0"\nedition = "2024"\nlicense = "MIT"\n\n[dependencies]\nzip = { version = "4", features = ["aes-crypto", "zstd", "deflate64"] }\nsevenz-rust2 = "0.14"\ntar = "0.4"\nzstd = "0.13"\nchardetng = "0.1"\n',
+ json:'{\n  "name": "omnizip-desktop",\n  "private": true,\n  "scripts": {\n    "dev": "tauri dev",\n    "build": "tauri build"\n  },\n  "dependencies": {\n    "react": "^19.1.0",\n    "i18next": "^25.0.0",\n    "@tanstack/react-virtual": "^3.13.0"\n  }\n}\n',
+ env:'DATABASE_URL=postgres://omnizip:•••••@db.internal:5432/app\nAPI_TOKEN=••••••••••••••••\nSENTRY_DSN=https://•••@o1.ingest.sentry.io/1\n',
+ c:'#include <linux/module.h>\n#include <linux/fs.h>\n\nstatic int __init omni_init(void)\n{\n\tpr_info("omnizip: virtual fs ready\\n");\n\treturn 0;\n}\nmodule_init(omni_init);\n'};
+function openPreview(n){const show=()=>{const [ic,cls]=nodeIcon(n);let body='';
+  if(cls==='image'){const hue=(n.id*47)%360;body=`<div class="imgprev"><svg viewBox="0 0 400 300" role="img" aria-label="${esc(n.name)}"><defs><linearGradient id="g${n.id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},60%,55%)"/><stop offset="1" stop-color="hsl(${(hue+60)%360},55%,35%)"/></linearGradient></defs><rect width="400" height="300" fill="url(#g${n.id})"/><circle cx="310" cy="80" r="34" fill="rgba(255,255,255,.55)"/><path d="M0 230 L90 150 L160 210 L230 140 L320 220 L400 170 V300 H0Z" fill="rgba(0,0,0,.28)"/><text x="16" y="284" font-family="monospace" font-size="14" fill="rgba(255,255,255,.85)">${esc(n.name)}</text></svg></div><div class="prev-meta"><span>${t('preview.dims')} 4032 × 3024</span><span>${fmtSize(n.size)}</span><span>${fmtDate(n.mtime)}</span></div>`;}
+  else if(cls==='code'||cls==='text'){const s=SAMPLES[n.ext]||(['ts','js','jsx'].includes(n.ext)?SAMPLES.tsx:['h','c'].includes(n.ext)?SAMPLES.c:SAMPLES.md);body=`<pre class="code">${esc(s)}</pre><div class="prev-meta"><span>${fmtSize(n.size)}</span><span>${t('props.crc')} ${crcOf(n)}</span><span>${fmtDate(n.mtime)}</span></div>`;}
+  else body=`<div class="emptyst" style="min-height:160px">${icon(ic)}<div>${t('preview.unsupported')}</div><button class="btn outline" data-action="toast" data-val="toast.openWith">${t('preview.openWith')}</button></div>`;
+  openModal({title:`${t('preview.title')} · ${esc(n.name)}`,width:720,body,footer:`<button class="btn" data-action="toast" data-val="toast.openWith">${icon('external')}<span>${t('preview.openWith')}</span></button><span class="grow"></span><button class="btn primary" data-mok>${t('common.close')}</button>`,onOpen(el,m){el.querySelector('[data-mok]').addEventListener('click',()=>m.close());}});};
+ if(n.enc)askPassword(state.archive.name,show);else show();}
+function openRename(n){const f=FORMATS[state.archive.fmt];if(!f.rename){toast(t('toast.renameUnsupported',f.label),{type:'warn'});return;}
+ openModal({title:t('rename.title'),width:420,body:`<div class="field"><label for="rn-in">${t('rename.label')}</label><input class="inp" id="rn-in" value="${esc(n.name)}"></div>`,footer:`<button class="btn" data-mcancel>${t('common.cancel')}</button><button class="btn primary" id="rn-ok">${t('common.ok')}</button>`,
+  onOpen(el,m){const inp=$('#rn-in',el);setTimeout(()=>inp.select(),60);const ok=()=>{const v=inp.value.trim();if(v&&v!==n.name){n.name=v;renderContent();renderSidebar();toast(t('toast.renamed'));}m.close();};$('#rn-ok',el).addEventListener('click',ok);inp.addEventListener('keydown',e=>{if(e.key==='Enter')ok();});el.querySelector('[data-mcancel]').addEventListener('click',()=>m.close());}});}
+function deleteNodes(nodes){const f=FORMATS[state.archive.fmt];if(f.readonly){toast(t('toast.readonly',f.label),{type:'warn'});return;}if(!nodes.length)return;
+ const removed=nodes.map(n=>({n,parent:n.parent,idx:n.parent.children.indexOf(n)}));removed.forEach(r=>{const i=r.parent.children.indexOf(r.n);if(i>=0)r.parent.children.splice(i,1);invalidate(r.parent);});
+ state.sel.clear();state.focusId=null;renderContent();renderSidebar();renderStatus();renderCmdbar();
+ toast(t('toast.deleted',nodes.length),{action:{label:t('toast.undo'),fn:()=>{removed.sort((a,b)=>a.idx-b.idx).forEach(r=>{r.parent.children.splice(Math.min(r.idx,r.parent.children.length),0,r.n);invalidate(r.parent);});renderContent();renderSidebar();renderStatus();toast(t('toast.restored'),{type:'info'});}}});}
+function addFiles(){const f=FORMATS[state.archive.fmt];if(f.readonly){toast(t('toast.readonly',f.label),{type:'warn'});return;}const added=['screenshot-'+pad(rnd(1,999),3)+'.png','notes.md','report.pdf'].map(n=>F(n,rnd(40,900)*KB,0));added.forEach(n=>{n.parent=state.cwd;state.cwd.children.push(n);});invalidate(state.cwd);startTask({kind:'add',name:state.archive.name,files:added,total:added.reduce((s,x)=>s+x.size,0)});renderContent();renderStatus();}
+
+/* ---------- 导航与菜单 ---------- */
+function openArchive(id){const a=ARCHIVES.find(x=>x.id===id);if(!a)return;state.archive=a;state.hist=[];state.histIdx=-1;state.expanded=new Set();navigate(a.get());toast(t('toast.opened',esc(a.name)),{type:'info',ms:1800});}
+function navigate(dir,noHist){state.cwd=dir;state.sel.clear();state.focusId=null;state.anchorId=null;state.query='';ancestors(dir).forEach(x=>state.expanded.add(x.id));if(!noHist){state.hist=state.hist.slice(0,state.histIdx+1);state.hist.push(dir);state.histIdx=state.hist.length-1;}state.view='browser';state.sbOpen=false;render();}
+function openNode(n){if(n.kind==='dir')navigate(n);else openPreview(n);}
+function selectAll(){LIST.forEach(n=>state.sel.add(n.id));renderContent();renderStatus();renderCmdbar();}
+function extractHere(nodes){const files=filesOf(nodes);startTask({kind:'extract',name:state.archive.name,files,total:files.reduce((s,f)=>s+f.size,0),dest:downloadsDir()+SEP(),overwrite:'skip'});}
+function copyPath(n){const p=pathOf(n);const done=()=>toast(t('toast.copied'),{type:'info'});if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(p).then(done,done);else done();}
+function rowMenu(x,y,n){const f=FORMATS[state.archive.fmt],nodes=selectionNodes(),one=nodes.length===1;
+ openCtx(x,y,[{label:n.kind==='dir'?t('cmd.open'):t('cmd.preview'),icon:n.kind==='dir'?'folderOpen':'eye',kbd:'Enter',fn:()=>openNode(n)},
+  n.kind!=='dir'?{label:t('cmd.openWith'),icon:'external',fn:()=>toast(t('toast.openWith'),{type:'info'})}:null,{sep:true},
+  {label:t('cmd.extractSel'),icon:'extract',kbd:'Ctrl+E',fn:()=>openExtract(state.archive,nodes)},{label:t('cmd.extractHere'),icon:'download',fn:()=>extractHere(nodes)},{sep:true},
+  {label:t('cmd.copyPath'),icon:'copy',fn:()=>copyPath(n)},{label:t('cmd.rename'),icon:'edit',kbd:'F2',disabled:!one||!!f.readonly,fn:()=>openRename(n)},{label:t('cmd.delete'),icon:'trash',kbd:'Del',disabled:!!f.readonly,cls:'danger',fn:()=>deleteNodes(nodes)},{sep:true},
+  {label:t('cmd.props'),icon:'info',kbd:'Alt+Enter',disabled:!one,fn:()=>openProps(n)}].filter(Boolean));}
+function bgMenu(x,y){const f=FORMATS[state.archive.fmt];openCtx(x,y,[{label:t('cmd.add'),icon:'plus',disabled:!!f.readonly,fn:addFiles},{label:t('cmd.newFolder'),icon:'folder',disabled:!!f.readonly,fn:()=>{const d=D('New folder',[],0);d.parent=state.cwd;state.cwd.children.push(d);invalidate(state.cwd);renderContent();renderSidebar();}},{sep:true},{label:t('cmd.selectAll'),icon:'check',kbd:'Ctrl+A',fn:selectAll},{label:t('cmd.extract'),icon:'extract',fn:()=>openExtract(state.archive)},{label:t('cmd.mount'),icon:'drive',kbd:'Ctrl+M',fn:()=>openMount(state.archive)}]);}
+function moreMenu(btn){const r=btn.getBoundingClientRect(),f=FORMATS[state.archive.fmt],nodes=selectionNodes();
+ openCtx(r.left,r.bottom+4,[{label:t('cmd.convert'),icon:'refresh',fn:()=>toast(t('toast.proto'),{type:'info'})},{label:t('cmd.hash'),icon:'hash',fn:()=>startTask({kind:'test',name:state.archive.name,files:filesOf([state.archive.get()]),total:stats(state.archive.get()).size})},{label:t('cmd.encoding'),icon:'globe',fn:()=>toast(t('toast.proto'),{type:'info'})},{sep:true},{label:t('cmd.rename'),icon:'edit',disabled:nodes.length!==1||!!f.readonly,fn:()=>openRename(nodes[0])},{label:t('cmd.copyPath'),icon:'copy',disabled:!nodes.length,fn:()=>copyPath(nodes[0])},{label:t('cmd.selectAll'),icon:'check',kbd:'Ctrl+A',fn:selectAll}]);}
+function shellDemo(){const a=ARCHIVES[1],r=a.get(),files=filesOf([r]);const tk=startTask({kind:'extract',name:a.name,files,total:stats(r).size,dest:downloadsDir()+SEP()+safeName(a.name)+SEP(),overwrite:'skip',mini:true});state.miniTask=tk;renderMini();}
+
+/* ---------- 选择与键盘 ---------- */
+function refreshSel(){renderContent();renderStatus();renderCmdbar();}
+function clickRow(id,e){const idx=LIST.findIndex(n=>n.id===id);if(e.shiftKey&&state.anchorId!=null){const a=LIST.findIndex(n=>n.id===state.anchorId);if(a>=0){if(!(e.ctrlKey||e.metaKey))state.sel.clear();for(let i=Math.min(a,idx);i<=Math.max(a,idx);i++)state.sel.add(LIST[i].id);}}else if(e.ctrlKey||e.metaKey){if(state.sel.has(id))state.sel.delete(id);else state.sel.add(id);state.anchorId=id;}else{state.sel.clear();state.sel.add(id);state.anchorId=id;}state.focusId=id;refreshSel();}
+function gridCols(){const g=$('.gridv');if(!g||!g.firstElementChild)return 1;return Math.max(1,Math.floor(g.clientWidth/(g.firstElementChild.getBoundingClientRect().width+6)));}
+function focusNode(n,extend){if(extend)state.sel.add(n.id);else{state.sel.clear();state.sel.add(n.id);state.anchorId=n.id;}state.focusId=n.id;refreshSel();const el=$(`[data-id="${n.id}"]`);if(el)el.scrollIntoView({block:'nearest'});}
+function moveFocus(delta,e){if(!LIST.length)return;let i=LIST.findIndex(n=>n.id===state.focusId);i=i<0?0:Math.max(0,Math.min(LIST.length-1,i+delta));focusNode(LIST[i],e.shiftKey);}
+document.addEventListener('keydown',e=>{
+ const inField=/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName),mod=e.ctrlKey||e.metaKey;
+ if(e.key==='Escape'){if(state.ctx){closeCtx();return;}if(state.modals.length){closeTopModal();return;}if(state.drawer){state.drawer=false;renderDrawer();return;}if(state.sbOpen){state.sbOpen=false;applyChrome();return;}}
+ if(mod&&e.shiftKey&&e.key.toLowerCase()==='d'){e.preventDefault();toggleAppearance();return;}
+ if(mod&&e.key===','){e.preventDefault();showSettings();return;}
+ if(state.modals.length||inField)return;
+ if(mod&&e.key.toLowerCase()==='f'){e.preventDefault();const s=$('#search');if(s)s.focus();return;}
+ if(mod&&!e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();openCompress(state.view==='browser'?selectionNodes():[]);return;}
+ if(state.view!=='browser')return;
+ const k=e.key.toLowerCase();
+ if(mod&&k==='e'){e.preventDefault();openExtract(state.archive,selectionNodes());return;}
+ if(mod&&k==='m'){e.preventDefault();openMount(state.archive);return;}
+ if(mod&&k==='a'){e.preventDefault();selectAll();return;}
+ if(mod&&k==='t'){e.preventDefault();command('test');return;}
+ if(mod&&e.key==='1'){state.vm='table';renderCmdbar();renderContent();return;}
+ if(mod&&e.key==='2'){state.vm='grid';renderCmdbar();renderContent();return;}
+ if(mod)return;
+ if(e.key==='ArrowDown'){e.preventDefault();moveFocus(state.vm==='grid'?gridCols():1,e);}
+ else if(e.key==='ArrowUp'){e.preventDefault();moveFocus(state.vm==='grid'?-gridCols():-1,e);}
+ else if(e.key==='ArrowRight'&&state.vm==='grid'){e.preventDefault();moveFocus(1,e);}
+ else if(e.key==='ArrowLeft'&&state.vm==='grid'){e.preventDefault();moveFocus(-1,e);}
+ else if(e.key==='Home'){e.preventDefault();moveFocus(-LIST.length,e);}
+ else if(e.key==='End'){e.preventDefault();moveFocus(LIST.length,e);}
+ else if(e.key==='Enter'){const n=NODES.get(state.focusId);if(n){if(e.altKey)openProps(n);else openNode(n);}}
+ else if(e.key==='Backspace'){if(state.cwd.parent)navigate(state.cwd.parent);}
+ else if(e.key==='Delete'){deleteNodes(selectionNodes());}
+ else if(e.key==='F2'){const n=selectionNodes();if(n.length===1)openRename(n[0]);}
+ else if(e.key===' '){e.preventDefault();const n=NODES.get(state.focusId);if(n&&n.kind!=='dir')openPreview(n);}
+ else if(e.key.length===1&&!e.altKey){const start=LIST.findIndex(n=>n.id===state.focusId);for(let i=1;i<=LIST.length;i++){const n=LIST[(start+i)%LIST.length];if(n.name.toLowerCase().startsWith(k)){focusNode(n,false);break;}}}
+});
+
+/* ---------- 事件分发 ---------- */
+document.addEventListener('click',e=>{
+ if(state.ctx&&!e.target.closest('.ctx'))closeCtx();
+ if(state.sbOpen&&!e.target.closest('#sidebar')&&!e.target.closest('.menu-toggle')){state.sbOpen=false;applyChrome();}
+ const row=e.target.closest('.trow,.gcell');
+ if(row&&!e.target.closest('[data-action]')){clickRow(+row.dataset.id,e);return;}
+ const a=e.target.closest('[data-action]');if(!a)return;
+ handle(a.dataset.action,a.dataset.val,a,e);
+});
+document.addEventListener('dblclick',e=>{const row=e.target.closest('.trow,.gcell');if(row){const n=NODES.get(+row.dataset.id);if(n)openNode(n);}});
+document.addEventListener('contextmenu',e=>{const c=$('#content');if(!c||state.view!=='browser'||!c.contains(e.target))return;e.preventDefault();const row=e.target.closest('.trow,.gcell');
+ if(row){const id=+row.dataset.id;if(!state.sel.has(id)){state.sel.clear();state.sel.add(id);state.focusId=id;state.anchorId=id;refreshSel();}rowMenu(e.clientX,e.clientY,NODES.get(id));}else bgMenu(e.clientX,e.clientY);});
+document.addEventListener('change',e=>{const el=e.target;
+ if(el.dataset.set){setPref(el.dataset.set,el.value);return;}
+ if(el.dataset.pref){state.prefs[el.dataset.pref]=el.type==='range'?+el.value:el.value;if(el.type==='range')renderView();return;}
+ if(el.dataset.assoc){state.prefs.assoc[el.dataset.assoc]=el.checked;return;}
+ if(el.dataset.shellitem){state.prefs.shellItems[el.dataset.shellitem]=el.checked;renderView();}
+});
+document.addEventListener('input',e=>{const el=e.target;
+ if(el.dataset.set==='fontScale'){state.fontScale=+el.value;applyTheme();const l=el.previousElementSibling;if(l)l.textContent=state.fontScale+'px';persist();}
+ else if(el.dataset.set==='accent'&&el.type==='color'){state.accent=el.value;applyTheme();persist();}
+ else if(el.dataset.pref==='cacheGB'){const l=el.previousElementSibling;if(l)l.textContent=el.value+' GB';}
+});
+document.addEventListener('dragover',e=>{const d=e.target.closest&&e.target.closest('#drop');if(d){e.preventDefault();d.classList.add('over');}});
+document.addEventListener('dragleave',e=>{const d=e.target.closest&&e.target.closest('#drop');if(d)d.classList.remove('over');});
+document.addEventListener('drop',e=>{const d=e.target.closest&&e.target.closest('#drop');if(d){e.preventDefault();d.classList.remove('over');openArchive('a2');toast(t('home.dropped'),{type:'info'});}});
+function setPref(k,v){if(k==='material')state.material=v==='toggle'?!state.material:!!v;else if(k==='fontScale')state.fontScale=+v;else state[k]=v;persist();
+ if(k==='lang'||k==='platform'||k==='sizeUnit')render();else{applyTheme();applyChrome();if(state.view==='settings')renderView();renderProtobar();renderTitlebar();renderStatus();}}
+function toggleAppearance(){state.appearance=isDark()?'light':'dark';persist();render();}
+function showSettings(tab){state.view='settings';if(tab)state.settingsTab=tab;state.sbOpen=false;render();}
+function command(c,el){const a=state.archive,nodes=state.view==='browser'?selectionNodes():[];
+ switch(c){
+  case 'new':openCompress(nodes);break;
+  case 'home-extract':openExtract(ARCHIVES[0]);break;
+  case 'add':addFiles();break;
+  case 'extract':openExtract(a,nodes);break;
+  case 'mount':openMount(a);break;
+  case 'test':startTask({kind:'test',name:a.name,files:filesOf([a.get()]),total:stats(a.get()).size});break;
+  case 'delete':deleteNodes(nodes);break;
+  case 'props':if(nodes[0])openProps(nodes[0]);break;
+  case 'more':moreMenu(el);break;
+  case 'clear-search':state.query='';renderTitlebar();renderContent();renderStatus();break;
+ }}
+function handle(act,val,el,e){
+ switch(act){
+  case 'nav':if(val==='settings')showSettings();else{state.view='home';state.sbOpen=false;render();if(val!=='home')setTimeout(()=>{const c=$('.cards');if(c)c.scrollIntoView({behavior:'smooth',block:'start'});},60);}break;
+  case 'open':openArchive(val);break;
+  case 'tree':{const n=NODES.get(+val);if(n)navigate(n);break;}
+  case 'expand':{e.stopPropagation();const id=+val;if(state.expanded.has(id))state.expanded.delete(id);else state.expanded.add(id);renderSidebar();break;}
+  case 'crumb':{const n=NODES.get(+val);if(n&&(n!==state.cwd||state.query))navigate(n);break;}
+  case 'hist':if(val==='up'){if(state.cwd.parent)navigate(state.cwd.parent);}else{const i=state.histIdx+(val==='back'?-1:1);if(i>=0&&i<state.hist.length){state.histIdx=i;navigate(state.hist[i],true);}}break;
+  case 'sort':if(state.sort.key===val)state.sort.dir*=-1;else state.sort={key:val,dir:1};renderContent();break;
+  case 'vm':state.vm=val;renderCmdbar();renderContent();break;
+  case 'cmd':command(val,el);break;
+  case 'toggle-sb':state.sbCollapsed=!state.sbCollapsed;persist();applyChrome();renderSidebar();break;
+  case 'sb-open':state.sbOpen=!state.sbOpen;applyChrome();break;
+  case 'theme-toggle':toggleAppearance();break;
+  case 'tasks':state.drawer=true;renderDrawer();break;
+  case 'drawer-close':state.drawer=false;renderDrawer();break;
+  case 'tasks-clear':state.tasks=state.tasks.filter(x=>x.state==='running'||x.state==='paused');renderTasks();break;
+  case 'task':{const [op,id]=val.split(':');const tk=state.tasks.find(x=>x.id===+id);if(!tk)break;if(op==='pause')tk.state='paused';else if(op==='resume'){tk.state='running';ensureTick();}else if(op==='cancel'){tk.state='cancelled';toast(t('toast.cancelled'),{type:'info'});if(tk.mini)state.miniTask=null;}renderTasks();break;}
+  case 'mini-bg':state.miniTask=null;renderMini();toast(t('task.background'),{type:'info',ms:1500});break;
+  case 'mount-eject':{const m=state.mounts.find(x=>x.id===val);if(m){state.mounts=state.mounts.filter(x=>x!==m);renderSidebar();renderStatus();if(state.view==='settings')renderView();toast(t('mount.ejected',esc(m.label)),{type:'info'});}break;}
+  case 'settings-tab':state.settingsTab=val;renderView();break;
+  case 'set':setPref(el.dataset.set,val);break;
+  case 'set-appearance':state.appearance=val;persist();render();break;
+  case 'set-accent':state.accent=val;persist();applyTheme();renderView();renderProtobar();break;
+  case 'set-density':state.density=val;persist();applyChrome();renderView();break;
+  case 'set-icons':state.iconStyle=val;persist();applyChrome();renderView();break;
+  case 'set-shell':state.shellStyle=val;persist();renderView();break;
+  case 'pref-toggle':state.prefs[val]=!state.prefs[val];renderView();break;
+  case 'platform':state.platform=val;persist();render();break;
+  case 'win-ctl':toast(t('toast.winctl'),{type:'info'});break;
+  case 'toast':toast(t(val),{type:'info'});break;
+  case 'shell-demo':shellDemo();break;
+  case 'proto-reset':try{localStorage.removeItem('omnizip-proto');}catch(x){}location.reload();break;
+ }}
+
+/* ---------- 启动 ---------- */
+function init(){
+ if(window.matchMedia){const mq=window.matchMedia('(prefers-color-scheme: dark)');if(mq.addEventListener)mq.addEventListener('change',()=>{if(state.appearance==='system')render();});}
+ if(window.MutationObserver)new MutationObserver(()=>{if(state.appearance==='system')render();}).observe(root,{attributes:true,attributeFilter:['data-theme']});
+ render();
+}
+init();
+})();
+</script>
+</body>
+</html>

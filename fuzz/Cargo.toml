@@ -1,0 +1,82 @@
+[package]
+name = "omnizip-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Fuzz targets for every OmniZip parser (docs/10-build-release.md §7). Run with cargo-fuzz on nightly."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+omnizip-core = { path = "../crates/omnizip-core" }
+omnizip-formats = { path = "../crates/omnizip-formats" }
+omnizip-vfs = { path = "../crates/omnizip-vfs" }
+
+# Not part of the main workspace: cargo-fuzz builds with its own flags and nightly toolchain.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "detect"
+path = "fuzz_targets/detect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip"
+path = "fuzz_targets/zip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sevenz"
+path = "fuzz_targets/sevenz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar"
+path = "fuzz_targets/tar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rar"
+path = "fuzz_targets/rar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mount"
+path = "fuzz_targets/mount.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sanitize"
+path = "fuzz_targets/sanitize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "encoding"
+path = "fuzz_targets/encoding.rs"
+test = false
+doc = false
+bench = false

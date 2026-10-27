@@ -1,0 +1,378 @@
+use std::{fs, path::Path, sync::Arc};
+
+use omnizip_core::{
+    CollectOptions, ExtractOptions, NullProgress, OverwriteMode, Selection, UpdateOp, extract,
+    job::FixedPassword, source,
+};
+
+use super::*;
+
+fn ctx() -> JobCtx {
+    JobCtx::default()
+}
+
+fn pw_ctx(pw: &str) -> JobCtx {
+    JobCtx::new(Arc::new(NullProgress), Arc::new(FixedPassword(pw.into())))
+}
+
+fn sample_tree(root: &Path) -> std::path::PathBuf {
+    let p = root.join("项目");
+    fs::create_dir_all(p.join("src/empty")).unwrap();
+    fs::write(
+        p.join("src/main.rs"),
+        "fn main() { println!(\"hi\"); }\n".repeat(50),
+    )
+    .unwrap();
+    fs::write(p.join("说明.txt"), "中文内容".repeat(100)).unwrap();
+    p
+}
+
+fn build(dir: &Path, opts: &WriteOptions) -> std::path::PathBuf {
+    let src = sample_tree(dir);
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    let dest = dir.join("out.zip");
+    ZipEngine.create(&dest, &sources, opts, &ctx()).unwrap();
+    dest
+}
+
+fn open(path: &Path) -> Box<dyn ArchiveReader> {
+    ZipEngine
+        .open(path, FormatId::Zip, &OpenOptions::default(), &ctx())
+        .unwrap()
+}
+
+#[test]
+fn round_trip_with_unicode_names() {
+    let d = tempfile::tempdir().unwrap();
+    let zip = build(d.path(), &WriteOptions::default());
+    let mut r = open(&zip);
+    let names: Vec<_> = r.entries().iter().map(|e| e.path.clone()).collect();
+    assert!(names.contains(&"项目/说明.txt".to_owned()), "{names:?}");
+    assert!(names.contains(&"项目/src/empty/".to_owned()), "{names:?}");
+    assert_eq!(
+        r.info().encoding,
+        None,
+        "UTF-8 flagged names need no detection"
+    );
+    assert_eq!(r.info().methods, vec!["Deflate".to_owned()]);
+
+    let out = d.path().join("x");
+    let opts = ExtractOptions {
+        destination: out.clone(),
+        ..Default::default()
+    };
+    let report = extract(r.as_mut(), &opts, Selection::all(), &ctx()).unwrap();
+    assert_eq!(report.files, 2);
+    assert_eq!(
+        fs::read_to_string(out.join("项目/说明.txt")).unwrap(),
+        "中文内容".repeat(100),
+        "single top-level folder: no extra wrapper folder"
+    );
+    assert!(out.join("项目/src/empty").is_dir());
+}
+
+#[test]
+fn every_level_and_method_round_trips() {
+    for level in Level::ALL {
+        for method in [None, Some("bzip2"), Some("zstd"), Some("xz")] {
+            let d = tempfile::tempdir().unwrap();
+            let opts = WriteOptions {
+                level,
+                method: method.map(str::to_owned),
+                ..Default::default()
+            };
+            let zip = build(d.path(), &opts);
+            let mut r = open(&zip);
+            let rep = omnizip_core::test(r.as_mut(), Selection::all(), &ctx()).unwrap();
+            assert!(
+                rep.warnings.is_empty(),
+                "{level:?} {method:?}: {:?}",
+                rep.warnings
+            );
+            assert_eq!(rep.files, 2);
+        }
+    }
+}
+
+#[test]
+fn unsupported_write_method_is_reported() {
+    let opts = WriteOptions {
+        method: Some("lzma".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        method_and_level(&opts).unwrap_err().code(),
+        ErrorCode::UnsupportedMethod
+    );
+}
+
+#[test]
+fn aes_encryption() {
+    let d = tempfile::tempdir().unwrap();
+    let opts = WriteOptions {
+        password: Some("s3cret".into()),
+        ..Default::default()
+    };
+    let zip = build(d.path(), &opts);
+    let mut r = open(&zip);
+    assert!(r.info().encrypted);
+    assert_eq!(r.info().encryption.as_deref(), Some("AES-256"));
+
+    // No password available → PasswordRequired.
+    let o = ExtractOptions {
+        destination: d.path().join("a"),
+        ..Default::default()
+    };
+    let err = extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::PasswordRequired);
+
+    // Wrong password → WrongPassword after the retry budget.
+    let mut r = open(&zip);
+    let err = extract(r.as_mut(), &o, Selection::all(), &pw_ctx("nope")).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::WrongPassword);
+
+    let mut r = open(&zip);
+    let o = ExtractOptions {
+        destination: d.path().join("b"),
+        ..Default::default()
+    };
+    extract(r.as_mut(), &o, Selection::all(), &pw_ctx("s3cret")).unwrap();
+    assert!(d.path().join("b/项目/src/main.rs").is_file());
+}
+
+#[test]
+fn update_delete_rename_add() {
+    let d = tempfile::tempdir().unwrap();
+    let zip = build(d.path(), &WriteOptions::default());
+    let before = fs::metadata(&zip).unwrap().len();
+    let extra = d.path().join("new.txt");
+    fs::write(&extra, "added").unwrap();
+    let ops = vec![
+        UpdateOp::Delete {
+            paths: vec!["项目/src".into()],
+        },
+        UpdateOp::Rename {
+            from: "项目/说明.txt".into(),
+            to: "项目/README.txt".into(),
+        },
+        UpdateOp::Add {
+            sources: vec![Source::file(&extra, "项目/docs/new.txt").unwrap()],
+        },
+    ];
+    ZipEngine
+        .update(&zip, FormatId::Zip, &ops, &WriteOptions::default(), &ctx())
+        .unwrap();
+    let r = open(&zip);
+    let mut names: Vec<_> = r.entries().iter().map(|e| e.path.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["项目/", "项目/README.txt", "项目/docs/new.txt"]);
+    assert!(fs::metadata(&zip).unwrap().len() < before);
+    let leftovers = fs::read_dir(d.path()).unwrap().filter(|e| {
+        e.as_ref()
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".omnizip-")
+    });
+    assert_eq!(leftovers.count(), 0);
+}
+
+#[test]
+fn split_volumes_round_trip() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("blob.bin");
+    let data: Vec<u8> = (0..400_000u64)
+        .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+        .collect();
+    fs::write(&src, &data).unwrap();
+    let sources = vec![Source::file(&src, "blob.bin").unwrap()];
+    let opts = WriteOptions {
+        level: Level::Store,
+        volume_size: Some(100_000),
+        ..Default::default()
+    };
+    let rep = ZipEngine
+        .create(&d.path().join("v.zip"), &sources, &opts, &ctx())
+        .unwrap();
+    assert_eq!(rep.outputs.len(), 5);
+    let mut r = open(&d.path().join("v.zip.001"));
+    assert_eq!(r.info().volumes, 5);
+    let o = ExtractOptions {
+        destination: d.path().join("x"),
+        ..Default::default()
+    };
+    extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap();
+    assert_eq!(fs::read(d.path().join("x/blob.bin")).unwrap(), data);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hand-made archives: legacy encodings and hostile paths cannot be produced by ZipWriter.
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut c = 0xFFFF_FFFFu32;
+    for &b in data {
+        c ^= u32::from(b);
+        for _ in 0..8 {
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0xEDB8_8320
+            } else {
+                c >> 1
+            };
+        }
+    }
+    !c
+}
+
+/// A stored ZIP with raw (un-flagged) names.
+fn raw_zip(entries: &[(&[u8], &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in entries {
+        let off = out.len() as u32;
+        let crc = crc32(data);
+        let mut h = Vec::new();
+        h.extend_from_slice(b"PK\x03\x04");
+        h.extend_from_slice(&20u16.to_le_bytes());
+        h.extend_from_slice(&0u16.to_le_bytes()); // flags: no UTF-8
+        h.extend_from_slice(&0u16.to_le_bytes()); // stored
+        h.extend_from_slice(&0u16.to_le_bytes());
+        h.extend_from_slice(&0x5B21u16.to_le_bytes());
+        h.extend_from_slice(&crc.to_le_bytes());
+        h.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        h.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        h.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        h.extend_from_slice(&0u16.to_le_bytes());
+        h.extend_from_slice(name);
+        out.extend_from_slice(&h);
+        out.extend_from_slice(data);
+
+        central.extend_from_slice(b"PK\x01\x02");
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0x5B21u16.to_le_bytes());
+        central.extend_from_slice(&crc.to_le_bytes());
+        central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0; 8]);
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&off.to_le_bytes());
+        central.extend_from_slice(name);
+    }
+    let cd_off = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(b"PK\x05\x06");
+    out.extend_from_slice(&[0; 4]);
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&cd_off.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+fn gbk(s: &str) -> Vec<u8> {
+    let enc = omnizip_core::encoding::NameEncoding::from_label("gb18030").unwrap();
+    enc.encode(s).into_owned()
+}
+
+#[test]
+fn gbk_names_are_detected_and_overridable() {
+    let d = tempfile::tempdir().unwrap();
+    let names = [
+        gbk("资料/会议纪要.txt"),
+        gbk("资料/项目计划书.docx"),
+        gbk("图片/截图.png"),
+    ];
+    let bytes = raw_zip(&[(&names[0], b"a"), (&names[1], b"b"), (&names[2], b"c")]);
+    let p = d.path().join("legacy.zip");
+    fs::write(&p, bytes).unwrap();
+
+    let opts = OpenOptions {
+        locale: Some("zh-CN".into()),
+        ..Default::default()
+    };
+    let r = ZipEngine.open(&p, FormatId::Zip, &opts, &ctx()).unwrap();
+    assert_eq!(r.info().encoding.map(|e| e.label()), Some("gb18030"));
+    assert_eq!(r.entries()[0].path, "资料/会议纪要.txt");
+
+    // The user can force another encoding from the menu.
+    let opts = OpenOptions {
+        encoding: NameEncoding::from_label("cp437"),
+        ..Default::default()
+    };
+    let r = ZipEngine.open(&p, FormatId::Zip, &opts, &ctx()).unwrap();
+    assert_ne!(r.entries()[0].path, "资料/会议纪要.txt");
+    assert_eq!(r.entries()[0].raw_name, names[0]);
+}
+
+#[test]
+fn hostile_paths_never_escape() {
+    let d = tempfile::tempdir().unwrap();
+    let bytes = raw_zip(&[
+        (b"../escape.txt", b"x"),
+        (b"..\\escape2.txt", b"x"),
+        (b"/abs.txt", b"x"),
+        (b"C:/Windows/evil.dll", b"x"),
+        (b"ok/fine.txt", b"fine"),
+        (b"ok/CON.txt", b"reserved"),
+    ]);
+    let p = d.path().join("evil.zip");
+    fs::write(&p, bytes).unwrap();
+    let mut r = open(&p);
+    let dest = d.path().join("out");
+    let o = ExtractOptions {
+        destination: dest.clone(),
+        overwrite: OverwriteMode::Overwrite,
+        ..Default::default()
+    };
+    let rep = extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap();
+    assert!(!d.path().join("escape.txt").exists());
+    assert!(!d.path().join("escape2.txt").exists());
+    assert!(
+        dest.join("evil/ok/fine.txt").is_file(),
+        "several top-level items → wrapper folder"
+    );
+    assert_eq!(rep.exit_code(), 8);
+    assert!(rep.skipped >= 3, "{rep:?}");
+    let walked: Vec<_> = walk(&dest);
+    assert!(walked.iter().all(|p| p.starts_with(&dest)));
+}
+
+fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        }
+        out.push(p);
+    }
+    out
+}
+
+#[test]
+fn corrupt_data_is_reported_not_written() {
+    let d = tempfile::tempdir().unwrap();
+    let mut bytes = raw_zip(&[(b"a.txt", b"hello world")]);
+    // Flip a data byte so the CRC no longer matches.
+    let pos = bytes.windows(5).position(|w| w == b"hello").unwrap();
+    bytes[pos] = b'j';
+    let p = d.path().join("bad.zip");
+    fs::write(&p, bytes).unwrap();
+    let mut r = open(&p);
+    let rep = omnizip_core::test(r.as_mut(), Selection::all(), &ctx()).unwrap();
+    assert_eq!(rep.warnings.len(), 1);
+    assert_eq!(rep.warnings[0].code, ErrorCode::CrcMismatch);
+    let mut r = open(&p);
+    let o = ExtractOptions {
+        destination: d.path().join("out"),
+        ..Default::default()
+    };
+    let rep = extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap();
+    assert_eq!(rep.warnings[0].code, ErrorCode::CrcMismatch);
+    assert!(!d.path().join("out/a.txt").exists());
+}

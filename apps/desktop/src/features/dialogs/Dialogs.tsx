@@ -1,0 +1,844 @@
+// Dialogs (docs/04-ui-design.md §4.2–§4.10). The host renders the top-most open dialog.
+
+import { open as pick, save } from '@tauri-apps/plugin-dialog';
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { FileIcon, Icon } from '../../components/Icon';
+import { Modal, PasswordInput, Segmented } from '../../components/ui';
+import { api } from '../../lib/api';
+import { archiveStem, basename, dirname, joinPath } from '../../lib/format';
+import { useFmt } from '../../lib/hooks';
+import type { FormatId, Level, NodeInfo, OverwriteMode, PathStats, Preview } from '../../lib/types';
+import { type Dialog, useApp } from '../../store/app';
+
+const LEVELS: Level[] = ['store', 'fastest', 'fast', 'normal', 'better', 'best', 'ultra'];
+/** Rough output size ratio and throughput (MB/s) per level, for the estimate line. */
+const LEVEL_RATIO = [1, 0.72, 0.6, 0.5, 0.44, 0.4, 0.37];
+const LEVEL_SPEED = [900, 320, 180, 110, 70, 40, 22];
+
+function useClose(d: Dialog) {
+  const close = useApp((s) => s.closeDialog);
+  return () => close(d.id);
+}
+
+// ----------------------------------------------------------------------------------- extract
+
+function defaultDestination(paths: string[] | undefined, archivePath: string | undefined): string {
+  const s = useApp.getState();
+  const mode = s.settings?.general.extract_to ?? 'ask';
+  const sys = s.boot?.system;
+  const base = paths?.[0] ?? archivePath ?? '';
+  if (mode === 'downloads' && sys?.downloadsDir) return sys.downloadsDir;
+  if (base) return dirname(base);
+  return sys?.downloadsDir ?? sys?.homeDir ?? '';
+}
+
+function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const close = useClose(d);
+  const archive = useApp((s) => s.archive);
+  const settings = useApp((s) => s.settings)!;
+  const sys = useApp((s) => s.boot!.system);
+  const encodings = useApp((s) => s.boot!.encodings);
+  const fromDisk = !!d.paths?.length;
+  const name = fromDisk ? (d.paths!.length === 1 ? basename(d.paths![0]) : t('extract.batch', { count: d.paths!.length })) : archive?.name ?? '';
+  const [dest, setDest] = useState(() => defaultDestination(d.paths, archive?.path));
+  const [pathMode, setPathMode] = useState<'smart' | 'full' | 'flat'>(d.nodes?.length ? 'full' : 'smart');
+  const [overwrite, setOverwrite] = useState<OverwriteMode>('ask');
+  const [password, setPassword] = useState('');
+  const [encoding, setEncoding] = useState('auto');
+  const [keepBroken, setKeepBroken] = useState(false);
+  const [openAfter, setOpenAfter] = useState(settings.general.open_after_extract);
+  const [deleteAfter, setDeleteAfter] = useState(false);
+  const [each, setEach] = useState((d.paths?.length ?? 0) > 1);
+  const [scope, setScope] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    if (!fromDisk && archive) void api.selectionSize(archive.id, d.nodes ?? []).then(setScope);
+  }, [fromDisk, archive, d.nodes]);
+  const needsPassword = fromDisk || archive?.info.encrypted;
+  const destinations = [
+    [defaultDestination(d.paths, archive?.path), t('extract.destSame')],
+    [sys.downloadsDir, t('extract.destDownloads')],
+    [sys.desktopDir, t('extract.destDesktop')],
+  ].filter((x): x is [string, string] => !!x[0]);
+
+  const start = async () => {
+    try {
+      await api.extract({
+        archiveId: fromDisk ? undefined : archive?.id,
+        paths: fromDisk ? d.paths : undefined,
+        nodes: d.nodes ?? [],
+        relativeTo: d.relativeTo,
+        destination: dest,
+        pathMode,
+        overwrite,
+        password: password || null,
+        encoding: encoding === 'auto' ? null : encoding,
+        openAfter,
+        deleteAfter: fromDisk && deleteAfter,
+        keepBroken,
+        eachToFolder: fromDisk && each,
+      });
+      if (!fromDisk && password && archive) void api.setArchivePassword(archive.id, password);
+      close();
+    } catch (e) {
+      useApp.getState().reportError(e);
+    }
+  };
+
+  return (
+    <Modal
+      title={t('extract.title', { name })}
+      onClose={close}
+      width={560}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button type="button" className="btn primary" disabled={!dest} onClick={() => void start()}>
+            <Icon name="extract" />
+            <span>{t('extract.start')}</span>
+          </button>
+        </>
+      }
+    >
+      <div className="frow">
+        <label htmlFor="ex-dest">{t('extract.to')}</label>
+        <div className="inline">
+          <input id="ex-dest" className="inp mono grow" value={dest} list="ex-dests" onChange={(e) => setDest(e.target.value)} />
+          <datalist id="ex-dests">
+            {destinations.map(([p, l]) => (
+              <option key={p} value={p}>{l}</option>
+            ))}
+          </datalist>
+          <button
+            type="button"
+            className="btn outline"
+            onClick={async () => {
+              const p = await pick({ directory: true, multiple: false, defaultPath: dest || undefined });
+              if (typeof p === 'string') setDest(p);
+            }}
+          >
+            {t('common.browse')}
+          </button>
+        </div>
+      </div>
+      <div className="frow">
+        <label>{t('extract.paths')}</label>
+        <Segmented
+          value={pathMode}
+          onChange={setPathMode}
+          options={[['smart', t('extract.smart')], ['full', t('extract.full')], ['flat', t('extract.flat')]]}
+        />
+      </div>
+      <div className="frow">
+        <label htmlFor="ex-ow">{t('extract.overwrite')}</label>
+        <select id="ex-ow" className="sel" style={{ maxWidth: 240 }} value={overwrite} onChange={(e) => setOverwrite(e.target.value as OverwriteMode)}>
+          {(['ask', 'skip', 'overwrite', 'overwrite-older', 'rename'] as OverwriteMode[]).map((m) => (
+            <option key={m} value={m}>{t(`extract.overwriteModes.${m}`)}</option>
+          ))}
+        </select>
+      </div>
+      {needsPassword && (
+        <div className="frow">
+          <label>{t('extract.password')}</label>
+          <PasswordInput value={password} onChange={setPassword} label={t('extract.password')} />
+        </div>
+      )}
+      <details className="adv">
+        <summary>
+          <Icon name="chevronRight" />
+          {t('extract.more')}
+          <span className="hint">{t('extract.moreHint')}</span>
+        </summary>
+        <div className="advbody">
+          <div className="frow">
+            <label htmlFor="ex-enc">{t('extract.encoding')}</label>
+            <select id="ex-enc" className="sel" value={encoding} onChange={(e) => setEncoding(e.target.value)}>
+              <option value="auto">{t('settings.language.encodingAuto')}</option>
+              {encodings.map((x) => (
+                <option key={x} value={x}>{x}</option>
+              ))}
+            </select>
+          </div>
+          <label className="chk">
+            <input type="checkbox" checked={keepBroken} onChange={(e) => setKeepBroken(e.target.checked)} /> {t('extract.keepBroken')}
+          </label>
+        </div>
+      </details>
+      <div className="inline" style={{ gap: '8px 20px' }}>
+        <label className="chk">
+          <input type="checkbox" checked={openAfter} onChange={(e) => setOpenAfter(e.target.checked)} /> {t('extract.openAfter')}
+        </label>
+        {fromDisk && (
+          <label className="chk">
+            <input type="checkbox" checked={deleteAfter} onChange={(e) => setDeleteAfter(e.target.checked)} /> {t('extract.deleteAfter')}
+          </label>
+        )}
+        {fromDisk && (d.paths?.length ?? 0) > 1 && (
+          <label className="chk">
+            <input type="checkbox" checked={each} onChange={(e) => setEach(e.target.checked)} /> {t('extract.each')}
+          </label>
+        )}
+      </div>
+      {scope && (
+        <div className="hint">
+          {d.nodes?.length ? t('extract.scope', { count: d.nodes.length, size: fmt.size(scope[0]) }) : t('extract.scopeAll', { size: fmt.size(scope[0]) })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------- compress
+
+const WRITABLE: FormatId[] = ['zip', '7z', 'tar.zst', 'tar.gz', 'tar.xz', 'tar.bz2', 'tar', 'gz', 'xz', 'zst', 'bz2'];
+
+function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const close = useClose(d);
+  const boot = useApp((s) => s.boot)!;
+  const settings = useApp((s) => s.settings)!;
+  const sep = boot.system.pathSeparator;
+  const [stats, setStats] = useState<PathStats | null>(null);
+  const [format, setFormat] = useState<FormatId>((settings.formats.default_format as FormatId) || 'zip');
+  const [level, setLevel] = useState(Math.max(0, LEVELS.indexOf(settings.formats.default_level)));
+  const [dir, setDir] = useState('');
+  const [stem, setStem] = useState('');
+  const [password, setPassword] = useState('');
+  const [encryptNames, setEncryptNames] = useState(true);
+  const [volume, setVolume] = useState<'none' | 'fat32' | 'dvd' | 'email' | 'custom'>('none');
+  const [customMb, setCustomMb] = useState(100);
+  const [method, setMethod] = useState('');
+  const [solid, setSolid] = useState(true);
+  const [comment, setComment] = useState('');
+  const [exclude, setExclude] = useState('');
+  const [deleteSource, setDeleteSource] = useState(false);
+  const [verify, setVerify] = useState(true);
+  const [openAfter, setOpenAfter] = useState(false);
+  const [exists, setExists] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => {
+    void api.pathStats(d.paths).then((s) => {
+      setStats(s);
+      setDir(s.commonParent ?? boot.system.downloadsDir ?? '');
+      setStem(s.suggestedName);
+    });
+  }, [d.paths, boot.system.downloadsDir]);
+  const ext = '.' + format;
+  const dest = dir ? joinPath(dir, stem + ext, sep) : '';
+  useEffect(() => {
+    if (dest) void api.exists(dest).then(setExists);
+  }, [dest]);
+
+  const support = boot.formats.find((f) => f.format === format);
+  const canEncrypt = support?.capabilities.includes('ENCRYPT') ?? false;
+  const singleFile = support?.capabilities.includes('SINGLE_FILE') ?? false;
+  const methods = boot.writeMethods[format] ?? [];
+  const tooMany = singleFile && (stats?.files ?? 0) !== 1;
+  const bytes = stats?.bytes ?? 0;
+  const factor = format === 'zip' ? 1.1 : format.startsWith('tar') ? 1.05 : 1;
+  const out = Math.round(bytes * LEVEL_RATIO[level] * factor);
+  const secs = bytes / (LEVEL_SPEED[level] * 1024 * 1024);
+  const volumeSize =
+    volume === 'fat32' ? 4 * 1024 ** 3 - 1 : volume === 'dvd' ? 4_700_000_000 : volume === 'email' ? 25 * 1024 * 1024 : volume === 'custom' ? customMb * 1024 * 1024 : null;
+  const strength = useMemo(() => {
+    let s = 0;
+    if (password.length >= 8) s += 1;
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password)) s += 1;
+    if (/\d/.test(password)) s += 1;
+    if (/[^\w]/.test(password) || password.length >= 14) s += 1;
+    return s;
+  }, [password]);
+
+  const start = async () => {
+    try {
+      await api.compress({
+        paths: d.paths,
+        destination: dest,
+        format,
+        level: LEVELS[level],
+        method: method || null,
+        password: canEncrypt && password ? password : null,
+        encryptNames: format === '7z' && encryptNames,
+        solid,
+        volumeSize,
+        comment: comment || null,
+        exclude: exclude.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
+        deleteSource,
+        verify,
+        openAfter,
+      });
+      close();
+    } catch (e) {
+      useApp.getState().reportError(e);
+    }
+  };
+
+  const primaryFormats: FormatId[] = ['zip', '7z', 'tar.zst'];
+  return (
+    <Modal
+      title={t('compress.title')}
+      onClose={close}
+      sheet
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button type="button" className="btn primary" disabled={!dest || tooMany || !stats} onClick={() => void start()}>
+            <Icon name="package" />
+            <span>{t('compress.start')}</span>
+          </button>
+        </>
+      }
+    >
+      <div className="field">
+        <span className="flabel">{t('compress.format')}</span>
+        <div className="inline">
+          <Segmented
+            large
+            value={primaryFormats.includes(format) ? format : ('more' as FormatId)}
+            onChange={(v) => {
+              setFormat(v);
+              setMethod('');
+            }}
+            options={primaryFormats.map((f) => [f, f.toUpperCase()] as [FormatId, string])}
+          />
+          <select className="sel" style={{ flex: 'none', minWidth: 0, width: 120 }} value={primaryFormats.includes(format) ? '' : format} onChange={(e) => e.target.value && setFormat(e.target.value as FormatId)} aria-label={t('compress.more')}>
+            <option value="">{t('compress.more')} …</option>
+            {WRITABLE.filter((f) => !primaryFormats.includes(f)).map((f) => (
+              <option key={f} value={f}>{f.toUpperCase()}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="field">
+        <label htmlFor="cf-name">{t('compress.saveTo')}</label>
+        <div className="inline">
+          <input id="cf-name" className="inp grow" value={stem} onChange={(e) => setStem(e.target.value)} />
+          <span className="mono hint">{ext}</span>
+          <button
+            type="button"
+            className="btn outline"
+            onClick={async () => {
+              const p = await save({ defaultPath: dest || undefined, filters: [{ name: format.toUpperCase(), extensions: [format.split('.').pop()!] }] });
+              if (p) {
+                setDir(dirname(p));
+                setStem(archiveStem(basename(p)));
+              }
+            }}
+          >
+            {t('common.browse')}
+          </button>
+        </div>
+        <div className="hint mono ellipsis" title={dest}>{dest}</div>
+        {stats && <div className="hint">{t('compress.sources', { count: stats.files, size: fmt.size(stats.bytes) })}</div>}
+        {exists && <div className="note warn"><Icon name="alert" /><span>{t('compress.exists', { name: stem + ext })}</span></div>}
+        {tooMany && <div className="note warn"><Icon name="alert" /><span>{t('compress.singleFile', { format: format.toUpperCase() })}</span></div>}
+      </div>
+      <div className="field">
+        <label htmlFor="cf-level">
+          {t('compress.level')} · <b style={{ color: 'var(--fg-primary)' }}>{t(`compress.levels.${LEVELS[level]}`)}</b>
+        </label>
+        <input id="cf-level" type="range" min={0} max={6} value={level} style={{ width: '100%' }} onChange={(e) => setLevel(Number(e.target.value))} />
+        <div className="levels">
+          {LEVELS.map((l) => (
+            <span key={l}>{t(`compress.levels.${l}`)}</span>
+          ))}
+        </div>
+        {bytes > 0 && (
+          <div className="est">
+            {t('compress.estimate', { from: fmt.size(bytes), to: fmt.size(out) })} · {fmt.duration(secs)}
+          </div>
+        )}
+      </div>
+      <div className="field">
+        <span className="flabel">{t('compress.password')}</span>
+        {canEncrypt ? (
+          <>
+            <div className="inline">
+              <PasswordInput value={password} onChange={setPassword} label={t('compress.password')} />
+              <span className="hint">{t('compress.strength')}</span>
+              <span className="strength" aria-hidden="true">
+                {[0, 1, 2, 3].map((i) => (
+                  <i key={i} className={i < strength ? `on${strength <= 2 ? ' w' : ''}` : ''} />
+                ))}
+              </span>
+            </div>
+            {format === '7z' && (
+              <label className="chk">
+                <input type="checkbox" checked={encryptNames} onChange={(e) => setEncryptNames(e.target.checked)} /> {t('compress.encryptNames')}
+              </label>
+            )}
+          </>
+        ) : (
+          <div className="hint">{t('compress.noEncryption', { format: format.toUpperCase() })}</div>
+        )}
+      </div>
+      <div className="frow">
+        <label htmlFor="cf-vol">{t('compress.volume')}</label>
+        <div className="inline">
+          <select id="cf-vol" className="sel" value={volume} onChange={(e) => setVolume(e.target.value as typeof volume)}>
+            {(['none', 'fat32', 'dvd', 'email', 'custom'] as const).map((v) => (
+              <option key={v} value={v}>{t(`compress.volumes.${v}`)}</option>
+            ))}
+          </select>
+          {volume === 'custom' && (
+            <input className="inp" type="number" min={1} style={{ width: 100, flex: 'none' }} value={customMb} aria-label={t('compress.customSize')} onChange={(e) => setCustomMb(Math.max(1, Number(e.target.value)))} />
+          )}
+        </div>
+      </div>
+      <details className="adv" open={moreOpen} onToggle={(e) => setMoreOpen((e.target as HTMLDetailsElement).open)}>
+        <summary>
+          <Icon name="chevronRight" />
+          {t('compress.advanced')}
+          <span className="hint">{t('compress.advancedHint')}</span>
+        </summary>
+        <div className="advbody">
+          {methods.length > 0 && (
+            <div className="frow">
+              <label htmlFor="cf-method">{t('compress.method')}</label>
+              <select id="cf-method" className="sel" value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="">{t('compress.auto')}</option>
+                {methods.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {format === '7z' && (
+            <label className="chk">
+              <input type="checkbox" checked={solid} onChange={(e) => setSolid(e.target.checked)} /> {t('compress.solid')}
+            </label>
+          )}
+          {format === 'zip' && (
+            <div className="field">
+              <label htmlFor="cf-comment">{t('compress.comment')}</label>
+              <input id="cf-comment" className="inp" value={comment} onChange={(e) => setComment(e.target.value)} />
+            </div>
+          )}
+          <div className="field">
+            <label htmlFor="cf-exclude">{t('compress.exclude')}</label>
+            <textarea id="cf-exclude" className="inp mono" rows={3} value={exclude} placeholder={'node_modules\n*.log'} onChange={(e) => setExclude(e.target.value)} />
+          </div>
+        </div>
+      </details>
+      <div className="field" style={{ gap: 8 }}>
+        <label className="chk"><input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} /> {t('compress.verify')}</label>
+        <label className="chk"><input type="checkbox" checked={openAfter} onChange={(e) => setOpenAfter(e.target.checked)} /> {t('compress.openAfter')}</label>
+        <label className="chk"><input type="checkbox" checked={deleteSource} onChange={(e) => setDeleteSource(e.target.checked)} /> {t('compress.deleteSource')}</label>
+      </div>
+    </Modal>
+  );
+}
+
+// --------------------------------------------------------------------------------- passwords
+
+function OpenPasswordDialog({ d }: { d: Extract<Dialog, { kind: 'openPassword' }> }) {
+  const { t } = useTranslation();
+  const close = useClose(d);
+  const [pw, setPw] = useState('');
+  const [error, setError] = useState(d.wrong ? t('pwd.wrong') : '');
+  const submit = async () => {
+    if (!pw) return setError(t('pwd.empty'));
+    close();
+    await useApp.getState().openArchive(d.path, pw);
+  };
+  return (
+    <Modal
+      title={t('pwd.title')}
+      onClose={close}
+      width={420}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button type="button" className="btn primary" onClick={() => void submit()}>{t('common.ok')}</button>
+        </>
+      }
+    >
+      <p className="hint" style={{ margin: 0 }}>{t('pwd.desc', { name: basename(d.path) })}</p>
+      <PasswordInput value={pw} onChange={setPw} autoFocus onEnter={() => void submit()} label={t('pwd.label')} />
+      {error && <div className="err"><Icon name="alert" /><span>{error}</span></div>}
+    </Modal>
+  );
+}
+
+function JobPasswordDialog({ d }: { d: Extract<Dialog, { kind: 'jobPassword' }> }) {
+  const { t } = useTranslation();
+  const closeDialog = useApp((s) => s.closeDialog);
+  const [pw, setPw] = useState('');
+  const answer = (value: string | null) => {
+    closeDialog(d.id);
+    void api.answer(d.jobId, d.promptId, { kind: 'password', value });
+  };
+  return (
+    <Modal
+      title={t('pwd.title')}
+      onClose={() => answer(null)}
+      width={420}
+      sticky
+      footer={
+        <>
+          <button type="button" className="btn" onClick={() => answer(null)}>{t('common.cancel')}</button>
+          <button type="button" className="btn primary" disabled={!pw} onClick={() => answer(pw)}>{t('common.ok')}</button>
+        </>
+      }
+    >
+      <p className="hint" style={{ margin: 0 }}>{t('pwd.desc', { name: d.archive })}</p>
+      <PasswordInput value={pw} onChange={setPw} autoFocus onEnter={() => pw && answer(pw)} label={t('pwd.label')} />
+      {d.attempt > 0 && <div className="err"><Icon name="alert" /><span>{t('pwd.wrong')}</span></div>}
+    </Modal>
+  );
+}
+
+// --------------------------------------------------------------------------------- conflicts
+
+function ConflictDialog({ d }: { d: Extract<Dialog, { kind: 'conflict' }> }) {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const closeDialog = useApp((s) => s.closeDialog);
+  const [all, setAll] = useState(true);
+  const c = d.data as { path: string; existingSize: number; existingMtime: number | null; incomingSize: number; incomingMtime: number | null };
+  const name = basename(c.path);
+  const newer = (c.incomingMtime ?? 0) > (c.existingMtime ?? 0);
+  const answer = (choice: 'overwrite' | 'skip' | 'rename' | 'overwrite-older' | 'abort') => {
+    closeDialog(d.id);
+    void api.answer(d.jobId, d.promptId, { kind: 'conflict', choice, applyToAll: all });
+  };
+  return (
+    <Modal
+      title={t('conflict.title', { name })}
+      onClose={() => answer('abort')}
+      width={580}
+      sticky
+      footer={
+        <>
+          <button type="button" className="btn danger" onClick={() => answer('abort')}>{t('conflict.abort')}</button>
+          <span className="grow" />
+          <button type="button" className="btn" onClick={() => answer('skip')}>{t('conflict.skip')}</button>
+          <button type="button" className="btn" onClick={() => answer('rename')}>{t('conflict.keepBoth')}</button>
+          <button type="button" className="btn" onClick={() => answer('overwrite-older')}>{t('conflict.older')}</button>
+          <button type="button" className="btn primary" onClick={() => answer('overwrite')}>{t('conflict.overwrite')}</button>
+        </>
+      }
+    >
+      <div className="conf">
+        <div className="side">
+          <h4>{t('conflict.existing')}</h4>
+          <FileIcon name={name} isDir={false} />
+          <b title={c.path}>{name}</b>
+          <span>{fmt.size(c.existingSize)}</span>
+          <span>{fmt.date(c.existingMtime)}</span>
+        </div>
+        <div className="side">
+          <h4>{t('conflict.incoming')}</h4>
+          <FileIcon name={name} isDir={false} />
+          <b>{name}</b>
+          <span>{fmt.size(c.incomingSize)}</span>
+          <span>
+            {fmt.date(c.incomingMtime)} {newer && <span className="new">· {t('conflict.newer')}</span>}
+          </span>
+        </div>
+      </div>
+      <label className="chk">
+        <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t('conflict.applyAll')}
+      </label>
+    </Modal>
+  );
+}
+
+function ConfirmDialog({ d }: { d: Extract<Dialog, { kind: 'confirm' }> }) {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const closeDialog = useApp((s) => s.closeDialog);
+  const job = useApp((s) => s.jobs[d.jobId]);
+  const data = d.data as { ratio?: number; unpacked?: number };
+  const answer = (yes: boolean) => {
+    closeDialog(d.id);
+    void api.answer(d.jobId, d.promptId, { kind: 'confirm', yes });
+  };
+  return (
+    <Modal
+      title={t('confirm.highRatioTitle')}
+      onClose={() => answer(false)}
+      width={480}
+      sticky
+      footer={
+        <>
+          <button type="button" className="btn" onClick={() => answer(true)}>{t('confirm.continue')}</button>
+          <button type="button" className="btn primary" onClick={() => answer(false)}>{t('confirm.stop')}</button>
+        </>
+      }
+    >
+      <div className="note warn">
+        <Icon name="alert" />
+        <span>{t('confirm.highRatio', { name: job?.title ?? '', ratio: data.ratio ?? 0, size: fmt.size(data.unpacked ?? 0) })}</span>
+      </div>
+    </Modal>
+  );
+}
+
+function AskDialog({ d }: { d: Extract<Dialog, { kind: 'ask' }> }) {
+  const { t } = useTranslation();
+  const close = useClose(d);
+  return (
+    <Modal
+      title={d.title}
+      onClose={close}
+      width={440}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button
+            type="button"
+            className={`btn primary`}
+            style={d.danger ? { background: 'var(--danger)' } : undefined}
+            onClick={() => {
+              close();
+              d.onConfirm();
+            }}
+          >
+            {d.confirm}
+          </button>
+        </>
+      }
+    >
+      <p style={{ margin: 0 }}>{d.message}</p>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------------------- props / preview
+
+function PropsDialog({ d }: { d: Extract<Dialog, { kind: 'props' }> }) {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const close = useClose(d);
+  const archive = useApp((s) => s.archive)!;
+  const [info, setInfo] = useState<NodeInfo | null>(null);
+  useEffect(() => {
+    void api.node(archive.id, d.node).then(setInfo);
+  }, [archive.id, d.node]);
+  const yes = (b: boolean) => t(b ? 'common.yes' : 'common.no');
+  return (
+    <Modal title={t('props.title')} onClose={close} width={480} footer={<button type="button" className="btn primary" onClick={close}>{t('common.ok')}</button>}>
+      {info && (
+        <>
+          <div className="inline" style={{ gap: 12, flexWrap: 'nowrap' }}>
+            <FileIcon name={info.name} isDir={info.isDir} kind={info.kind} />
+            <b className="ellipsis" style={{ fontSize: '1.05rem' }}>{info.name}</b>
+          </div>
+          <dl className="dl">
+            <dt>{t('props.path')}</dt>
+            <dd className="mono" title={info.path}>{info.path || '/'}</dd>
+            <dt>{t('props.size')}</dt>
+            <dd>{fmt.size(info.size)}</dd>
+            <dt>{t('props.packed')}</dt>
+            <dd>{info.packed ? fmt.size(info.packed) : '—'}</dd>
+            <dt>{t('props.ratio')}</dt>
+            <dd>{info.packed ? fmt.percent(info.packed, info.size) : '—'}</dd>
+            {info.isDir ? (
+              <>
+                <dt>{t('props.items')}</dt>
+                <dd>{info.files}</dd>
+              </>
+            ) : (
+              <>
+                <dt>{t('props.crc')}</dt>
+                <dd className="mono">{info.crc32 != null ? info.crc32.toString(16).toUpperCase().padStart(8, '0') : '—'}</dd>
+              </>
+            )}
+            <dt>{t('props.method')}</dt>
+            <dd>{info.method ?? '—'}</dd>
+            <dt>{t('props.mtime')}</dt>
+            <dd>{fmt.date(info.mtime) || '—'}</dd>
+            <dt>{t('props.encrypted')}</dt>
+            <dd>{yes(info.encrypted)}</dd>
+            {info.linkTarget && (
+              <>
+                <dt>{t('props.linkTarget')}</dt>
+                <dd className="mono">{info.linkTarget}</dd>
+              </>
+            )}
+            {info.comment && (
+              <>
+                <dt>{t('props.comment')}</dt>
+                <dd>{info.comment}</dd>
+              </>
+            )}
+          </dl>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function PreviewDialog({ d }: { d: Extract<Dialog, { kind: 'preview' }> }) {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const close = useClose(d);
+  const archive = useApp((s) => s.archive)!;
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [info, setInfo] = useState<NodeInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    void api.node(archive.id, d.node).then(setInfo);
+    api
+      .preview(archive.id, d.node)
+      .then(setPreview)
+      .catch((e) => setError(fmt.error(e)));
+  }, [archive.id, d.node, fmt]);
+  const openWith = () => void api.openExternal(archive.id, d.node).catch((e) => useApp.getState().reportError(e));
+  return (
+    <Modal
+      title={`${t('preview.title')} · ${info?.name ?? ''}`}
+      onClose={close}
+      width={760}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={openWith}>
+            <Icon name="external" />
+            <span>{t('preview.openWith')}</span>
+          </button>
+          <span className="grow" />
+          <button type="button" className="btn primary" onClick={close}>{t('common.close')}</button>
+        </>
+      }
+    >
+      {error && <div className="note danger"><Icon name="alert" /><span>{error}</span></div>}
+      {!preview && !error && <div className="hint">{t('common.loading')}</div>}
+      {preview?.kind === 'text' && (
+        <>
+          <pre className="code">{preview.text}</pre>
+          <div className="prev-meta">
+            <span>{t('preview.encoding', { encoding: preview.encoding })}</span>
+            {info && <span>{fmt.size(info.size)}</span>}
+            {preview.truncated && <span>{t('preview.truncated')}</span>}
+          </div>
+        </>
+      )}
+      {preview?.kind === 'image' && (
+        <>
+          <div className="imgprev">
+            <img src={preview.dataUrl} alt={info?.name ?? ''} />
+          </div>
+          <div className="prev-meta">
+            <span>{t('preview.dims', { width: preview.width, height: preview.height })}</span>
+            {info && <span>{fmt.size(info.size)}</span>}
+            {info && <span>{fmt.date(info.mtime)}</span>}
+          </div>
+        </>
+      )}
+      {preview?.kind === 'binary' && (
+        <>
+          <div className="hint">{t('preview.binary')}</div>
+          <pre className="code">{preview.hex}</pre>
+        </>
+      )}
+      {preview?.kind === 'unsupported' && (
+        <div className="emptyst" style={{ minHeight: 160 }}>
+          <Icon name="file" />
+          <div>{t('preview.unsupported')}</div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function RenameDialog({ d }: { d: Extract<Dialog, { kind: 'rename' }> }) {
+  const { t } = useTranslation();
+  const close = useClose(d);
+  const archive = useApp((s) => s.archive)!;
+  const [name, setName] = useState(d.name);
+  const invalid = /[\\/]/.test(name);
+  const submit = () => {
+    if (!name.trim() || invalid || name === d.name) return close();
+    close();
+    void api.rename(archive.id, d.node, name.trim()).catch((e) => useApp.getState().reportError(e));
+  };
+  return (
+    <Modal
+      title={t('rename.title')}
+      onClose={close}
+      width={420}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button type="button" className="btn primary" disabled={invalid} onClick={submit}>{t('common.ok')}</button>
+        </>
+      }
+    >
+      <div className="field">
+        <label htmlFor="rn">{t('rename.label')}</label>
+        <input
+          id="rn"
+          className="inp"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onFocus={(e) => {
+            const dot = d.name.lastIndexOf('.');
+            e.target.setSelectionRange(0, dot > 0 ? dot : d.name.length);
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+        />
+        {invalid && <div className="err"><Icon name="alert" /><span>{t('rename.invalid')}</span></div>}
+      </div>
+    </Modal>
+  );
+}
+
+function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
+  const { t } = useTranslation();
+  const close = useClose(d);
+  const archive = useApp((s) => s.archive)!;
+  return (
+    <Modal title={t('mount.title', { name: archive.name })} onClose={close} width={520} footer={<button type="button" className="btn primary" onClick={close}>{t('common.ok')}</button>}>
+      <div className="note">
+        <Icon name="info" />
+        <span>{t(`mount.class.${archive.mountClass}`, { format: archive.info.format.toUpperCase() })}</span>
+      </div>
+      <div className="note warn">
+        <Icon name="alert" />
+        <span>
+          <b>{t('mount.unavailableTitle')}</b>
+          <br />
+          {t('mount.unavailable')}
+        </span>
+      </div>
+    </Modal>
+  );
+}
+
+export function DialogHost() {
+  const dialogs = useApp((s) => s.dialogs);
+  const d = dialogs[dialogs.length - 1];
+  if (!d) return null;
+  switch (d.kind) {
+    case 'extract':
+      return <ExtractDialog key={d.id} d={d} />;
+    case 'compress':
+      return <CompressSheet key={d.id} d={d} />;
+    case 'openPassword':
+      return <OpenPasswordDialog key={d.id} d={d} />;
+    case 'jobPassword':
+      return <JobPasswordDialog key={d.id} d={d} />;
+    case 'conflict':
+      return <ConflictDialog key={d.id} d={d} />;
+    case 'confirm':
+      return <ConfirmDialog key={d.id} d={d} />;
+    case 'ask':
+      return <AskDialog key={d.id} d={d} />;
+    case 'props':
+      return <PropsDialog key={d.id} d={d} />;
+    case 'preview':
+      return <PreviewDialog key={d.id} d={d} />;
+    case 'rename':
+      return <RenameDialog key={d.id} d={d} />;
+    case 'mount':
+      return <MountDialog key={d.id} d={d} />;
+    default:
+      return null;
+  }
+}

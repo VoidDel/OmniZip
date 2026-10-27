@@ -1,0 +1,13 @@
+menu-root = OmniZip
+menu-open = OmniZip で開く
+menu-extract-here = ここに展開
+menu-extract-smart = 「{ $name }\」に展開
+menu-extract-to = 展開先を指定…
+menu-extract-each = それぞれ別のフォルダーに展開
+menu-mount = マウント
+menu-test = アーカイブをテスト
+menu-convert = 形式を変換…
+menu-add-zip = 「{ $name }.zip」に追加
+menu-add-7z = 「{ $name }.7z」に追加
+menu-add = アーカイブに追加…
+menu-tooltip = OmniZip で圧縮・展開・マウント

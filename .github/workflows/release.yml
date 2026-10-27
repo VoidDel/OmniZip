@@ -1,0 +1,72 @@
+# Tagged releases (docs/10-build-release.md §4–5).
+# The `release` environment should require a manual approval in the repository settings.
+# Signing runs only when the repository variable AZURE_SIGNING is "true" and the Azure
+# Trusted Signing secrets are configured; otherwise the draft release carries unsigned files.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Version from the tag
+        id: version
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          if ($v -notmatch '^\d+\.\d+\.\d+') { $v = "0.0.0" }
+          "value=$v" >> $env:GITHUB_OUTPUT
+      - name: NSIS installer
+        run: pnpm --filter omnizip-desktop tauri build --bundles nsis
+      - name: MSIX package
+        shell: pwsh
+        run: platform/windows/msix/pack.ps1 -Version ${{ steps.version.outputs.value }} -Publisher "${{ vars.MSIX_PUBLISHER || 'CN=OmniZip Contributors' }}"
+      - name: Sign installers
+        if: vars.AZURE_SIGNING == 'true'
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\release\bundle
+          files-folder-filter: exe,msix
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem target/release/bundle/nsis/*.exe, target/release/bundle/msix/*.msix
+          $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 $_).Hash.ToLower(), $_.Name } |
+            Set-Content -Encoding ascii target/release/bundle/SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msix/*.msix
+            target/release/bundle/SHA256SUMS.txt

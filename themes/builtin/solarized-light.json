@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "solarized-light",
+  "name": {
+    "zh-CN": "日光 · 浅",
+    "zh-TW": "日光 · 淺",
+    "en-US": "Solarized Light",
+    "ja-JP": "Solarized ライト"
+  },
+  "author": "Solarized palette (MIT) · OmniZip",
+  "appearance": "light",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#FDF6E3",
+    "bg.surface": "#FFFCF2",
+    "bg.elevated": "#FFFFFF",
+    "bg.sidebar": "#EEE8D5",
+    "fg.primary": "#073642",
+    "fg.secondary": "#586E75",
+    "border.default": "#E0D8C0",
+    "accent": "#268BD2",
+    "success": "#859900",
+    "warning": "#B58900",
+    "danger": "#DC322F",
+    "info": "#2AA198"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

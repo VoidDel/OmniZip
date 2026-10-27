@@ -1,0 +1,24 @@
+[package]
+name = "omnizip-formats"
+description = "Wires every OmniZip engine into a FormatRegistry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[features]
+default = ["rar"]
+rar = ["dep:omnizip-engine-rar"]
+
+[dependencies]
+omnizip-core.workspace = true
+omnizip-engine-zip.workspace = true
+omnizip-engine-7z.workspace = true
+omnizip-engine-tar.workspace = true
+omnizip-engine-rar = { workspace = true, optional = true }
+tempfile.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

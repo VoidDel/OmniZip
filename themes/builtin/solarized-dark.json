@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "solarized-dark",
+  "name": {
+    "zh-CN": "日光 · 深",
+    "zh-TW": "日光 · 深",
+    "en-US": "Solarized Dark",
+    "ja-JP": "Solarized ダーク"
+  },
+  "author": "Solarized palette (MIT) · OmniZip",
+  "appearance": "dark",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#002B36",
+    "bg.surface": "#073642",
+    "bg.elevated": "#0B3F4D",
+    "bg.sidebar": "#00252F",
+    "fg.primary": "#EEE8D5",
+    "fg.secondary": "#93A1A1",
+    "border.default": "#1C4A56",
+    "accent": "#268BD2",
+    "success": "#859900",
+    "warning": "#B58900",
+    "danger": "#DC322F",
+    "info": "#2AA198"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

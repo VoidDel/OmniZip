@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "midnight",
+  "name": {
+    "zh-CN": "午夜",
+    "zh-TW": "午夜",
+    "en-US": "Midnight",
+    "ja-JP": "ミッドナイト"
+  },
+  "author": "OmniZip",
+  "appearance": "dark",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#0F1115",
+    "bg.surface": "#161922",
+    "bg.elevated": "#1C2029",
+    "bg.sidebar": "#12151C",
+    "fg.primary": "#E6E8EE",
+    "fg.secondary": "#A3A9B7",
+    "border.default": "#2A3040",
+    "accent": "#5B8CFF",
+    "success": "#3DD68C",
+    "warning": "#F5B544",
+    "danger": "#FF6B6B",
+    "info": "#58B7FF"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

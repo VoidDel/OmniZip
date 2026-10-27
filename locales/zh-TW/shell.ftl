@@ -1,0 +1,13 @@
+menu-root = OmniZip
+menu-open = 以 OmniZip 開啟
+menu-extract-here = 解壓縮到此處
+menu-extract-smart = 解壓縮到「{ $name }\」
+menu-extract-to = 解壓縮到…
+menu-extract-each = 分別解壓縮到獨立資料夾
+menu-mount = 掛載
+menu-test = 測試壓縮檔
+menu-convert = 轉換為…
+menu-add-zip = 加入「{ $name }.zip」
+menu-add-7z = 加入「{ $name }.7z」
+menu-add = 加入壓縮檔…
+menu-tooltip = 使用 OmniZip 壓縮、解壓縮和掛載

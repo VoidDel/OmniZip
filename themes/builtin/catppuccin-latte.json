@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "catppuccin-latte",
+  "name": {
+    "zh-CN": "卡布奇诺 · 拿铁",
+    "zh-TW": "卡布奇諾 · 拿鐵",
+    "en-US": "Catppuccin Latte",
+    "ja-JP": "Catppuccin ラテ"
+  },
+  "author": "Catppuccin palette (MIT) · OmniZip",
+  "appearance": "light",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#EFF1F5",
+    "bg.surface": "#FFFFFF",
+    "bg.elevated": "#FFFFFF",
+    "bg.sidebar": "#E6E9EF",
+    "fg.primary": "#4C4F69",
+    "fg.secondary": "#6C6F85",
+    "border.default": "#CCD0DA",
+    "accent": "#1E66F5",
+    "success": "#40A02B",
+    "warning": "#DF8E1D",
+    "danger": "#D20F39",
+    "info": "#209FB5"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

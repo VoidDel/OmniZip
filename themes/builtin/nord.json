@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "nord",
+  "name": {
+    "zh-CN": "北极",
+    "zh-TW": "北極",
+    "en-US": "Nord",
+    "ja-JP": "Nord"
+  },
+  "author": "Nord palette (MIT) · OmniZip",
+  "appearance": "dark",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#2E3440",
+    "bg.surface": "#3B4252",
+    "bg.elevated": "#434C5E",
+    "bg.sidebar": "#2B303B",
+    "fg.primary": "#ECEFF4",
+    "fg.secondary": "#B8C0CE",
+    "border.default": "#4C566A",
+    "accent": "#88C0D0",
+    "success": "#A3BE8C",
+    "warning": "#EBCB8B",
+    "danger": "#BF616A",
+    "info": "#81A1C1"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

@@ -1,0 +1,90 @@
+[workspace]
+resolver = "3"
+exclude = ["fuzz"]
+members = [
+  "crates/omnizip-core",
+  "crates/omnizip-engine-zip",
+  "crates/omnizip-engine-7z",
+  "crates/omnizip-engine-tar",
+  "crates/omnizip-engine-rar",
+  "crates/omnizip-formats",
+  "crates/omnizip-i18n",
+  "crates/omnizip-cli",
+  "crates/omnizip-vfs",
+  "crates/omnizip-shell-win",
+  "apps/desktop/src-tauri",
+]
+default-members = [
+  "crates/omnizip-core",
+  "crates/omnizip-engine-zip",
+  "crates/omnizip-engine-7z",
+  "crates/omnizip-engine-tar",
+  "crates/omnizip-engine-rar",
+  "crates/omnizip-formats",
+  "crates/omnizip-i18n",
+  "crates/omnizip-cli",
+  "crates/omnizip-vfs",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+authors = ["OmniZip Contributors"]
+repository = "https://github.com/omnizip/omnizip"
+publish = false
+
+[workspace.dependencies]
+omnizip-core = { path = "crates/omnizip-core" }
+omnizip-engine-zip = { path = "crates/omnizip-engine-zip" }
+omnizip-engine-7z = { path = "crates/omnizip-engine-7z" }
+omnizip-engine-tar = { path = "crates/omnizip-engine-tar" }
+omnizip-engine-rar = { path = "crates/omnizip-engine-rar" }
+omnizip-formats = { path = "crates/omnizip-formats" }
+omnizip-i18n = { path = "crates/omnizip-i18n" }
+omnizip-vfs = { path = "crates/omnizip-vfs" }
+
+bitflags = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+encoding_rs = "0.8"
+chardetng = "1"
+unicode-normalization = "0.1"
+crc32fast = "1"
+filetime = "0.2"
+tempfile = "3"
+globset = "0.4"
+toml = "1"
+directories = "6"
+sys-locale = "0.3"
+
+zip = { version = "9", default-features = false }
+sevenz-rust2 = { version = "0.24" }
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+liblzma = { version = "0.4", default-features = false, features = ["static", "parallel"] }
+bzip2 = { version = "0.6" }
+zstd = { version = "0.14", features = ["zstdmt"] }
+lz4_flex = "0.14"
+brotli = "9"
+unrar = "0.5"
+
+clap = { version = "4", features = ["derive", "wrap_help", "env", "string"] }
+clap_complete = "4"
+clap_mangen = "0.3"
+indicatif = "0.18"
+fluent-bundle = "0.16"
+fluent-langneg = "0.14"
+unic-langid = { version = "0.9", features = ["macros"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"
+
+[profile.dev.package."*"]
+opt-level = 2

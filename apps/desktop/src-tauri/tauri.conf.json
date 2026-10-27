@@ -1,0 +1,132 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OmniZip",
+  "mainBinaryName": "omnizip-desktop",
+  "version": "0.1.0",
+  "identifier": "app.omnizip.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build && node ../../scripts/prepare-bundle.mjs"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost"
+      },
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "publisher": "OmniZip Contributors",
+    "copyright": "Copyright (c) 2026 OmniZip Contributors. MIT License.",
+    "category": "Utility",
+    "shortDescription": "Archive manager: create, extract, test and convert archives",
+    "longDescription": "OmniZip is a cross-platform archive manager for ZIP, 7z, TAR, RAR and more, with a modern interface, many languages and themes, and file-manager integration.",
+    "licenseFile": "../../../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/omnizip"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "zip",
+          "zipx"
+        ],
+        "name": "ZIP archive",
+        "description": "ZIP archive",
+        "role": "Editor",
+        "mimeType": "application/zip"
+      },
+      {
+        "ext": [
+          "7z"
+        ],
+        "name": "7z archive",
+        "description": "7z archive",
+        "role": "Editor",
+        "mimeType": "application/x-7z-compressed"
+      },
+      {
+        "ext": [
+          "rar"
+        ],
+        "name": "RAR archive",
+        "description": "RAR archive",
+        "role": "Viewer",
+        "mimeType": "application/vnd.rar"
+      },
+      {
+        "ext": [
+          "tar",
+          "tgz",
+          "tbz2",
+          "txz",
+          "tzst"
+        ],
+        "name": "TAR archive",
+        "description": "TAR archive",
+        "role": "Editor",
+        "mimeType": "application/x-tar"
+      },
+      {
+        "ext": [
+          "gz",
+          "bz2",
+          "xz",
+          "zst",
+          "lz4",
+          "br"
+        ],
+        "name": "Compressed file",
+        "description": "Compressed file",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "TradChinese",
+          "English",
+          "Japanese"
+        ],
+        "displayLanguageSelector": true,
+        "installerHooks": "../../../platform/windows/nsis/hooks.nsh"
+      },
+      "wix": {
+        "language": [
+          "zh-CN",
+          "en-US"
+        ]
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "resources": {
+      "binaries/omnizip_shell.dll": "omnizip_shell.dll"
+    }
+  }
+}

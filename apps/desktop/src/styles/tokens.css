@@ -1,0 +1,68 @@
+/* Design tokens (docs/05-theming.md). The theme service overwrites every color token at start-up;
+   these values are the Aurora theme so the first frame already looks right. Components must use
+   tokens only — no literal colors. */
+:root {
+  --bg-canvas: #F5F7FB;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --bg-sidebar: #EEF2F8;
+  --sidebar-material: #EEF2F8;
+  --bg-subtle: #F0F2F6;
+  --bg-hover: #E9ECF2;
+  --bg-pressed: #DFE3EB;
+  --fg-primary: #1B2230;
+  --fg-secondary: #5B6577;
+  --fg-muted: rgba(27, 34, 48, .55);
+  --fg-disabled: rgba(27, 34, 48, .35);
+  --border-subtle: #EDF0F5;
+  --border-default: #DCE2EC;
+  --border-strong: #B9C2D1;
+  --border-focus: #2F6FED;
+  --accent: #2F6FED;
+  --accent-hover: #2A62D1;
+  --accent-pressed: #2556B6;
+  --accent-subtle: rgba(47, 111, 237, .14);
+  --accent-fg: #FFFFFF;
+  --success: #1E9E63;
+  --success-subtle: rgba(30, 158, 99, .14);
+  --warning: #D98A0B;
+  --warning-subtle: rgba(217, 138, 11, .16);
+  --danger: #D8434E;
+  --danger-subtle: rgba(216, 67, 78, .14);
+  --info: #2A8CD6;
+  --info-subtle: rgba(42, 140, 214, .14);
+  --selection-bg: rgba(47, 111, 237, .22);
+  --selection-fg: #1B2230;
+  --folder-color: #E0A82E;
+  --shadow-1: 0 2px 8px rgba(20, 30, 50, .10);
+  --shadow-2: 0 16px 48px rgba(20, 30, 50, .18);
+  --overlay-scrim: rgba(10, 14, 22, .4);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --row-h: 32px;
+  --ctrl-h: 32px;
+  --dur: 160ms;
+  --size-base: 14px;
+  --sidebar-w: 240px;
+  --titlebar-h: 40px;
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, "SF Pro Text", system-ui, Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+}
+
+/* CJK font stacks follow the UI language (docs/06-i18n.md §5). */
+:root:lang(zh-TW) {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, system-ui, "PingFang TC",
+    "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
+}
+:root:lang(ja-JP) {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, system-ui, "Hiragino Sans",
+    "Yu Gothic UI", "Meiryo UI", "Noto Sans CJK JP", sans-serif;
+}
+
+:root[data-density="compact"] { --row-h: 28px; --ctrl-h: 28px; }
+:root[data-density="spacious"] { --row-h: 40px; --ctrl-h: 36px; }

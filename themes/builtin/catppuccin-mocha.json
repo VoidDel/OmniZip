@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "catppuccin-mocha",
+  "name": {
+    "zh-CN": "卡布奇诺 · 摩卡",
+    "zh-TW": "卡布奇諾 · 摩卡",
+    "en-US": "Catppuccin Mocha",
+    "ja-JP": "Catppuccin モカ"
+  },
+  "author": "Catppuccin palette (MIT) · OmniZip",
+  "appearance": "dark",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#1E1E2E",
+    "bg.surface": "#181825",
+    "bg.elevated": "#313244",
+    "bg.sidebar": "#11111B",
+    "fg.primary": "#CDD6F4",
+    "fg.secondary": "#A6ADC8",
+    "border.default": "#45475A",
+    "accent": "#89B4FA",
+    "success": "#A6E3A1",
+    "warning": "#F9E2AF",
+    "danger": "#F38BA8",
+    "info": "#74C7EC"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

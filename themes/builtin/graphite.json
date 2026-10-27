@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "graphite",
+  "name": {
+    "zh-CN": "石墨",
+    "zh-TW": "石墨",
+    "en-US": "Graphite",
+    "ja-JP": "グラファイト"
+  },
+  "author": "OmniZip",
+  "appearance": "dark",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#121212",
+    "bg.surface": "#1A1A1A",
+    "bg.elevated": "#222222",
+    "bg.sidebar": "#161616",
+    "fg.primary": "#EDEDED",
+    "fg.secondary": "#A8A8A8",
+    "border.default": "#2C2C2C",
+    "accent": "#8AB4F8",
+    "success": "#6CCB8B",
+    "warning": "#E8B64A",
+    "danger": "#F28B82",
+    "info": "#7FC2F5"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}

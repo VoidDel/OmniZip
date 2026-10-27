@@ -1,0 +1,17 @@
+[package]
+name = "omnizip-engine-7z"
+description = "OmniZip 7z engine (read / write)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+omnizip-core.workspace = true
+sevenz-rust2 = { workspace = true, features = ["compress", "aes256", "util", "bzip2", "ppmd", "zstd", "brotli", "lz4", "deflate"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

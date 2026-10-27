@@ -1,0 +1,35 @@
+{
+  "$schema": "../schema/theme-1.json",
+  "schemaVersion": 1,
+  "id": "nord-light",
+  "name": {
+    "zh-CN": "北极 · 浅",
+    "zh-TW": "北極 · 淺",
+    "en-US": "Nord Light",
+    "ja-JP": "Nord ライト"
+  },
+  "author": "Nord palette (MIT) · OmniZip",
+  "appearance": "light",
+  "highContrast": false,
+  "colors": {
+    "bg.canvas": "#ECEFF4",
+    "bg.surface": "#FFFFFF",
+    "bg.elevated": "#FFFFFF",
+    "bg.sidebar": "#E5E9F0",
+    "fg.primary": "#2E3440",
+    "fg.secondary": "#4C566A",
+    "border.default": "#D8DEE9",
+    "accent": "#5E81AC",
+    "success": "#6F9F5A",
+    "warning": "#B08A2E",
+    "danger": "#BF616A",
+    "info": "#5E81AC"
+  },
+  "effects": {
+    "material": "auto"
+  },
+  "icons": {
+    "fileIconTheme": "duotone",
+    "typeColors": "muted"
+  }
+}
