@@ -67,7 +67,7 @@
 ### 3.4 文件关联与默认程序
 
 - 每种格式一个 ProgID：`OmniZip.zip`、`OmniZip.7z`、`OmniZip.rar`、`OmniZip.tar`…，含按格式区分的 `DefaultIcon`、`shell\open\command`、`shell\extract`（"解压到此处"动词）、`shell\mount`（"挂载"动词，仅可挂载格式）。**当前实现**（EXE）：`tauri.conf.json` 每个扩展名一条关联（ProgID `OmniZip.<扩展名>`，打开命令由打包器生成），安装钩子把各自的 `DefaultIcon` 指向 `$INSTDIR\filetypes\<扩展名>.ico` 并通知资源管理器刷新；"解压到此处""挂载"动词尚未加入 ProgID（右键菜单已提供）。
-- 文件类型图标：白色文档页、右上折角，页面中轴一段拉链（呼应应用图标），其下居中一块格式色块印格式名（ZIP、7Z、RAR、TAR、TGZ…）。按家族配色：ZIP 系 `#2F6FED`、7Z `#7A5AF8`、RAR `#C0392B`、TAR 系 `#8A6D3B`、单文件压缩（gz、bz2、xz、zst、lz4、br）`#4B5B73`、光盘镜像 `#0B7F72`，与应用内格式徽章一致。每个 .ico 含 16–256 px：24 px 及以下按像素网格重画（色块占满底部、无文字），32 / 40 px 无文字，48 px 起印格式名；同一家族在小尺寸下只靠颜色区分。由 `scripts/gen-filetype-icons.mjs` 生成到 `icons/filetypes/`（文字用 Segoe UI Bold，需在 Windows 上运行）。完整 MSIX 的文件类型仍用应用图标。
+- 文件类型图标：白色文档页、右上折角，页面中轴一段拉链（呼应应用图标），其下居中一块格式色块印格式名（ZIP、7Z、RAR、TAR、TGZ…）。按家族配色：ZIP 系 `#2F6FED`、7Z `#7A5AF8`、RAR `#C0392B`、TAR 系 `#8A6D3B`、单文件压缩（gz、bz2、xz、zst、lz4、br）`#4B5B73`、光盘镜像 `#0B7F72`，与应用内格式徽章一致。每个 .ico 含 16–256 px，各尺寸都印格式名：16–24 px 按像素网格重画，色块加宽到接近整个图标，格式名用 3×5 像素字母（字体在这么小时会糊）；32 / 40 px 同样按像素网格绘制，格式名用字体并放大，另有拉链；48 px 起是 256 px 图按比例缩小。由 `scripts/gen-filetype-icons.mjs` 生成到 `icons/filetypes/`（文字用 Segoe UI Bold，需在 Windows 上运行）。完整 MSIX 的文件类型仍用应用图标。
 - `HKLM\SOFTWARE\RegisteredApplications` + `Capabilities\FileAssociations`，以出现在"设置 → 默认应用"。
 - Windows 10/11 不允许程序静默夺取默认：设置页"设为默认压缩软件"按钮打开 `ms-settings:defaultapps?registeredAppUser=OmniZip` 并给出引导。
 - `OpenWithProgids` 让 OmniZip 出现在"打开方式"。

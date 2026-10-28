@@ -7,5 +7,5 @@
   <rect x="131" y="114" width="10" height="10" rx="3" fill="#FFFFFF"/>
   <rect x="40" y="146" width="192" height="84" rx="16" fill="#4B5B73"/>
   <path d="M40 162 Q40 146 56 146 H216 Q232 146 232 162 V188 H40 Z" fill="#FFFFFF" opacity="0.13"/>
-  <text x="136" y="189" text-anchor="middle" dominant-baseline="central" font-family="Segoe UI" font-size="70" font-weight="700" letter-spacing="1" fill="#FFFFFF">XZ</text>
+  <text x="136" y="215.3" text-anchor="middle" font-family="Segoe UI" font-size="78" font-weight="700" letter-spacing="1" fill="#FFFFFF">XZ</text>
 </svg>
