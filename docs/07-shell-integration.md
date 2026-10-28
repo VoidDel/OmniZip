@@ -61,12 +61,13 @@
 | Scoop / 便携版 | 无身份 | 仅经典菜单；设置页提供"注册 Win11 菜单"按钮（执行 Sparse Package 注册） |
 
 升级与卸载：
-- Explorer 可能持有旧 DLL 句柄：新版本安装到版本化目录（`shell\<ver>\omnizip_shell.dll`）并更新注册表指向；旧目录在下次启动时清理；必要时提示一键"重启资源管理器"。**M1 实现**（NSIS，`platform/windows/nsis/hooks.nsh`）：安装前把旧 DLL 改名为 `.old` 并标记重启删除，安装后 `regsvr32 /s` 注册经典菜单，并把安装目录加入用户 PATH；卸载时反向执行。Win11 一级菜单由 MSIX 包提供（`platform/windows/msix/`），Sparse Package 待签名证书到位后接入。
+- Explorer 可能持有旧 DLL 句柄：新版本安装到版本化目录（`shell\<ver>\omnizip_shell.dll`）并更新注册表指向；旧目录在下次启动时清理；必要时提示一键"重启资源管理器"。**M1 实现**（NSIS，`platform/windows/nsis/hooks.nsh`）：安装前把旧 DLL 改名为 `.old` 并标记重启删除，安装后运行 `omnizip-desktop.exe --register-shell`（不开窗口）：注册经典菜单，并注册随安装包附带的菜单包 `omnizip_menu.msix`，再把安装目录加入用户 PATH；卸载时 `--unregister-shell` 反向执行。菜单包是 Sparse Package（`platform/windows/msix/AppxManifest.sparse.xml`，名称 `OmniZip.ContextMenu`，`uap10:AllowExternalContent`），以安装目录为外部位置，只声明 Win11 一级菜单及其 COM 代理服务器，文件全部来自安装目录，不在开始菜单列出（`AppListEntry="none"`），程序本身照常以普通 EXE 运行、没有包身份——与 Bandizip 等 EXE 分发的软件做法相同。注册前先移除已注册的旧菜单包（例如另一安装目录的），因此升级与换目录都会重新指向当前安装。系统只注册受信任证书签名的包。正式证书到位前，菜单包用自签测试证书签名，程序在构建时内置该证书的公钥（`build.rs`，取自仓库中的 `platform/windows/msix/omnizip-test.cer`，用正式证书构建时为空；私钥不进仓库）：注册已签名的菜单包前若本机"受信任的人"（本地计算机）中没有它，就以管理员身份再启动自身（`--trust-cert`，弹出 UAC）导入，然后由用户自己的进程注册菜单包（注册按用户进行）。因此安装时自动导入，只需在 UAC 中确认一次；拒绝时安装照常完成，只有经典菜单，设置页显示"仅经典菜单"并可重试。导入的只是公钥证书，私钥不随程序分发；卸载时不移除证书。完整 MSIX（`platform/windows/msix/AppxManifest.xml`）保留给商店渠道，与菜单包不要同时安装，否则一级菜单出现两次。
 - 卸载：注销 COM 与 ProgID、移除 Sparse Package、`SHChangeNotify(SHCNE_ASSOCCHANGED)`。
 
 ### 3.4 文件关联与默认程序
 
-- 每种格式一个 ProgID：`OmniZip.zip`、`OmniZip.7z`、`OmniZip.rar`、`OmniZip.tar`…，含按格式区分的 `DefaultIcon`、`shell\open\command`、`shell\extract`（"解压到此处"动词）、`shell\mount`（"挂载"动词，仅可挂载格式）。
+- 每种格式一个 ProgID：`OmniZip.zip`、`OmniZip.7z`、`OmniZip.rar`、`OmniZip.tar`…，含按格式区分的 `DefaultIcon`、`shell\open\command`、`shell\extract`（"解压到此处"动词）、`shell\mount`（"挂载"动词，仅可挂载格式）。**当前实现**（EXE）：`tauri.conf.json` 每个扩展名一条关联（ProgID `OmniZip.<扩展名>`，打开命令由打包器生成），安装钩子把各自的 `DefaultIcon` 指向 `$INSTDIR\filetypes\<扩展名>.ico` 并通知资源管理器刷新；"解压到此处""挂载"动词尚未加入 ProgID（右键菜单已提供）。
+- 文件类型图标：白色文档页、右上折角，页面中轴一段拉链（呼应应用图标），其下居中一块格式色块印格式名（ZIP、7Z、RAR、TAR、TGZ…）。按家族配色：ZIP 系 `#2F6FED`、7Z `#7A5AF8`、RAR `#C0392B`、TAR 系 `#8A6D3B`、单文件压缩（gz、bz2、xz、zst、lz4、br）`#4B5B73`、光盘镜像 `#0B7F72`，与应用内格式徽章一致。每个 .ico 含 16–256 px：24 px 及以下按像素网格重画（色块占满底部、无文字），32 / 40 px 无文字，48 px 起印格式名；同一家族在小尺寸下只靠颜色区分。由 `scripts/gen-filetype-icons.mjs` 生成到 `icons/filetypes/`（文字用 Segoe UI Bold，需在 Windows 上运行）。完整 MSIX 的文件类型仍用应用图标。
 - `HKLM\SOFTWARE\RegisteredApplications` + `Capabilities\FileAssociations`，以出现在"设置 → 默认应用"。
 - Windows 10/11 不允许程序静默夺取默认：设置页"设为默认压缩软件"按钮打开 `ms-settings:defaultapps?registeredAppUser=OmniZip` 并给出引导。
 - `OpenWithProgids` 让 OmniZip 出现在"打开方式"。

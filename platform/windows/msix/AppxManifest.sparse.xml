@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Context-menu package of the EXE install (docs/07-shell-integration.md §3.3): a sparse package
+  ("package with external location", uap10:AllowExternalContent). The installer registers it
+  with the install folder as its external location (apps/desktop/src-tauri/src/integration.rs),
+  which gives the Windows 11 top-level context menu the package identity it needs. It holds no
+  files of its own: the menu and its COM server are those of the full MSIX (AppxManifest.xml),
+  served from the installed omnizip_shell.dll; the app itself runs without package identity and
+  is not listed in Start (the installer makes the shortcut). `pack.ps1 -Sparse` fills in
+  $VERSION$, $PUBLISHER$ and $ARCH$. It must be signed with a certificate the machine trusts.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 desktop4 desktop5 com rescap">
+
+  <Identity Name="OmniZip.ContextMenu" Publisher="$PUBLISHER$" Version="$VERSION$" ProcessorArchitecture="$ARCH$" />
+
+  <Properties>
+    <DisplayName>OmniZip</DisplayName>
+    <PublisherDisplayName>OmniZip Contributors</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="OmniZip" Executable="omnizip-desktop.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+      <uap:VisualElements
+        DisplayName="OmniZip"
+        Description="Archive manager"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <!-- Windows 11 top-level context menu for files and folders. -->
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type="*">
+              <desktop5:Verb Id="OmniZip" Clsid="6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F00" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="Directory">
+              <desktop5:Verb Id="OmniZip" Clsid="6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F00" />
+            </desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="OmniZip context menu">
+              <com:Class Id="6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F00" Path="omnizip_shell.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

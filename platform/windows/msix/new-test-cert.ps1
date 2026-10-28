@@ -4,6 +4,11 @@
 #
 # Writes omnizip-test.pfx, omnizip-test.cer and password.txt to -OutDir (default
 # %LOCALAPPDATA%\OmniZip\dev-cert, outside the repository: never commit the .pfx).
+#
+# The project's test certificate is platform/windows/msix/omnizip-test.cer: the app builds it in
+# and has the computer trust it when it registers its context-menu package (UAC prompt). Its key
+# is kept by the maintainer; a new certificate made here only matches once its .cer replaces
+# that file (or OMNIZIP_TEST_CERT points at it when building).
 # -Trust imports the public certificate into LocalMachine\TrustedPeople so that packages
 # signed with it install on this machine; that needs administrator rights and shows a UAC
 # prompt. Every other test machine needs the same import (the .cer file is enough).

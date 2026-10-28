@@ -436,7 +436,12 @@
       "unregister": "從右鍵選單移除",
       "stale": "已註冊的選單屬於另一份 OmniZip",
       "missingDll": "應用程式旁邊沒有 omnizip_shell.dll（開發組建）",
-      "win11": "傳統選單（顯示其他選項）立即可用；Windows 11 第一層選單需要使用 MSIX 安裝套件。"
+      "win11": "傳統選單（顯示其他選項）立即可用；Windows 11 第一層選單由安裝程式提供。",
+      "win11Off": "Windows 11 第一層選單未啟用。請重新註冊；測試版會先要求系統管理員權限，匯入安裝程式的簽章憑證。",
+      "win11On": "Windows 11 第一層選單與傳統選單（顯示其他選項）均已啟用。",
+      "partial": "僅傳統選單",
+      "reregister": "重新註冊",
+      "working": "正在註冊…"
     },
     "security": {
       "ratio": "壓縮炸彈門檻",
@@ -472,7 +477,8 @@
       "version": "版本",
       "license": "授權",
       "components": "建置元件",
-      "engines": "格式引擎"
+      "engines": "格式引擎",
+      "source": "原始碼"
     }
   },
   "errors": {

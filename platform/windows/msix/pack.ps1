@@ -1,7 +1,11 @@
 # Builds the OmniZip MSIX package from release binaries (docs/10-build-release.md §3).
 #
 #   pwsh platform/windows/msix/pack.ps1 -Version 0.1.0 [-Publisher "CN=..."] [-Arch x64]
-#                                       [-Sign path\to\cert.pfx -Password ...]
+#                                       [-Sign path\to\cert.pfx -Password ...] [-Sparse]
+#
+# -Sparse builds the context-menu package of the EXE install instead (AppxManifest.sparse.xml):
+# a sparse package with the logos only, registered by the installer with the install folder as
+# its external location (scripts/prepare-bundle.mjs builds it into the NSIS installer).
 #
 # Prerequisite: `pnpm bundle:windows` (or scripts/prepare-bundle.mjs plus a release build of
 # omnizip-desktop) so that target/release and apps/desktop/src-tauri/binaries are filled.
@@ -13,7 +17,8 @@ param(
   [ValidateSet("x64", "arm64")][string]$Arch = "x64",
   [string]$Out = "",
   [string]$Sign = "",
-  [string]$Password = ""
+  [string]$Password = "",
+  [switch]$Sparse
 )
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "../../..")
@@ -35,7 +40,7 @@ function Find-SdkTool([string]$name) {
   return $hit.FullName
 }
 
-$stage = Join-Path $root "target/msix/$Arch"
+$stage = Join-Path $root ("target/msix/" + $(if ($Sparse) { "sparse-$Arch" } else { $Arch }))
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force (Join-Path $stage "Assets") | Out-Null
 
@@ -46,11 +51,14 @@ $files = @{
   (Join-Path $bins "omnizip-$triple.exe")      = "omnizip.exe"
   (Join-Path $bins "omnizip_shell.dll")        = "omnizip_shell.dll"
 }
-foreach ($src in $files.Keys) {
-  if (-not (Test-Path $src)) { throw "missing $src (run the release build first)" }
-  Copy-Item $src (Join-Path $stage $files[$src])
+# The sparse package holds no files of its own: they are those of the install folder.
+if (-not $Sparse) {
+  foreach ($src in $files.Keys) {
+    if (-not (Test-Path $src)) { throw "missing $src (run the release build first)" }
+    Copy-Item $src (Join-Path $stage $files[$src])
+  }
+  Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE.txt")
 }
-Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE.txt")
 
 # Logos. The shell picks the taskbar, Start and file-type icons by pixel size through
 # resources.pri; given only the plain 44x44 logo it scales that onto a plate, which looks small
@@ -101,7 +109,7 @@ foreach ($s in 100, 125, 150, 200, 400) {
 }
 $art.Dispose()
 
-$manifest = Get-Content -Raw (Join-Path $PSScriptRoot "AppxManifest.xml")
+$manifest = Get-Content -Raw (Join-Path $PSScriptRoot $(if ($Sparse) { "AppxManifest.sparse.xml" } else { "AppxManifest.xml" }))
 $manifest = $manifest.Replace('$VERSION$', $msixVersion).Replace('$PUBLISHER$', $Publisher).Replace('$ARCH$', $Arch)
 Set-Content -Path (Join-Path $stage "AppxManifest.xml") -Value $manifest -Encoding utf8
 
@@ -109,7 +117,7 @@ Set-Content -Path (Join-Path $stage "AppxManifest.xml") -Value $manifest -Encodi
 # default config splits scales into separate resource packs, which only a bundle installs, so
 # everything is kept in the one resources.pri.
 $makepri = Find-SdkTool "makepri.exe"
-$priConfig = Join-Path $root "target/msix/priconfig-$Arch.xml"
+$priConfig = Join-Path $root ("target/msix/priconfig-" + $(if ($Sparse) { "sparse-$Arch" } else { $Arch }) + ".xml")
 & $makepri createconfig /cf $priConfig /dq en-US /pv 10.0.0 /o | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed ($LASTEXITCODE)" }
 $cfg = (Get-Content -Raw $priConfig) -replace '(?s)\s*<packaging>.*?</packaging>', ''
@@ -117,9 +125,18 @@ Set-Content -Path $priConfig -Value $cfg -Encoding utf8
 & $makepri new /pr $stage /cf $priConfig /mn (Join-Path $stage "AppxManifest.xml") /of (Join-Path $stage "resources.pri") /o | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "makepri new failed ($LASTEXITCODE)" }
 
-if (-not $Out) { $Out = Join-Path $root "target/release/bundle/msix/OmniZip_${Version}_$Arch.msix" }
+if (-not $Out) {
+  $name = if ($Sparse) { "OmniZip-ContextMenu_${Version}_$Arch.msix" } else { "OmniZip_${Version}_$Arch.msix" }
+  $Out = Join-Path $root "target/release/bundle/msix/$name"
+}
 New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null
-& (Find-SdkTool "makeappx.exe") pack /o /d $stage /p $Out
+$makeappx = Find-SdkTool "makeappx.exe"
+if ($Sparse) {
+  # The files a sparse package names are in its external location: not checked here.
+  & $makeappx pack /o /nv /d $stage /p $Out
+} else {
+  & $makeappx pack /o /d $stage /p $Out
+}
 if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
 
 if ($Sign) {

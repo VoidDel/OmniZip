@@ -4,7 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { FileIcon, Icon, Logo, type IconName } from '../../components/Icon';
+import { FileIcon, GitHubMark, Icon, Logo, type IconName } from '../../components/Icon';
 import { Segmented, Switch } from '../../components/ui';
 import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
@@ -88,10 +88,21 @@ function ThemeCard({ th, selected, onPick, lang }: { th: ThemeSummary; selected:
 function ShellStatusRow() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<ShellStatus | null>(null);
+  // Registering the Windows 11 menu takes a few seconds.
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     void api.shellStatus().then(setStatus);
   }, []);
-  const run = (f: () => Promise<ShellStatus>) => void f().then(setStatus).catch((e) => useApp.getState().reportError(e));
+  const run = (f: () => Promise<ShellStatus>) => {
+    setBusy(true);
+    void f()
+      .then(setStatus)
+      .catch((e) => {
+        useApp.getState().reportError(e);
+        return api.shellStatus().then(setStatus);
+      })
+      .finally(() => setBusy(false));
+  };
   if (!status) return null;
   if (!status.supported) {
     return (
@@ -100,19 +111,35 @@ function ShellStatusRow() {
       </Row>
     );
   }
-  const hint = !status.dll ? t('settings.shell.missingDll') : status.stale ? t('settings.shell.stale') : t('settings.shell.win11');
+  const hint = !status.dll
+    ? t('settings.shell.missingDll')
+    : status.stale
+      ? t('settings.shell.stale')
+      : t(status.win11 === 'on' ? 'settings.shell.win11On' : status.win11 === 'off' ? 'settings.shell.win11Off' : 'settings.shell.win11');
+  const registered = status.registered && !status.stale;
+  const unregister = (
+    <button type="button" className="btn" disabled={busy} onClick={() => run(api.shellUnregister)}>{t('settings.shell.unregister')}</button>
+  );
   return (
     <Row label={t('settings.shell.status')} hint={hint}>
-      {status.registered && !status.stale ? (
+      {registered && status.win11 !== 'off' ? (
         <>
           <span className="status-ok"><Icon name="checkCircle" />{t('settings.shell.registered')}</span>
-          <button type="button" className="btn" onClick={() => run(api.shellUnregister)}>{t('settings.shell.unregister')}</button>
+          {unregister}
+        </>
+      ) : registered ? (
+        <>
+          <span className="status-warn"><Icon name="alert" />{t('settings.shell.partial')}</span>
+          <button type="button" className="btn outline" disabled={busy} onClick={() => run(api.shellRegister)}>
+            {busy ? t('settings.shell.working') : t('settings.shell.reregister')}
+          </button>
+          {unregister}
         </>
       ) : (
         <>
           <span className="status-warn"><Icon name="alert" />{t('settings.shell.notRegistered')}</span>
-          <button type="button" className="btn outline" disabled={!status.dll} onClick={() => run(api.shellRegister)}>
-            {t('settings.shell.register')}
+          <button type="button" className="btn outline" disabled={!status.dll || busy} onClick={() => run(api.shellRegister)}>
+            {busy ? t('settings.shell.working') : t('settings.shell.register')}
           </button>
         </>
       )}
@@ -520,6 +547,11 @@ export function SettingsView() {
               </Row>
               <Row label={t('settings.about.license')}>
                 <span>MIT</span>
+              </Row>
+              <Row label={t('settings.about.source')}>
+                <button type="button" className="gh-btn" title={sys.homepage} aria-label="GitHub" onClick={() => void api.openHomepage().catch((e) => useApp.getState().reportError(e))}>
+                  <GitHubMark />
+                </button>
               </Row>
               <Row col label={t('settings.about.engines')}>
                 <div className="chips">

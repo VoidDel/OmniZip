@@ -384,7 +384,7 @@ export function Sidebar() {
           title={t('nav.settings')}
           onClick={() => setView(inSettings ? (archive ? 'browser' : 'home') : 'settings')}
         >
-          <Icon name="sliders" />
+          <Icon name="gear" />
           <span className="lbl grow">{t('nav.settings')}</span>
           <Icon name="chevronUp" className="chev" />
         </button>

@@ -110,6 +110,7 @@ export const api = {
   /** Focuses the window and its page (needed for transparent material windows). */
   focusWindow: () => invoke<void>('window_focus'),
   openDefaultApps: () => invoke<void>('open_default_apps'),
+  openHomepage: () => invoke<void>('open_homepage'),
   shellStatus: () => invoke<ShellStatus>('shell_status'),
   mountProbe: () => invoke<MountProbe>('mount_probe'),
   shellRegister: () => invoke<ShellStatus>('shell_register'),

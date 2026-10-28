@@ -22,6 +22,7 @@ use crate::{
     clipboard,
     draft::Draft,
     dragout,
+    integration::{self, ShellStatus},
     jobs::{Finish, JobInfo, JobSpec, JobState, PromptAnswer},
     launch::LaunchRequest,
     ops::{self, CompressRequest, ExtractRequest},
@@ -122,8 +123,8 @@ pub fn settings_set(
         windows::apply_material(&app);
     }
     // Flat versus submenu layout lives in the registry: apply it right away.
-    if menu_changed && shell_status().registered {
-        let _ = shell_register();
+    if menu_changed {
+        integration::refresh_classic();
     }
     Ok(settings)
 }
@@ -1317,26 +1318,6 @@ pub fn window_focus(window: WebviewWindow) {
     let _ = AsRef::<tauri::Webview>::as_ref(&window).set_focus();
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShellStatus {
-    /// The platform has a context-menu integration in this build.
-    supported: bool,
-    registered: bool,
-    /// The extension next to this executable.
-    dll: Option<String>,
-    /// The registry points at another copy (for example an older install).
-    stale: bool,
-}
-
-#[cfg(windows)]
-fn shell_dll() -> Option<PathBuf> {
-    let p = std::env::current_exe()
-        .ok()?
-        .with_file_name("omnizip_shell.dll");
-    p.is_file().then_some(p)
-}
-
 /// The request a standalone dialog window was opened for (`None` for other windows).
 #[tauri::command]
 pub fn shell_request(window: WebviewWindow, state: State<'_, AppState>) -> Option<LaunchRequest> {
@@ -1350,52 +1331,38 @@ pub fn shell_request(window: WebviewWindow, state: State<'_, AppState>) -> Optio
 
 /// Context-menu registration state (docs/07-shell-integration.md §7).
 #[tauri::command]
-pub fn shell_status() -> ShellStatus {
-    #[cfg(windows)]
-    {
-        let s = omnizip_shell::register::status();
-        let dll = shell_dll();
-        let stale = match (&s.dll, &dll) {
-            (Some(a), Some(b)) => !Path::new(a).eq(b.as_path()),
-            _ => false,
-        };
-        ShellStatus {
-            supported: true,
-            registered: s.registered,
-            dll: dll.map(|p| p.to_string_lossy().into_owned()),
-            stale,
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        ShellStatus {
-            supported: false,
-            registered: false,
-            dll: None,
-            stale: false,
-        }
-    }
+pub async fn shell_status() -> CmdResult<ShellStatus> {
+    tauri::async_runtime::spawn_blocking(integration::status)
+        .await
+        .map_err(|e| err(Error::internal(e)))
 }
 
-/// Registers (or re-registers with the current menu settings) the context menu for this user.
+/// Registers (or re-registers with the current menu settings) the context menu for this user,
+/// with the Windows 11 top-level menu where the app ships its package (a few seconds).
 #[tauri::command]
-pub fn shell_register() -> CmdResult<ShellStatus> {
-    #[cfg(windows)]
-    {
-        let dll = shell_dll().ok_or_else(|| {
-            err(Error::new(ErrorCode::MissingDependency).with("path", "omnizip_shell.dll"))
-        })?;
-        let cfg = omnizip_shell::menu::MenuConfig::load();
-        omnizip_shell::register::register(&dll, &cfg).map_err(|e| err(Error::from(e)))?;
-    }
-    Ok(shell_status())
+pub async fn shell_register() -> CmdResult<ShellStatus> {
+    tauri::async_runtime::spawn_blocking(|| integration::register().map(|()| integration::status()))
+        .await
+        .map_err(|e| err(Error::internal(e)))?
+        .map_err(err)
 }
 
 #[tauri::command]
-pub fn shell_unregister() -> CmdResult<ShellStatus> {
-    #[cfg(windows)]
-    omnizip_shell::register::unregister().map_err(|e| err(Error::from(e)))?;
-    Ok(shell_status())
+pub async fn shell_unregister() -> CmdResult<ShellStatus> {
+    tauri::async_runtime::spawn_blocking(|| {
+        integration::unregister().map(|()| integration::status())
+    })
+    .await
+    .map_err(|e| err(Error::internal(e)))?
+    .map_err(err)
+}
+
+/// Opens the project's page in the browser (settings, About). The page cannot open addresses
+/// itself (docs/09-security.md §7), so this one is fixed here.
+#[tauri::command]
+pub fn open_homepage() -> CmdResult<()> {
+    tauri_plugin_opener::open_url(env!("CARGO_PKG_REPOSITORY"), None::<&str>)
+        .map_err(|e| err(Error::internal(e)))
 }
 
 /// Opens the system "default apps" settings (`docs/07-shell-integration.md` §3.4).

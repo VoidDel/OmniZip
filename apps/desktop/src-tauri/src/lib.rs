@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod draft;
 pub mod dragout;
+pub mod integration;
 pub mod jobs;
 pub mod launch;
 pub mod ops;
@@ -174,6 +175,17 @@ fn unique(p: &Path) -> PathBuf {
 pub fn run() {
     let cwd = std::env::current_dir().unwrap_or_default();
     let args: Vec<String> = std::env::args().collect();
+    // Installer hooks (platform/windows/nsis/hooks.nsh): set up or remove the context menu,
+    // without a window.
+    match args.get(1).map(String::as_str) {
+        Some("--register-shell") => std::process::exit(i32::from(integration::register().is_err())),
+        // Run elevated by --register-shell / the settings page when the package needs it.
+        Some("--trust-cert") => std::process::exit(i32::from(integration::trust_cert().is_err())),
+        Some("--unregister-shell") => {
+            std::process::exit(i32::from(integration::unregister().is_err()))
+        }
+        _ => {}
+    }
     let invocation = launch::parse(&args, &cwd);
 
     tauri::Builder::default()
@@ -280,6 +292,7 @@ pub fn run() {
             commands::window_ready,
             commands::window_focus,
             commands::open_default_apps,
+            commands::open_homepage,
             commands::shell_status,
             commands::shell_request,
             commands::mount_probe,

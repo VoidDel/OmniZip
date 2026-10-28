@@ -13,5 +13,8 @@
     "test": "pnpm --filter omnizip-desktop test",
     "i18n-check": "node scripts/i18n-check.mjs",
     "bundle:windows": "pnpm --filter omnizip-desktop bundle:windows"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2"
   }
 }

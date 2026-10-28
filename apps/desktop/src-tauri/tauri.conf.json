@@ -47,11 +47,19 @@
     "fileAssociations": [
       {
         "ext": [
-          "zip",
+          "zip"
+        ],
+        "name": "OmniZip.zip",
+        "description": "ZIP archive",
+        "role": "Editor",
+        "mimeType": "application/zip"
+      },
+      {
+        "ext": [
           "zipx"
         ],
-        "name": "ZIP archive",
-        "description": "ZIP archive",
+        "name": "OmniZip.zipx",
+        "description": "ZIPX archive",
         "role": "Editor",
         "mimeType": "application/zip"
       },
@@ -59,7 +67,7 @@
         "ext": [
           "7z"
         ],
-        "name": "7z archive",
+        "name": "OmniZip.7z",
         "description": "7z archive",
         "role": "Editor",
         "mimeType": "application/x-7z-compressed"
@@ -68,35 +76,107 @@
         "ext": [
           "rar"
         ],
-        "name": "RAR archive",
+        "name": "OmniZip.rar",
         "description": "RAR archive",
         "role": "Viewer",
         "mimeType": "application/vnd.rar"
       },
       {
         "ext": [
-          "tar",
-          "tgz",
-          "tbz2",
-          "txz",
-          "tzst"
+          "tar"
         ],
-        "name": "TAR archive",
+        "name": "OmniZip.tar",
         "description": "TAR archive",
         "role": "Editor",
         "mimeType": "application/x-tar"
       },
       {
         "ext": [
-          "gz",
-          "bz2",
-          "xz",
-          "zst",
-          "lz4",
+          "tgz"
+        ],
+        "name": "OmniZip.tgz",
+        "description": "TAR.GZ archive",
+        "role": "Editor",
+        "mimeType": "application/x-compressed-tar"
+      },
+      {
+        "ext": [
+          "tbz2"
+        ],
+        "name": "OmniZip.tbz2",
+        "description": "TAR.BZ2 archive",
+        "role": "Editor",
+        "mimeType": "application/x-bzip2-compressed-tar"
+      },
+      {
+        "ext": [
+          "txz"
+        ],
+        "name": "OmniZip.txz",
+        "description": "TAR.XZ archive",
+        "role": "Editor",
+        "mimeType": "application/x-xz-compressed-tar"
+      },
+      {
+        "ext": [
+          "tzst"
+        ],
+        "name": "OmniZip.tzst",
+        "description": "TAR.ZST archive",
+        "role": "Editor",
+        "mimeType": "application/x-zstd-compressed-tar"
+      },
+      {
+        "ext": [
+          "gz"
+        ],
+        "name": "OmniZip.gz",
+        "description": "GZ compressed file",
+        "role": "Editor",
+        "mimeType": "application/gzip"
+      },
+      {
+        "ext": [
+          "bz2"
+        ],
+        "name": "OmniZip.bz2",
+        "description": "BZ2 compressed file",
+        "role": "Editor",
+        "mimeType": "application/x-bzip2"
+      },
+      {
+        "ext": [
+          "xz"
+        ],
+        "name": "OmniZip.xz",
+        "description": "XZ compressed file",
+        "role": "Editor",
+        "mimeType": "application/x-xz"
+      },
+      {
+        "ext": [
+          "zst"
+        ],
+        "name": "OmniZip.zst",
+        "description": "ZST compressed file",
+        "role": "Editor",
+        "mimeType": "application/zstd"
+      },
+      {
+        "ext": [
+          "lz4"
+        ],
+        "name": "OmniZip.lz4",
+        "description": "LZ4 compressed file",
+        "role": "Editor",
+        "mimeType": "application/x-lz4"
+      },
+      {
+        "ext": [
           "br"
         ],
-        "name": "Compressed file",
-        "description": "Compressed file",
+        "name": "OmniZip.br",
+        "description": "Brotli compressed file",
         "role": "Editor"
       }
     ],

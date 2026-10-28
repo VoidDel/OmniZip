@@ -436,7 +436,12 @@
       "unregister": "Remove from context menu",
       "stale": "The registered menu belongs to another copy of OmniZip",
       "missingDll": "omnizip_shell.dll is not next to the app (development build)",
-      "win11": "The classic menu (Show more options) works right away. The Windows 11 top-level menu needs the MSIX package."
+      "win11": "The classic menu (Show more options) works right away. The Windows 11 top-level menu comes with the installer.",
+      "win11Off": "The Windows 11 top-level menu is not on. Register again; a test build first asks for administrator rights to import the certificate the installer is signed with.",
+      "win11On": "Both the Windows 11 top-level menu and the classic menu (Show more options) are on.",
+      "partial": "Classic menu only",
+      "reregister": "Register again",
+      "working": "Registering…"
     },
     "security": {
       "ratio": "Decompression bomb threshold",
@@ -472,7 +477,8 @@
       "version": "Version",
       "license": "License",
       "components": "Built with",
-      "engines": "Format engines"
+      "engines": "Format engines",
+      "source": "Source code"
     }
   },
   "errors": {

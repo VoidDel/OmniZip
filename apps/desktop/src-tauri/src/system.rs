@@ -18,6 +18,8 @@ pub struct SystemInfo {
     pub desktop_dir: Option<String>,
     pub path_separator: &'static str,
     pub app_version: &'static str,
+    /// The project's page (the source repository).
+    pub homepage: &'static str,
 }
 
 pub const fn platform() -> &'static str {
@@ -113,6 +115,7 @@ pub fn info() -> SystemInfo {
         desktop_dir: user_dir("desktop"),
         path_separator: if cfg!(windows) { "\\" } else { "/" },
         app_version: env!("CARGO_PKG_VERSION"),
+        homepage: env!("CARGO_PKG_REPOSITORY"),
     }
 }
 

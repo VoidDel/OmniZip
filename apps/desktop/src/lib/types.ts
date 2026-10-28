@@ -83,6 +83,8 @@ export interface SystemInfo {
   desktopDir: string | null;
   pathSeparator: string;
   appVersion: string;
+  /** The project's page (source repository). */
+  homepage: string;
 }
 
 export interface FormatSupport {
@@ -303,9 +305,12 @@ export interface RecentItem {
 
 export interface ShellStatus {
   supported: boolean;
+  /** The classic menu. */
   registered: boolean;
   dll: string | null;
   stale: boolean;
+  /** The Windows 11 top-level menu: no package next to the app, not registered, registered. */
+  win11: 'none' | 'off' | 'on';
 }
 
 export interface PathStats {

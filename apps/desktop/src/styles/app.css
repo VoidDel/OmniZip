@@ -486,6 +486,17 @@ pre.code { margin: 0; font-family: var(--font-mono); font-size: .82rem; line-hei
 body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; }
 /* Items cut, until pasted. */
 .trow.cut, .gcell.cut { opacity: .5; }
+/* The project's page on GitHub (settings, About), in GitHub's own button colours: dark on light
+   themes, light on dark ones. */
+.gh-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px;
+  background: #24292F; color: #FFFFFF; border: 1px solid rgba(31, 35, 40, .15);
+  transition: background var(--dur);
+}
+.gh-btn:hover { background: #32383F; }
+.gh-btn .gh-mark { width: 18px; height: 18px; fill: currentColor; flex: none; }
+:root[data-appearance="dark"] .gh-btn { background: #F0F6FC; color: #1F2328; border-color: transparent; }
+:root[data-appearance="dark"] .gh-btn:hover { background: #FFFFFF; }
 .drop-over { background: var(--accent-subtle) !important; box-shadow: inset 0 0 0 1px var(--accent); }
 .drag-ghost {
   position: fixed; z-index: 60; pointer-events: none; max-width: 320px; padding: 4px 10px; border-radius: var(--radius-md);

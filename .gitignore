@@ -26,6 +26,8 @@ Thumbs.db
 .env.local
 fixtures/generated/
 apps/desktop/src-tauri/binaries/
+# Signing keys stay out of the repository; only public certificates (.cer) are committed.
+*.pfx
 
 # Fuzzing (cargo-fuzz)
 fuzz/corpus/

@@ -61,26 +61,24 @@ cargo test --workspace           # 核心、引擎、CLI、挂载核心、Shell 
 pnpm test                        # 前端单元测试
 cargo run -p omnizip-cli -- --help
 pnpm dev                         # 开发模式运行桌面应用
-pnpm bundle:windows              # NSIS 安装包（含 CLI 与右键菜单 DLL）→ target/release/bundle/nsis/
-pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # MSIX（需 Windows SDK，签名可选）
+pnpm bundle:windows              # NSIS 安装包（含 CLI、右键菜单 DLL 与 Win11 菜单包，需 Windows SDK）→ target/release/bundle/nsis/
+pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # 完整 MSIX（商店渠道，签名可选）
 ```
 
 模糊测试在 nightly 上运行：`cargo +nightly fuzz run zip`（目标见 `fuzz/fuzz_targets/`）；稳定版可运行其冒烟测试 `cargo test --manifest-path fuzz/Cargo.toml --lib`。
 
-### 测试用 MSIX（自签证书）
+### Win11 一级右键菜单与测试证书
 
-Win11 一级右键菜单只在带包身份的 MSIX 中出现。正式证书到位前，可以用自签证书在本机或测试机上验证；这类包不能对外分发。
+程序以 EXE（NSIS）安装；Win11 一级右键菜单需要包身份，由安装包附带的菜单包 `omnizip_menu.msix`（Sparse Package，只声明菜单，文件来自安装目录）在安装时注册，做法同 Bandizip。系统只注册受信任证书签名的包，正式证书到位前可以用自签证书在本机或测试机上验证；这类安装包不能对外分发。
 
 ```powershell
 # 生成测试证书（私钥存放在 %LOCALAPPDATA%\OmniZip\dev-cert，不进仓库）
 # -Trust 把公钥证书导入“本地计算机\受信任的人”，需要管理员权限，会弹出 UAC
 pwsh platform/windows/msix/new-test-cert.ps1 -Trust
-$d = "$env:LOCALAPPDATA\OmniZip\dev-cert"
-pwsh platform/windows/msix/pack.ps1 -Version 0.1.0 -Sign $d\omnizip-test.pfx -Password (Get-Content $d\password.txt)
-Add-AppxPackage target\release\bundle\msix\OmniZip_0.1.0_x64.msix
+pnpm bundle:windows              # 发现测试证书时自动用它给菜单包签名
 ```
 
-其他测试机只需以管理员身份把 `omnizip-test.cer` 导入“本地计算机\受信任的人”。换成正式证书后发布者会变化，系统视为另一个应用，需先卸载测试版：`Get-AppxPackage OmniZip.OmniZip | Remove-AppxPackage`。
+测试证书的公钥在仓库中（`platform/windows/msix/omnizip-test.cer`），私钥 `.pfx` 只保存在维护者电脑上（`%LOCALAPPDATA%\OmniZip\dev-cert`），不进仓库。程序内置该公钥：在其他电脑上安装时，若该证书尚未受信任，安装程序会弹出一次 UAC，确认后自动导入“本地计算机\受信任的人”再注册菜单；拒绝时安装照常完成，只有经典菜单（显示更多选项），之后可在设置页重新注册。导入后，该电脑信任所有用这把测试私钥签名的包，因此 `.pfx` 务必保密。完整 MSIX 与菜单包不要同时安装，否则一级菜单出现两次：`Get-AppxPackage OmniZip.OmniZip | Remove-AppxPackage` 卸载完整 MSIX。
 
 ## 仓库结构
 
@@ -100,7 +98,8 @@ OmniZip/
 │  ├─ omnizip-vfs/            # 挂载核心：VirtualFs、ArchiveFs、内容缓存、后端探测
 │  └─ omnizip-shell-win/      # cdylib: omnizip_shell.dll（IExplorerCommand）
 ├─ apps/desktop/              # Tauri 2 应用（src-tauri + React 前端）
-├─ platform/windows/          # nsis/hooks.nsh；msix/AppxManifest.xml 与 pack.ps1
+├─ icons/                     # 应用图标源图（app-icon.svg）；filetypes/ 压缩文件类型图标（scripts/gen-filetype-icons.mjs 生成）
+├─ platform/windows/          # nsis/hooks.nsh；msix/AppxManifest.xml（完整 MSIX）、AppxManifest.sparse.xml（菜单包）与 pack.ps1
 ├─ locales/                   # en-US、zh-CN、zh-TW、ja-JP
 ├─ themes/                    # 12 套内置主题 JSON 与 Schema
 ├─ scripts/                   # i18n-check、gen-builtin-themes、prepare-bundle

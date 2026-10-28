@@ -32,7 +32,7 @@ edition = "2024"
 rust-version = "1.97"
 license = "MIT"
 authors = ["OmniZip Contributors"]
-repository = "https://github.com/omnizip/omnizip"
+repository = "https://github.com/VoidDel/OmniZip"
 publish = false
 
 [workspace.dependencies]

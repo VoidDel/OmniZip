@@ -436,7 +436,12 @@
       "unregister": "从右键菜单移除",
       "stale": "已注册的菜单属于另一份 OmniZip",
       "missingDll": "应用旁边没有 omnizip_shell.dll（开发构建）",
-      "win11": "经典菜单（显示更多选项）立即可用；Windows 11 一级菜单需要使用 MSIX 安装包。"
+      "win11": "经典菜单（显示更多选项）立即可用；Windows 11 一级菜单由安装程序提供。",
+      "win11Off": "Windows 11 一级菜单未启用。请重新注册；测试版会先请求管理员权限，导入安装包的签名证书。",
+      "win11On": "Windows 11 一级菜单与经典菜单（显示更多选项）均已启用。",
+      "partial": "仅经典菜单",
+      "reregister": "重新注册",
+      "working": "正在注册…"
     },
     "security": {
       "ratio": "压缩炸弹阈值",
@@ -472,7 +477,8 @@
       "version": "版本",
       "license": "许可证",
       "components": "构建组件",
-      "engines": "格式引擎"
+      "engines": "格式引擎",
+      "source": "源代码"
     }
   },
   "errors": {

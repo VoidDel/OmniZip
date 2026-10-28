@@ -52,7 +52,8 @@ const PATHS: Record<string, string[]> = {
   eject: ['M5.5 14.5h13L12 6z', 'M5.5 18h13'],
   play: ['M8 5.5v13l10-6.5z'],
   pause: ['M8 5.5v13M16 5.5v13'],
-  sliders: ['M5 7h14M5 12h14M5 17h14', 'circle-fill:9,7,2', 'circle-fill:15,12,2', 'circle-fill:10,17,2'],
+  // Eight-tooth gear (settings).
+  gear: ['M10.04 5.59 L10.47 3.33 A8.8 8.8 0 0 1 13.53 3.33 L13.96 5.59 A6.7 6.7 0 0 1 15.15 6.08 L17.05 4.79 A8.8 8.8 0 0 1 19.21 6.95 L17.92 8.85 A6.7 6.7 0 0 1 18.41 10.04 L20.67 10.47 A8.8 8.8 0 0 1 20.67 13.53 L18.41 13.96 A6.7 6.7 0 0 1 17.92 15.15 L19.21 17.05 A8.8 8.8 0 0 1 17.05 19.21 L15.15 17.92 A6.7 6.7 0 0 1 13.96 18.41 L13.53 20.67 A8.8 8.8 0 0 1 10.47 20.67 L10.04 18.41 A6.7 6.7 0 0 1 8.85 17.92 L6.95 19.21 A8.8 8.8 0 0 1 4.79 17.05 L6.08 15.15 A6.7 6.7 0 0 1 5.59 13.96 L3.33 13.53 A8.8 8.8 0 0 1 3.33 10.47 L5.59 10.04 A6.7 6.7 0 0 1 6.08 8.85 L4.79 6.95 A8.8 8.8 0 0 1 6.95 4.79 L8.85 6.08 A6.7 6.7 0 0 1 10.04 5.59Z', 'circle:12,12,2.8'],
   moon: ['M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z'],
   monitor: ['M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 15V6A1.5 1.5 0 0 1 5 4.5z', 'M8.5 20h7M12 16.5V20'],
   sun: ['circle:12,12,4', 'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4'],
@@ -128,6 +129,15 @@ export function Logo({ size = 22 }: { size?: number }) {
   return <img className="logo" src={appIcon} width={size} height={size} alt="" draggable={false} />;
 }
 
+/** GitHub's mark (Octicons mark-github, MIT), filled with the text colour. */
+export function GitHubMark() {
+  return (
+    <svg className="gh-mark" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z" />
+    </svg>
+  );
+}
+
 const IMAGE = /^(jpe?g|png|gif|webp|svg|bmp|heic|ico|icns|tiff?|avif)$/;
 const MEDIA = /^(mp4|mkv|mov|avi|webm|mp3|flac|wav|m4a|ogg|aac)$/;
 const FONT = /^(woff2?|ttf|otf|pf2)$/;
@@ -157,8 +167,10 @@ export function FileIcon({ name, isDir, kind, big }: { name: string; isDir: bool
 
 /** Badge colors per format (stable across themes, docs/05-theming.md §7). */
 export function formatBadgeStyle(format: string, dark: boolean): React.CSSProperties {
-  const base: Record<string, string> = { zip: '#2F6FED', '7z': '#7A5AF8', rar: '#C0392B', iso: '#0E9F8E' };
-  const c = base[format] ?? (format.startsWith('tar') ? '#8A6D3B' : '#64748B');
+  // The colours of the file-type icons (scripts/gen-filetype-icons.mjs), by format family.
+  const base: Record<string, string> = { zip: '#2F6FED', zipx: '#2F6FED', '7z': '#7A5AF8', rar: '#C0392B', iso: '#0B7F72' };
+  const stream = ['gz', 'bz2', 'xz', 'lzma', 'zst', 'lz4', 'br'];
+  const c = base[format] ?? (format.startsWith('tar') ? '#8A6D3B' : stream.includes(format) ? '#4B5B73' : '#64748B');
   const hex = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const [r, g, b] = hex(c);
   const mix = (t: number, to: number) => [r, g, b].map((v) => Math.round(v + (to - v) * t));
