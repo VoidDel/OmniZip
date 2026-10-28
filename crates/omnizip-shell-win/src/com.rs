@@ -75,6 +75,30 @@ pub fn module_path() -> Option<PathBuf> {
     (n > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..n])))
 }
 
+/// Whether apps (and so the context menu) use the dark theme.
+fn dark_theme() -> bool {
+    windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_u32("AppsUseLightTheme"))
+        .is_ok_and(|light| light == 0)
+}
+
+/// The icon of a menu item for the current theme (`menu-icons\<verb>-light.ico` / `-dark.ico`
+/// next to the app, `scripts/gen-menu-icons.mjs`).
+fn menu_icon(verb: Verb) -> Option<PathBuf> {
+    let dir = module_path()?.parent()?.to_path_buf();
+    let theme = if dark_theme() { "dark" } else { "light" };
+    let name = format!("{}-{theme}.ico", verb.cli());
+    // Installed layout: the DLL may sit in a versioned `shell\<ver>` folder below the app.
+    [
+        dir.join("menu-icons"),
+        dir.join("..").join("..").join("menu-icons"),
+    ]
+    .into_iter()
+    .map(|d| d.join(&name))
+    .find(|p| p.is_file())
+}
+
 /// `omnizip-desktop.exe` next to this DLL (or `OMNIZIP_DESKTOP_EXE` for development).
 pub fn desktop_exe() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("OMNIZIP_DESKTOP_EXE") {
@@ -164,11 +188,16 @@ impl IExplorerCommand_Impl for Command_Impl {
 
     fn GetIcon(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
         guard(|| {
-            if self.verb.is_some() && !self.cfg.flat() || !self.cfg.shell.icons {
+            if !self.cfg.shell.icons {
                 return Err(E_NOTIMPL.into());
             }
-            let exe = desktop_exe().ok_or_else(|| windows::core::Error::from(E_NOTIMPL))?;
-            dup(&format!("{},0", exe.display()))
+            // The submenu and "Open with OmniZip" carry the app icon, the other items their own.
+            let icon = match self.verb {
+                None | Some(Verb::Open) => desktop_exe(),
+                Some(v) => menu_icon(v),
+            };
+            let icon = icon.ok_or_else(|| windows::core::Error::from(E_NOTIMPL))?;
+            dup(&format!("{},0", icon.display()))
         })
     }
 

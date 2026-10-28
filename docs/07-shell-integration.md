@@ -32,7 +32,7 @@
 | Windows 11 现代菜单（一级） | `IExplorerCommand` COM 服务器 + AppxManifest `desktop4:FileExplorerContextMenus` | 必须有包身份（MSIX 或 Sparse Package） |
 | 经典菜单（Win10、Win11 "显示更多选项"、Shift+F10） | 同一 COM 类注册到 `HKCR\*\shellex\ContextMenuHandlers\OmniZip`、`HKCR\Directory\shellex\ContextMenuHandlers\OmniZip`、`HKCR\Directory\Background\shellex\…` | 无需身份 |
 
-一个 Rust 编写的 COM DLL 同时服务两者；Win11 上两处都出现同一组菜单。
+一个 Rust 编写的 COM DLL 同时服务两者；Win11 上两处都出现同一组菜单。菜单样式"平铺"只作用于经典菜单（注册表里按样式注册对应的类）；Win11 一级菜单始终是一个"OmniZip"子菜单，设置页在 Windows 上注明这一点。
 
 ### 3.2 COM 扩展 `omnizip_shell.dll`（Rust + `windows-rs`）
 
@@ -42,7 +42,7 @@
 |---|---|
 | `GetState` | 遍历 `IShellItemArray`（上限 1000 项，超过按"混合"处理），仅看扩展名决定 `ECS_ENABLED` / `ECS_HIDDEN`；无扩展名文件最多读 8 个的前 16 字节 |
 | `GetTitle` / `GetToolTip` | 从内嵌 FTL 取文案；语言 = `%APPDATA%\OmniZip\config.toml` → `GetUserDefaultUILanguage()`；按配置文件 mtime 缓存 |
-| `GetIcon` | 返回 `"<dll 路径>,-<资源 id>"`，浅 / 深两套按 `AppsUseLightTheme` 选择 |
+| `GetIcon` | 返回 `"<dll 路径>,-<资源 id>"`，浅 / 深两套按 `AppsUseLightTheme` 选择。**当前实现**：一级菜单与"用 OmniZip 打开"用应用图标，其余各项是与应用同风格的线性图标（`icons/menu/<动作>-light.ico` / `-dark.ico`，`scripts/gen-menu-icons.mjs` 生成，16–48 px），随程序装在程序目录的 `menu-icons` 文件夹；子菜单与平铺样式相同，设置里关闭"显示图标"时都不显示 |
 | `Invoke` | 构造 `omnizip-desktop.exe --shell <verb> --cwd <dir> --files-from <临时文件>`；若主程序已运行则通过命名管道转发；否则 `ShellExecuteEx` 启动；全程不读文件内容 |
 | `EnumSubCommands` | 级联模式下返回子项枚举器 |
 

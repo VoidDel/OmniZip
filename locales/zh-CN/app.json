@@ -443,7 +443,8 @@
       "reregister": "重新注册",
       "working": "正在注册…",
       "missingCli": "应用旁边没有 omnizip 命令行程序（开发构建需先编译 omnizip-cli）",
-      "nautilus": "Nautilus（GNOME 文件）右键菜单，需要安装 python3-nautilus；注册后执行 nautilus -q 重启文件管理器生效。"
+      "nautilus": "Nautilus（GNOME 文件）右键菜单，需要安装 python3-nautilus；注册后执行 nautilus -q 重启文件管理器生效。",
+      "styleHint": "平铺只用于经典菜单（显示更多选项）；Windows 11 一级菜单始终是“OmniZip”子菜单。"
     },
     "security": {
       "ratio": "压缩炸弹阈值",

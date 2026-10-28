@@ -443,7 +443,8 @@
       "reregister": "Register again",
       "working": "Registering…",
       "missingCli": "The omnizip command-line program is not next to the app (development builds: build omnizip-cli first)",
-      "nautilus": "Context menu of Nautilus (GNOME Files), which needs python3-nautilus. After registering, run nautilus -q to restart the file manager."
+      "nautilus": "Context menu of Nautilus (GNOME Files), which needs python3-nautilus. After registering, run nautilus -q to restart the file manager.",
+      "styleHint": "Flat applies to the classic menu (Show more options) only; the Windows 11 top-level menu always has an OmniZip submenu."
     },
     "security": {
       "ratio": "Decompression bomb threshold",

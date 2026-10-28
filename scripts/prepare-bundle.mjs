@@ -6,7 +6,9 @@
 //                            the installer registers (platform/windows/msix/pack.ps1 -Sparse);
 //   * filetypes/<ext>.ico  — the icons of the archive file types (icons/filetypes,
 //                            scripts/gen-filetype-icons.mjs), resources the installer points the
-//                            file types at.
+//                            file types at;
+//   * menu-icons/*.ico     — the icons of the context-menu items (icons/menu,
+//                            scripts/gen-menu-icons.mjs), resources the menu extension shows.
 // Called by `beforeBuildCommand` in apps/desktop/src-tauri/bundle.windows.json (`pnpm bundle:windows`).
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -33,10 +35,11 @@ const built = path.join(root, 'target', triple, 'release');
 copyFileSync(path.join(built, `omnizip${exe}`), path.join(out, `omnizip-${triple}${exe}`));
 if (windows) {
   copyFileSync(path.join(built, 'omnizip_shell.dll'), path.join(out, 'omnizip_shell.dll'));
-  const icons = path.join(root, 'icons/filetypes');
-  mkdirSync(path.join(out, 'filetypes'), { recursive: true });
-  for (const f of readdirSync(icons).filter((f) => f.endsWith('.ico'))) {
-    copyFileSync(path.join(icons, f), path.join(out, 'filetypes', f));
+  for (const [from, to] of [['icons/filetypes', 'filetypes'], ['icons/menu', 'menu-icons']]) {
+    mkdirSync(path.join(out, to), { recursive: true });
+    for (const f of readdirSync(path.join(root, from)).filter((f) => f.endsWith('.ico'))) {
+      copyFileSync(path.join(root, from, f), path.join(out, to, f));
+    }
   }
   // Signed with the release certificate (OMNIZIP_SIGN_PFX, OMNIZIP_SIGN_PASSWORD, its subject in
   // OMNIZIP_PUBLISHER) or with the key of the project's test certificate

@@ -438,7 +438,7 @@ export function SettingsView() {
           <>
             <div className="set-group">
               <ShellStatusRow />
-              <Row label={t('settings.shell.style')}>
+              <Row label={t('settings.shell.style')} hint={document.documentElement.dataset.platform === 'win' ? t('settings.shell.styleHint') : undefined}>
                 <Segmented value={settings.shell.style} onChange={(v) => set((s) => (s.shell.style = v))} options={[['cascade', t('settings.shell.cascade')], ['flat', t('settings.shell.flat')]]} />
               </Row>
               <Row col label={t('settings.shell.items')}>

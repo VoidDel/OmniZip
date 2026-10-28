@@ -9,7 +9,8 @@
     "resources": {
       "binaries/omnizip_shell.dll": "omnizip_shell.dll",
       "binaries/omnizip_menu.msix": "omnizip_menu.msix",
-      "binaries/filetypes/": "filetypes/"
+      "binaries/filetypes/": "filetypes/",
+      "binaries/menu-icons/": "menu-icons/"
     },
     "windows": {
       "nsis": {

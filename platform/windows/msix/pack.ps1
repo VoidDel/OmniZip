@@ -58,6 +58,8 @@ if (-not $Sparse) {
     Copy-Item $src (Join-Path $stage $files[$src])
   }
   Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE.txt")
+  # Icons of the context-menu items, next to omnizip_shell.dll.
+  Copy-Item -Recurse (Join-Path $root "icons/menu") (Join-Path $stage "menu-icons")
 }
 
 # Logos. The shell picks the taskbar, Start and file-type icons by pixel size through

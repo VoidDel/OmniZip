@@ -443,7 +443,8 @@
       "reregister": "再登録",
       "working": "登録中…",
       "missingCli": "アプリの隣に omnizip コマンドラインプログラムがありません（開発ビルドでは先に omnizip-cli をビルドしてください）",
-      "nautilus": "Nautilus（GNOME ファイル）の右クリックメニューです。python3-nautilus が必要です。登録後、nautilus -q でファイルマネージャーを再起動すると有効になります。"
+      "nautilus": "Nautilus（GNOME ファイル）の右クリックメニューです。python3-nautilus が必要です。登録後、nautilus -q でファイルマネージャーを再起動すると有効になります。",
+      "styleHint": "フラットは従来のメニュー（その他のオプションを表示）にのみ適用されます。Windows 11 の第 1 階層メニューは常に「OmniZip」サブメニューです。"
     },
     "security": {
       "ratio": "圧縮爆弾のしきい値",
