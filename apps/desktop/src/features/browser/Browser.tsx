@@ -334,7 +334,9 @@ export function Browser() {
   const cellW = 132;
   const cols = viewMode === 'grid' ? Math.max(1, Math.floor((size.width - 32) / cellW)) : 1;
   const lineCount = viewMode === 'grid' ? Math.ceil(total / cols) : total;
-  const lineH = viewMode === 'grid' ? 116 : rowH;
+  // A grid cell holds padding, icon and gaps (84 px) and the name and size lines (.86rem and
+  // .74rem at line-height 1.4, so they grow with the font size), with 6 px between cells.
+  const lineH = viewMode === 'grid' ? Math.ceil(90 + 2.24 * settings.appearance.font_size) : rowH;
   const virt = useVirtualizer({
     count: lineCount,
     getScrollElement: () => scrollRef.current,
