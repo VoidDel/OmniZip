@@ -156,6 +156,19 @@
     "noEncryption": "{format} archives cannot be encrypted.",
     "exists": "{name} already exists and will be replaced."
   },
+  "draft": {
+    "name": "New archive",
+    "addFiles": "Add files",
+    "addFolder": "Add folder",
+    "newFolder": "New folder",
+    "folderName": "Folder name",
+    "save": "Save…",
+    "unsaved": "New archive, not saved",
+    "empty": "Drag files or folders here, or add them below; when it looks right, choose Save… to pick the format and location",
+    "discardTitle": "Discard the new archive?",
+    "discardMessage": "“{name}” has not been saved; its {count, plural, one {# item} other {# items}} will not be kept.",
+    "discard": "Discard"
+  },
   "extract": {
     "title": "Extract {name}",
     "to": "Extract to",

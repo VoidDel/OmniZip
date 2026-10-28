@@ -1,6 +1,7 @@
 //! OmniZip desktop application (Tauri 2).
 
 pub mod commands;
+pub mod draft;
 pub mod jobs;
 pub mod launch;
 pub mod ops;
@@ -133,8 +134,9 @@ fn handle_invocation(app: &AppHandle, inv: Invocation, startup: bool) {
                 delete_source: false,
                 verify: false,
                 open_after: false,
+                draft: None,
             };
-            let (t, w) = ops::compress_work(req, settings.advanced.threads);
+            let (t, w) = ops::compress_work(req, None, settings.advanced.threads);
             ("compress", t, w)
         }
         _ => unreachable!("foreground verbs return above"),
@@ -239,6 +241,8 @@ pub fn run() {
             commands::archive_preview,
             commands::archive_set_password,
             commands::archive_open_external,
+            commands::draft_new,
+            commands::draft_mkdir,
             commands::job_extract,
             commands::job_compress,
             commands::job_test,

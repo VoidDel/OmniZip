@@ -140,6 +140,8 @@ export interface ArchiveSummary {
   writable: boolean;
   capabilities: string[];
   mountClass: MountClass;
+  /** A new archive not saved yet: edits change memory, saving compresses it. */
+  draft: boolean;
   entries: number;
 }
 
@@ -287,6 +289,8 @@ export interface CompressRequest {
   deleteSource?: boolean;
   verify?: boolean;
   openAfter?: boolean;
+  /** Save this new archive instead of collecting `paths`. */
+  draft?: number | null;
 }
 
 export interface RecentItem {

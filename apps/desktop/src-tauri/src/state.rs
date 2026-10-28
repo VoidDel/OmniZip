@@ -14,7 +14,9 @@ use omnizip_core::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{jobs::JobManager, launch::LaunchRequest, settings::Settings, theme::ThemeFile};
+use crate::{
+    draft::Draft, jobs::JobManager, launch::LaunchRequest, settings::Settings, theme::ThemeFile,
+};
 
 /// An archive open in the browser.
 pub struct OpenedArchive {
@@ -28,6 +30,8 @@ pub struct OpenedArchive {
     pub reader: Mutex<Box<dyn ArchiveReader>>,
     pub password: Mutex<Option<String>>,
     pub encoding: Option<NameEncoding>,
+    /// A new archive not saved yet (`crate::draft`): edits change memory, not a file.
+    pub draft: bool,
 }
 
 /// A recently opened archive.
@@ -43,6 +47,8 @@ pub struct RecentItem {
 
 pub struct AppState {
     pub archives: Mutex<HashMap<u32, Arc<OpenedArchive>>>,
+    /// New archives being edited, by archive id (also in `archives`, for browsing).
+    pub drafts: Mutex<HashMap<u32, Draft>>,
     next_archive: AtomicU32,
     pub jobs: JobManager,
     pub settings: Mutex<Settings>,
@@ -75,6 +81,7 @@ impl AppState {
             .unwrap_or_default();
         Self {
             archives: Mutex::new(HashMap::new()),
+            drafts: Mutex::new(HashMap::new()),
             next_archive: AtomicU32::new(1),
             jobs: JobManager::default(),
             settings: Mutex::new(settings),

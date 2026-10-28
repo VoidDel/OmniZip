@@ -156,6 +156,19 @@
     "noEncryption": "{format} 格式不支持加密。",
     "exists": "{name} 已存在，将被替换。"
   },
+  "draft": {
+    "name": "新建压缩包",
+    "addFiles": "添加文件",
+    "addFolder": "添加文件夹",
+    "newFolder": "新建文件夹",
+    "folderName": "文件夹名称",
+    "save": "保存…",
+    "unsaved": "未保存的新压缩包",
+    "empty": "把文件或文件夹拖到这里，或从下面添加；整理好后点“保存…”选择格式与保存位置",
+    "discardTitle": "放弃新建的压缩包？",
+    "discardMessage": "“{name}”尚未保存，其中的 {count} 项不会被保存。",
+    "discard": "放弃"
+  },
   "extract": {
     "title": "解压 {name}",
     "to": "解压到",

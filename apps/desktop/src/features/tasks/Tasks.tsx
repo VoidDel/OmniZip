@@ -42,6 +42,11 @@ export function useJobEvents() {
       seen.set(j.id, j.state);
       s.upsertJob(j);
       const finished = (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') && before !== j.state;
+      // A saved new archive takes the place of its draft; after a failure the draft stays.
+      if (finished && s.draftSaves.includes(j.id)) {
+        useApp.setState({ draftSaves: s.draftSaves.filter((x) => x !== j.id) });
+        if (j.state === 'done' && j.output) void s.openArchive(j.output, null, true);
+      }
       // Mini windows report their own jobs.
       if (!finished || (j.window && j.window !== 'main')) return;
       if (j.state === 'failed' && j.error) {

@@ -15,9 +15,10 @@ use omnizip_core::{
 };
 use omnizip_formats::shared;
 use serde::Serialize;
-use tauri::{AppHandle, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use crate::{
+    draft::Draft,
     jobs::{JobInfo, JobSpec, PromptAnswer},
     launch::LaunchRequest,
     ops::{self, CompressRequest, ExtractRequest},
@@ -194,6 +195,8 @@ pub struct ArchiveSummary {
     capabilities: Vec<&'static str>,
     mount_class: omnizip_core::MountClass,
     entries: usize,
+    /// A new archive not saved yet.
+    draft: bool,
 }
 
 fn summary(a: &OpenedArchive) -> ArchiveSummary {
@@ -215,10 +218,11 @@ fn summary(a: &OpenedArchive) -> ArchiveSummary {
         },
         files: root.files,
         dirs,
-        writable: caps.contains(Capabilities::UPDATE) && a.info.volumes <= 1,
+        writable: a.draft || caps.contains(Capabilities::UPDATE) && a.info.volumes <= 1,
         capabilities: caps.names(),
         mount_class: a.info.format.mount_class(a.info.solid),
         entries: a.tree.len().saturating_sub(1),
+        draft: a.draft,
     }
 }
 
@@ -301,6 +305,80 @@ pub fn archive_close(state: State<'_, AppState>, id: u32) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
+    state
+        .drafts
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
+}
+
+/// Starts a new archive (`crate::draft`), optionally with files and folders in it, and opens
+/// it for browsing.
+#[tauri::command]
+pub fn draft_new(
+    state: State<'_, AppState>,
+    name: String,
+    paths: Vec<String>,
+) -> CmdResult<ArchiveSummary> {
+    let mut draft = Draft::new(name);
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    draft.add(&paths, "").map_err(err)?;
+    let id = state.next_archive_id();
+    let opened = draft.open(id);
+    let s = summary(&opened);
+    state
+        .archives
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, Arc::new(opened));
+    state
+        .drafts
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, draft);
+    Ok(s)
+}
+
+/// Creates an empty folder in a new archive.
+#[tauri::command]
+pub fn draft_mkdir(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: u32,
+    dir: NodeId,
+    name: String,
+) -> CmdResult<()> {
+    if name.is_empty() || name.contains(['/', '\\']) {
+        return Err(err(Error::invalid_argument("invalid name")));
+    }
+    let dir = archive(&state, id)?.tree.path(dir);
+    edit_draft(&app, &state, id, |d| d.mkdir(&dir, &name))
+        .unwrap_or_else(|| Err(err(Error::invalid_argument("not a new archive"))))
+        .map(|_| ())
+}
+
+/// Applies an edit to a new archive and refreshes its listing. Drafts live in memory, so there
+/// is no job (the returned job id is 0); `None` when `id` is not a draft.
+fn edit_draft(
+    app: &AppHandle,
+    state: &AppState,
+    id: u32,
+    edit: impl FnOnce(&mut Draft) -> omnizip_core::Result<()>,
+) -> Option<CmdResult<u32>> {
+    let mut drafts = state.drafts.lock().unwrap_or_else(|e| e.into_inner());
+    let draft = drafts.get_mut(&id)?;
+    if let Err(e) = edit(draft) {
+        return Some(Err(err(e)));
+    }
+    let opened = draft.open(id);
+    drop(drafts);
+    state
+        .archives
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, Arc::new(opened));
+    let _ = app.emit("archive://changed", id);
+    Some(Ok(0))
 }
 
 #[derive(Serialize)]
@@ -657,7 +735,16 @@ pub fn job_compress(
     request: CompressRequest,
     window: Option<String>,
 ) -> CmdResult<u32> {
-    let (title, work) = ops::compress_work(request, threads(&state));
+    let sources = request.draft.map(|id| {
+        state
+            .drafts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .map(|d| d.sources.clone())
+            .unwrap_or_default()
+    });
+    let (title, work) = ops::compress_work(request, sources, threads(&state));
     Ok(state.jobs.spawn(
         &app,
         JobSpec {
@@ -725,8 +812,11 @@ pub fn job_add(
 ) -> CmdResult<u32> {
     let a = archive(&state, id)?;
     let prefix = a.tree.path(dir);
-    let ctx = omnizip_core::JobCtx::default();
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    if let Some(r) = edit_draft(&app, &state, id, |d| d.add(&paths, &prefix)) {
+        return r;
+    }
+    let ctx = omnizip_core::JobCtx::default();
     let sources = omnizip_core::source::collect(
         &paths,
         &omnizip_core::CollectOptions {
@@ -751,7 +841,13 @@ pub fn job_delete(
         .iter()
         .map(|&n| a.tree.path(n))
         .filter(|p| !p.is_empty())
-        .collect();
+        .collect::<Vec<_>>();
+    if let Some(r) = edit_draft(&app, &state, id, |d| {
+        paths.iter().for_each(|p| d.delete(p));
+        Ok(())
+    }) {
+        return r;
+    }
     spawn_update(&app, &state, id, "delete", vec![UpdateOp::Delete { paths }])
 }
 
@@ -772,6 +868,9 @@ pub fn job_rename(
         Some((parent, _)) => format!("{parent}/{name}"),
         None => name,
     };
+    if let Some(r) = edit_draft(&app, &state, id, |d| d.rename(&from, &to)) {
+        return r;
+    }
     spawn_update(
         &app,
         &state,

@@ -11,7 +11,7 @@ import { Home, pickArchive } from './features/home/Home';
 import { SettingsView } from './features/settings/Settings';
 import { Sidebar, StatusBar, TitleBar } from './features/shell/Chrome';
 import { TaskDrawer, useJobEvents } from './features/tasks/Tasks';
-import { resolveLang, setLanguage } from './i18n';
+import i18n, { resolveLang, setLanguage } from './i18n';
 import { api, events } from './lib/api';
 import { applyTheme, effectiveDark, onSystemThemeChange } from './lib/theme';
 import type { LaunchRequest } from './lib/types';
@@ -51,7 +51,8 @@ async function handleDrop(paths: string[]) {
   const { archives, others } = await api.classify(paths);
   if (others.length === 0 && archives.length === 1) await s.openArchive(archives[0]);
   else if (others.length === 0) s.openDialog({ kind: 'extract', paths: archives });
-  else s.openDialog({ kind: 'compress', paths });
+  // Other files start a new archive with them in it (docs/04-ui-design.md §1).
+  else await s.newArchive(i18n.t('draft.name'), paths);
 }
 
 export function App() {

@@ -242,13 +242,19 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [advTab, setAdvTab] = useState<AdvTab>('encrypt');
 
+  // Saving a new archive: its items are already chosen (no exclusions, nothing to delete
+  // afterwards), and it is saved to Downloads under its name unless the user picks a place.
+  const draft = d.draft !== undefined;
   useEffect(() => {
-    void api.pathStats(d.paths).then((s) => {
+    const a = useApp.getState().archive;
+    const stats: Promise<PathStats> =
+      draft && a ? Promise.resolve({ bytes: a.totalSize, files: a.files, commonParent: null, suggestedName: a.name }) : api.pathStats(d.paths);
+    void stats.then((s) => {
       setStats(s);
       setDir(s.commonParent ?? boot.system.downloadsDir ?? '');
       setStem(s.suggestedName);
     });
-  }, [d.paths, boot.system.downloadsDir]);
+  }, [d.paths, draft, boot.system.downloadsDir]);
   const ext = '.' + format;
   const dest = dir ? joinPath(dir, stem + ext, sep) : '';
   useEffect(() => {
@@ -266,8 +272,14 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const secs = bytes / (LEVEL_SPEED[level] * 1024 * 1024);
   const volumeSize =
     volume === 'fat32' ? 4 * 1024 ** 3 - 1 : volume === 'dvd' ? 4_700_000_000 : volume === 'email' ? 25 * 1024 * 1024 : volume === 'custom' ? customMb * 1024 * 1024 : null;
-  // Formats without a choice of method (and not 7z, which has solid mode) have no Method tab.
-  const tabs: AdvTab[] = ['encrypt', 'volume', ...(methods.length > 0 || format === '7z' ? (['method'] as const) : []), 'other'];
+  // Formats without a choice of method (and not 7z, which has solid mode) have no Method tab;
+  // a new archive has nothing under Other but a ZIP comment.
+  const tabs: AdvTab[] = [
+    'encrypt',
+    'volume',
+    ...(methods.length > 0 || format === '7z' ? (['method'] as const) : []),
+    ...(!draft || format === 'zip' ? (['other'] as const) : []),
+  ];
   const tab = tabs.includes(advTab) ? advTab : 'encrypt';
   const panel = (id: AdvTab) => ({ className: `tabpanel${tab === id ? '' : ' off'}`, inert: tab !== id });
   const activeAdvanced = [
@@ -296,11 +308,13 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         solid,
         volumeSize,
         comment: comment || null,
-        exclude: exclude.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
-        deleteSource,
+        exclude: draft ? [] : exclude.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
+        deleteSource: !draft && deleteSource,
         verify,
         openAfter,
+        draft: d.draft ?? null,
       }, shell ?? undefined);
+      if (draft) useApp.getState().savingDraft(id);
       if (shell) startedInShell(d.id, id);
       else close();
     } catch (e) {
@@ -459,10 +473,12 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
                   <input id="cf-comment" className="inp" value={comment} onChange={(e) => setComment(e.target.value)} />
                 </div>
               )}
-              <div className="field">
-                <label htmlFor="cf-exclude">{t('compress.exclude')}</label>
-                <textarea id="cf-exclude" className="inp mono" rows={3} value={exclude} placeholder={'node_modules\n*.log'} onChange={(e) => setExclude(e.target.value)} />
-              </div>
+              {!draft && (
+                <div className="field">
+                  <label htmlFor="cf-exclude">{t('compress.exclude')}</label>
+                  <textarea id="cf-exclude" className="inp mono" rows={3} value={exclude} placeholder={'node_modules\n*.log'} onChange={(e) => setExclude(e.target.value)} />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -470,7 +486,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
       <div className="field" style={{ gap: 8 }}>
         <label className="chk"><input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} /> {t('compress.verify')}</label>
         <label className="chk"><input type="checkbox" checked={openAfter} onChange={(e) => setOpenAfter(e.target.checked)} /> {t('compress.openAfter')}</label>
-        <label className="chk"><input type="checkbox" checked={deleteSource} onChange={(e) => setDeleteSource(e.target.checked)} /> {t('compress.deleteSource')}</label>
+        {!draft && <label className="chk"><input type="checkbox" checked={deleteSource} onChange={(e) => setDeleteSource(e.target.checked)} /> {t('compress.deleteSource')}</label>}
       </div>
     </Modal>
   );
@@ -486,7 +502,8 @@ function OpenPasswordDialog({ d }: { d: Extract<Dialog, { kind: 'openPassword' }
   const submit = async () => {
     if (!pw) return setError(t('pwd.empty'));
     close();
-    await useApp.getState().openArchive(d.path, pw);
+    // Retrying after the password prompt: a new archive was already confirmed to be dropped.
+    await useApp.getState().openArchive(d.path, pw, true);
   };
   return (
     <Modal
@@ -624,21 +641,25 @@ function ConfirmDialog({ d }: { d: Extract<Dialog, { kind: 'confirm' }> }) {
 
 function AskDialog({ d }: { d: Extract<Dialog, { kind: 'ask' }> }) {
   const { t } = useTranslation();
-  const close = useClose(d);
+  const closeDialog = useClose(d);
+  const cancel = () => {
+    closeDialog();
+    d.onCancel?.();
+  };
   return (
     <Modal
       title={d.title}
-      onClose={close}
+      onClose={cancel}
       width={440}
       footer={
         <>
-          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button type="button" className="btn" onClick={cancel}>{t('common.cancel')}</button>
           <button
             type="button"
             className={`btn primary`}
             style={d.danger ? { background: 'var(--danger)' } : undefined}
             onClick={() => {
-              close();
+              closeDialog();
               d.onConfirm();
             }}
           >
@@ -796,13 +817,14 @@ function RenameDialog({ d }: { d: Extract<Dialog, { kind: 'rename' }> }) {
   const [name, setName] = useState(d.name);
   const invalid = /[\\/]/.test(name);
   const submit = () => {
-    if (!name.trim() || invalid || name === d.name) return close();
+    if (!name.trim() || invalid || (!d.mkdir && name === d.name)) return close();
     close();
-    void api.rename(archive.id, d.node, name.trim()).catch((e) => useApp.getState().reportError(e));
+    const done = d.mkdir ? api.mkdir(archive.id, d.node, name.trim()) : api.rename(archive.id, d.node, name.trim());
+    void done.catch((e) => useApp.getState().reportError(e));
   };
   return (
     <Modal
-      title={t('rename.title')}
+      title={d.mkdir ? t('draft.newFolder') : t('rename.title')}
       onClose={close}
       width={420}
       footer={
@@ -813,17 +835,23 @@ function RenameDialog({ d }: { d: Extract<Dialog, { kind: 'rename' }> }) {
       }
     >
       <div className="field">
-        <label htmlFor="rn">{t('rename.label')}</label>
+        <label htmlFor="rn">{d.mkdir ? t('draft.folderName') : t('rename.label')}</label>
         <input
           id="rn"
           className="inp"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onFocus={(e) => {
-            const dot = d.name.lastIndexOf('.');
+            const dot = d.mkdir ? -1 : d.name.lastIndexOf('.');
             e.target.setSelectionRange(0, dot > 0 ? dot : d.name.length);
           }}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            // Also swallows the key press, which would otherwise click the button that
+            // opened this dialog once focus returns to it (and open the dialog again).
+            e.preventDefault();
+            submit();
+          }}
         />
         {invalid && <div className="err"><Icon name="alert" /><span>{t('rename.invalid')}</span></div>}
       </div>

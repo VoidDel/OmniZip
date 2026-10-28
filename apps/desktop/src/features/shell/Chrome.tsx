@@ -272,9 +272,12 @@ export function Sidebar() {
             >
               <Icon name="archive" className="fi archive" />
               <span className="lbl">{archive.name}</span>
-              <span className="badge" style={{ marginLeft: 'auto', ...formatBadgeStyle(archive.info.format, false) }}>
-                {archive.info.format.toUpperCase()}
-              </span>
+              {/* A new archive has no format until it is saved. */}
+              {!archive.draft && (
+                <span className="badge" style={{ marginLeft: 'auto', ...formatBadgeStyle(archive.info.format, false) }}>
+                  {archive.info.format.toUpperCase()}
+                </span>
+              )}
             </button>
             {roots.map((r) => (
               <TreeNode key={r.node} id={archive.id} item={r} depth={1} />
@@ -338,6 +341,17 @@ export function StatusBar() {
   // Only an open archive has something to report; the app version is shown next to the logo.
   if (view !== 'browser' || !archive) return null;
   const i = archive.info;
+  if (archive.draft) {
+    return (
+      <footer className="statusbar">
+        <span className="lft">{t('draft.unsaved')}</span>
+        <span className="mid">
+          {t('status.items', { count: archive.entries })} · {fmt.size(archive.totalSize)}
+          {selection.size > 0 && ` · ${t('status.selected', { count: selection.size, size: fmt.size(selSize) })}`}
+        </span>
+      </footer>
+    );
+  }
   return (
     <footer className="statusbar">
       <span className="lft">

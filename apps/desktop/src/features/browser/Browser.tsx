@@ -155,15 +155,23 @@ export function Browser() {
 
   // ---- commands
   const readonly = !archive.writable;
+  // A new archive not saved yet: filled from disk and saved, nothing to extract, test or mount.
+  const draft = archive.draft;
   const readonlyToast = () =>
     useApp.getState().toast({ tone: 'warn', text: t('toast.readonly', { format: archive.info.format.toUpperCase() }) });
+  const addPicked = async (directory: boolean, title: string) => {
+    const picked = await openDialog({ multiple: true, directory, title });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (paths.length) await api.add(archive.id, paths, cwd).catch((e) => useApp.getState().reportError(e));
+  };
   const cmd = {
     add: async () => {
       if (readonly) return readonlyToast();
-      const picked = await openDialog({ multiple: true, directory: false, title: t('cmd.add') });
-      const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
-      if (paths.length) await api.add(archive.id, paths, cwd).catch((e) => useApp.getState().reportError(e));
+      await addPicked(false, draft ? t('draft.addFiles') : t('cmd.add'));
     },
+    addFolder: () => void addPicked(true, t('draft.addFolder')),
+    mkdir: () => openDialogSpec({ kind: 'rename', node: cwd, name: t('draft.newFolder'), mkdir: true }),
+    save: () => openDialogSpec({ kind: 'compress', paths: [], draft: archive.id }),
     extract: (nodes: number[]) => openDialogSpec({ kind: 'extract', nodes, relativeTo: nodes.length ? cwd : undefined }),
     test: () => void api.test(archive.id).catch((e) => useApp.getState().reportError(e)),
     mount: () => openDialogSpec({ kind: 'mount' }),
@@ -222,8 +230,12 @@ export function Browser() {
         { label: r.isDir ? t('cmd.open') : t('cmd.preview'), icon: r.isDir ? 'folderOpen' : 'eye', kbd: r.isDir ? 'Enter' : 'Space', run: () => openRow(r) },
         ...(!r.isDir ? [{ label: t('cmd.openWith'), icon: 'external' as const, run: () => cmd.openWith(r.node) }] : []),
         { separator: true },
-        { label: t('cmd.extractSelected'), icon: 'extract', kbd: 'Ctrl+E', run: () => cmd.extract(nodes) },
-        { separator: true },
+        ...(draft
+          ? []
+          : [
+              { label: t('cmd.extractSelected'), icon: 'extract' as const, kbd: 'Ctrl+E', run: () => cmd.extract(nodes) },
+              { separator: true },
+            ]),
         { label: t('cmd.copyPath'), icon: 'copy', run: () => void cmd.copyPath(r.node) },
         { label: t('cmd.rename'), icon: 'edit', kbd: 'F2', disabled: readonly || nodes.length !== 1, run: () => cmd.rename(r) },
         { label: t('cmd.delete'), icon: 'trash', kbd: 'Del', danger: true, disabled: readonly, run: () => cmd.remove(nodes) },
@@ -237,14 +249,22 @@ export function Browser() {
     setMenu({
       x,
       y,
-      items: [
-        { label: t('cmd.add'), icon: 'plus', disabled: readonly, run: () => void cmd.add() },
-        { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },
-        { separator: true },
-        { label: t('cmd.extract'), icon: 'extract', run: () => cmd.extract([]) },
-        { label: t('cmd.test'), icon: 'checkCircle', kbd: 'Ctrl+T', run: cmd.test },
-        { label: t('cmd.encoding'), icon: 'globe', run: () => cmd.encoding(x, y) },
-      ],
+      items: draft
+        ? [
+            { label: t('draft.addFiles'), icon: 'plus', run: () => void cmd.add() },
+            { label: t('draft.addFolder'), icon: 'folderPlus', run: cmd.addFolder },
+            { label: t('draft.newFolder'), icon: 'folder', run: cmd.mkdir },
+            { separator: true },
+            { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },
+          ]
+        : [
+            { label: t('cmd.add'), icon: 'plus', disabled: readonly, run: () => void cmd.add() },
+            { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },
+            { separator: true },
+            { label: t('cmd.extract'), icon: 'extract', run: () => cmd.extract([]) },
+            { label: t('cmd.test'), icon: 'checkCircle', kbd: 'Ctrl+T', run: cmd.test },
+            { label: t('cmd.encoding'), icon: 'globe', run: () => cmd.encoding(x, y) },
+          ],
     });
 
   // ---- virtualization
@@ -385,19 +405,22 @@ export function Browser() {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const k = e.key.toLowerCase();
-      if (k === 'e') {
+      if (draft && k === 's') {
+        e.preventDefault();
+        cmd.save();
+      } else if (k === 'e' && !draft) {
         e.preventDefault();
         cmd.extract(e.shiftKey ? [] : Array.from(useApp.getState().selection));
       } else if (k === 'f') {
         e.preventDefault();
         document.getElementById('search')?.focus();
-      } else if (k === 't') {
+      } else if (k === 't' && !draft) {
         e.preventDefault();
         cmd.test();
       } else if (k === 'i') {
         e.preventDefault();
         void cmd.add();
-      } else if (k === 'm') {
+      } else if (k === 'm' && !draft) {
         e.preventDefault();
         cmd.mount();
       } else if (e.key === '1' || e.key === '2') {
@@ -442,10 +465,21 @@ export function Browser() {
   return (
     <>
       <div className="cmdbar">
-        {btn('add', 'plus', t('cmd.add'), () => void cmd.add(), { disabled: readonly })}
-        {btn('extract', 'extract', n ? t('cmd.extractSelected') : t('cmd.extract'), () => cmd.extract(selectedNodes), { primary: true })}
-        {btn('mount', 'drive', t('cmd.mount'), cmd.mount)}
-        {btn('test', 'checkCircle', t('cmd.test'), cmd.test)}
+        {draft ? (
+          <>
+            {btn('add', 'plus', t('draft.addFiles'), () => void cmd.add())}
+            {btn('addFolder', 'folderPlus', t('draft.addFolder'), cmd.addFolder)}
+            {btn('mkdir', 'folder', t('draft.newFolder'), cmd.mkdir)}
+            {btn('save', 'package', t('draft.save'), cmd.save, { primary: true, disabled: archive.entries === 0 })}
+          </>
+        ) : (
+          <>
+            {btn('add', 'plus', t('cmd.add'), () => void cmd.add(), { disabled: readonly })}
+            {btn('extract', 'extract', n ? t('cmd.extractSelected') : t('cmd.extract'), () => cmd.extract(selectedNodes), { primary: true })}
+            {btn('mount', 'drive', t('cmd.mount'), cmd.mount)}
+            {btn('test', 'checkCircle', t('cmd.test'), cmd.test)}
+          </>
+        )}
         {n > 0 && btn('delete', 'trash', t('cmd.delete'), () => cmd.remove(selectedNodes), { disabled: readonly })}
         {n === 1 && btn('props', 'info', t('cmd.props'), () => cmd.props(selectedNodes[0]))}
         <button
@@ -459,12 +493,12 @@ export function Browser() {
               x: r.left,
               y: r.bottom + 4,
               items: [
-                { label: t('cmd.encoding'), icon: 'globe', run: () => cmd.encoding(r.left, r.bottom + 4) },
+                ...(draft ? [] : [{ label: t('cmd.encoding'), icon: 'globe' as const, run: () => cmd.encoding(r.left, r.bottom + 4) }]),
                 { label: t('cmd.rename'), icon: 'edit', disabled: readonly || n !== 1, run: () => cmd.rename(rowByNode(selectedNodes[0])) },
                 { label: t('cmd.copyPath'), icon: 'copy', disabled: n !== 1, run: () => void cmd.copyPath(selectedNodes[0]) },
                 { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },
                 { separator: true },
-                { label: t('cmd.reveal'), icon: 'folderOpen', run: () => void api.reveal(archive.path) },
+                ...(draft ? [] : [{ label: t('cmd.reveal'), icon: 'folderOpen' as const, run: () => void api.reveal(archive.path) }]),
                 { label: t('cmd.closeArchive'), icon: 'x', run: () => useApp.getState().closeArchive() },
               ],
             });
@@ -506,7 +540,7 @@ export function Browser() {
             <button type="button" className={crumbs.length === 0 ? 'cur' : ''} onClick={() => navigate(0)}>
               <Icon name="archive" className="fi archive" />
               {archive.name}
-              <span className="badge" style={formatBadgeStyle(archive.info.format, dark)}>{archive.info.format.toUpperCase()}</span>
+              {!draft && <span className="badge" style={formatBadgeStyle(archive.info.format, dark)}>{archive.info.format.toUpperCase()}</span>}
             </button>
             {crumbs.map((c, i) => (
               <span key={c.node} style={{ display: 'contents' }}>
@@ -545,8 +579,20 @@ export function Browser() {
       >
         {ready && total === 0 ? (
           <div className="emptyst">
-            <Icon name={searching ? 'search' : 'folderOpen'} />
-            <div>{searching ? t('empty.search', { query }) : t('empty.dir')}</div>
+            <Icon name={searching ? 'search' : draft ? 'upload' : 'folderOpen'} />
+            <div>{searching ? t('empty.search', { query }) : draft ? t('draft.empty') : t('empty.dir')}</div>
+            {draft && !searching && (
+              <div className="inline">
+                <button type="button" className="btn outline" onClick={() => void cmd.add()}>
+                  <Icon name="plus" />
+                  <span>{t('draft.addFiles')}</span>
+                </button>
+                <button type="button" className="btn outline" onClick={cmd.addFolder}>
+                  <Icon name="folderPlus" />
+                  <span>{t('draft.addFolder')}</span>
+                </button>
+              </div>
+            )}
             {searching && (
               <button type="button" className="btn outline" onClick={() => setQuery('')}>
                 {t('empty.clearSearch')}

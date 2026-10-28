@@ -3,6 +3,7 @@
 
 import { create } from 'zustand';
 
+import i18n from '../i18n';
 import { api, asError } from '../lib/api';
 import type {
   ArchiveSummary,
@@ -22,16 +23,18 @@ export type SettingsTab =
 /** Modal dialogs. Each carries its own props; the host renders the top-most one. */
 export type DialogSpec =
   | { kind: 'extract'; paths?: string[]; nodes?: number[]; relativeTo?: number }
-  | { kind: 'compress'; paths: string[] }
+  /** `draft`: save that new archive (its items) instead of compressing `paths`. */
+  | { kind: 'compress'; paths: string[]; draft?: number }
   | { kind: 'openPassword'; path: string; wrong: boolean }
   | { kind: 'jobPassword'; jobId: number; promptId: number; archive: string; attempt: number }
   | { kind: 'conflict'; jobId: number; promptId: number; data: Record<string, unknown> }
   | { kind: 'confirm'; jobId: number; promptId: number; data: Record<string, unknown> }
   | { kind: 'props'; node: number }
   | { kind: 'preview'; node: number }
-  | { kind: 'rename'; node: number; name: string }
+  /** `mkdir`: create a folder named `name` in the folder `node` of a new archive instead. */
+  | { kind: 'rename'; node: number; name: string; mkdir?: boolean }
   | { kind: 'mount' }
-  | { kind: 'ask'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void };
+  | { kind: 'ask'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void; onCancel?: () => void };
 
 export type Dialog = DialogSpec & { id: number };
 
@@ -72,6 +75,8 @@ interface State {
   /** Job started from that dialog; the window then shows its progress. */
   shellJob: number | null;
   toasts: Toast[];
+  /** Jobs saving a new archive: when one succeeds, the saved archive replaces the draft. */
+  draftSaves: number[];
 }
 
 interface Actions {
@@ -82,9 +87,13 @@ interface Actions {
   updateSettings(f: (s: Settings) => void): Promise<void>;
   setView(v: View): void;
   setSettingsTab(t: SettingsTab): void;
-  openArchive(path: string, password?: string | null): Promise<boolean>;
+  /** `force`: replace a new archive with content without asking (it has been saved). */
+  openArchive(path: string, password?: string | null, force?: boolean): Promise<boolean>;
+  /** Starts a new archive (optionally with files and folders) and shows it. */
+  newArchive(name: string, paths?: string[]): Promise<void>;
   setArchive(a: ArchiveSummary | null): void;
   closeArchive(): void;
+  savingDraft(jobId: number): void;
   navigate(node: number, push?: boolean): void;
   back(): void;
   forward(): void;
@@ -112,6 +121,39 @@ const nextId = () => seq++;
 /** Error reports are rendered by the toast host with `errorText`. */
 export const errorHandler: { render: (e: ErrorReport) => string } = { render: (e) => e.message };
 
+/** State for showing an archive (or a new one) from its root. */
+const shown = (a: ArchiveSummary, listVersion: number): Partial<State> => ({
+  archive: a,
+  cwd: 0,
+  history: [0],
+  histIdx: 0,
+  query: '',
+  selection: new Set(),
+  focus: null,
+  anchor: null,
+  expanded: new Set([0]),
+  view: 'browser',
+  listVersion: listVersion + 1,
+});
+
+/** Asks before a new archive with something in it is thrown away; resolves to whether to go on. */
+function discardDraft(): Promise<boolean> {
+  const s = useApp.getState();
+  const a = s.archive;
+  if (!a?.draft || a.entries === 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    s.openDialog({
+      kind: 'ask',
+      title: i18n.t('draft.discardTitle'),
+      message: i18n.t('draft.discardMessage', { name: a.name, count: a.entries }),
+      confirm: i18n.t('draft.discard'),
+      danger: true,
+      onConfirm: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
 export const useApp = create<State & Actions>()((set, get) => ({
   boot: null,
   settings: null,
@@ -138,6 +180,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   shellLabel: null,
   shellJob: null,
   toasts: [],
+  draftSaves: [],
 
   setBoot: (b) => set({ boot: b, settings: b.settings, themes: b.themes }),
   setTheme: (t) => set({ theme: t }),
@@ -163,24 +206,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
   setView: (v) => set({ view: v, sidebarOpen: false }),
   setSettingsTab: (t) => set({ settingsTab: t, view: 'settings', sidebarOpen: false }),
 
-  openArchive: async (path, password) => {
+  openArchive: async (path, password, force) => {
+    if (!force && !(await discardDraft())) return false;
     try {
       const a = await api.openArchive(path, password ?? null, null);
       const prev = get().archive;
       if (prev && prev.id !== a.id) void api.closeArchive(prev.id);
-      set({
-        archive: a,
-        cwd: 0,
-        history: [0],
-        histIdx: 0,
-        query: '',
-        selection: new Set(),
-        focus: null,
-        anchor: null,
-        expanded: new Set([0]),
-        view: 'browser',
-        listVersion: get().listVersion + 1,
-      });
+      set(shown(a, get().listVersion));
       return true;
     } catch (e) {
       const err = asError(e);
@@ -192,12 +224,27 @@ export const useApp = create<State & Actions>()((set, get) => ({
       return false;
     }
   },
+  newArchive: async (name, paths = []) => {
+    if (!(await discardDraft())) return;
+    try {
+      const a = await api.draftNew(name, paths);
+      const prev = get().archive;
+      if (prev) void api.closeArchive(prev.id);
+      set(shown(a, get().listVersion));
+    } catch (e) {
+      get().reportError(e);
+    }
+  },
   setArchive: (a) => set({ archive: a, listVersion: get().listVersion + 1 }),
   closeArchive: () => {
-    const a = get().archive;
-    if (a) void api.closeArchive(a.id);
-    set({ archive: null, view: 'home', selection: new Set(), query: '' });
+    void discardDraft().then((ok) => {
+      if (!ok) return;
+      const a = get().archive;
+      if (a) void api.closeArchive(a.id);
+      set({ archive: null, view: 'home', selection: new Set(), query: '' });
+    });
   },
+  savingDraft: (jobId) => set({ draftSaves: [...get().draftSaves, jobId] }),
 
   navigate: (node, push = true) => {
     const { history, histIdx } = get();

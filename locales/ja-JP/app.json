@@ -156,6 +156,19 @@
     "noEncryption": "{format} 形式は暗号化できません。",
     "exists": "{name} は既に存在し、置き換えられます。"
   },
+  "draft": {
+    "name": "新しいアーカイブ",
+    "addFiles": "ファイルを追加",
+    "addFolder": "フォルダーを追加",
+    "newFolder": "新しいフォルダー",
+    "folderName": "フォルダー名",
+    "save": "保存…",
+    "unsaved": "未保存の新しいアーカイブ",
+    "empty": "ファイルやフォルダーをここにドラッグするか、下から追加します。整ったら「保存…」で形式と保存先を選びます",
+    "discardTitle": "新しいアーカイブを破棄しますか？",
+    "discardMessage": "「{name}」は保存されていません。{count} 個の項目は保存されません。",
+    "discard": "破棄"
+  },
   "extract": {
     "title": "{name} を展開",
     "to": "展開先",

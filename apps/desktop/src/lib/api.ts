@@ -70,6 +70,9 @@ export const api = {
   add: (id: number, paths: string[], dir: number) => invoke<number>('job_add', { id, paths, dir }),
   remove: (id: number, nodes: number[]) => invoke<number>('job_delete', { id, nodes }),
   rename: (id: number, node: number, name: string) => invoke<number>('job_rename', { id, node, name }),
+  /** Starts a new archive, optionally with files and folders in it. */
+  draftNew: (name: string, paths: string[]) => invoke<ArchiveSummary>('draft_new', { name, paths }),
+  mkdir: (id: number, dir: number, name: string) => invoke<void>('draft_mkdir', { id, dir, name }),
   cancelJob: (id: number) => invoke<void>('job_cancel', { id }),
   pauseJob: (id: number) => invoke<void>('job_pause', { id }),
   resumeJob: (id: number) => invoke<void>('job_resume', { id }),

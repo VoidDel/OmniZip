@@ -156,6 +156,19 @@
     "noEncryption": "{format} 格式不支援加密。",
     "exists": "{name} 已存在，將被取代。"
   },
+  "draft": {
+    "name": "新增壓縮檔",
+    "addFiles": "加入檔案",
+    "addFolder": "加入資料夾",
+    "newFolder": "新增資料夾",
+    "folderName": "資料夾名稱",
+    "save": "儲存…",
+    "unsaved": "未儲存的新壓縮檔",
+    "empty": "把檔案或資料夾拖到這裡，或從下方加入；整理好後按「儲存…」選擇格式與儲存位置",
+    "discardTitle": "放棄新增的壓縮檔？",
+    "discardMessage": "「{name}」尚未儲存，其中的 {count} 項不會被儲存。",
+    "discard": "放棄"
+  },
   "extract": {
     "title": "解壓縮 {name}",
     "to": "解壓縮到",

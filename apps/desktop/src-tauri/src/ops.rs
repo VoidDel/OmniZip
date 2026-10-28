@@ -74,6 +74,9 @@ pub struct CompressRequest {
     pub verify: bool,
     #[serde(default)]
     pub open_after: bool,
+    /// Save this new archive (`crate::draft`) instead of collecting `paths`.
+    #[serde(default)]
+    pub draft: Option<u32>,
 }
 
 fn yes() -> bool {
@@ -202,20 +205,30 @@ fn selection_for(a: &OpenedArchive, nodes: &[u32], relative_to: Option<u32>) -> 
 }
 
 /// Builds the compression work.
-pub fn compress_work(req: CompressRequest, threads: u32) -> (String, Work) {
+/// `sources` are the items of a new archive being saved; otherwise `req.paths` are collected.
+pub fn compress_work(
+    req: CompressRequest,
+    sources: Option<Vec<omnizip_core::Source>>,
+    threads: u32,
+) -> (String, Work) {
     let dest = PathBuf::from(&req.destination);
     let title = file_name(&dest);
     let work: Work = Box::new(move |ctx: &JobCtx| {
-        let paths: Vec<PathBuf> = req.paths.iter().map(PathBuf::from).collect();
-        let sources = source::collect(
-            &paths,
-            &CollectOptions {
-                exclude: req.exclude.clone(),
-                never: vec![dest.clone()],
-                ..Default::default()
-            },
-            ctx,
-        )?;
+        let sources = match &sources {
+            Some(items) => items.clone(),
+            None => {
+                let paths: Vec<PathBuf> = req.paths.iter().map(PathBuf::from).collect();
+                source::collect(
+                    &paths,
+                    &CollectOptions {
+                        exclude: req.exclude.clone(),
+                        never: vec![dest.clone()],
+                        ..Default::default()
+                    },
+                    ctx,
+                )?
+            }
+        };
         let opts = WriteOptions {
             format: req.format,
             level: req.level,
@@ -246,7 +259,7 @@ pub fn compress_work(req: CompressRequest, threads: u32) -> (String, Work) {
             report.warnings.extend(t.warnings);
         }
         if req.delete_source {
-            for p in &paths {
+            for p in &req.paths {
                 let _ = trash::delete(p);
             }
         }
@@ -396,6 +409,7 @@ pub fn open_archive(
         reader: std::sync::Mutex::new(reader),
         password: std::sync::Mutex::new(password),
         encoding,
+        draft: false,
     })
 }
 

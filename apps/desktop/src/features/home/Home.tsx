@@ -44,11 +44,9 @@ export function Home({ dragOver }: { dragOver: boolean }) {
     const p = await pickArchive(t);
     if (p) await openArchive(p);
   };
-  const onNew = async () => {
-    const picked = await open({ multiple: true, directory: false, title: t('home.new') });
-    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
-    if (paths.length) openDialogSpec({ kind: 'compress', paths });
-  };
+  // An empty new archive to fill (drag in, add, arrange) and save; "Archive a folder" is the
+  // one-step way to compress something as it is.
+  const onNew = () => void useApp.getState().newArchive(t('draft.name'));
   const onNewFolder = async () => {
     const picked = await open({ multiple: false, directory: true, title: t('home.new') });
     if (typeof picked === 'string') openDialogSpec({ kind: 'compress', paths: [picked] });
@@ -75,7 +73,7 @@ export function Home({ dragOver }: { dragOver: boolean }) {
           <button
             type="button"
             className="btn outline lg"
-            onClick={() => void onNew()}
+            onClick={onNew}
           >
             <Icon name="plus" />
             <span>{t('home.new')}</span>
