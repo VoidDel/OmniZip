@@ -16,6 +16,7 @@ path = "src/main.rs"
 omnizip-core.workspace = true
 omnizip-formats.workspace = true
 omnizip-i18n.workspace = true
+omnizip-shell-win = { path = "../omnizip-shell-win" }
 clap.workspace = true
 clap_complete.workspace = true
 clap_mangen.workspace = true

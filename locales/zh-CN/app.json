@@ -441,7 +441,9 @@
       "win11On": "Windows 11 一级菜单与经典菜单（显示更多选项）均已启用。",
       "partial": "仅经典菜单",
       "reregister": "重新注册",
-      "working": "正在注册…"
+      "working": "正在注册…",
+      "missingCli": "应用旁边没有 omnizip 命令行程序（开发构建需先编译 omnizip-cli）",
+      "nautilus": "Nautilus（GNOME 文件）右键菜单，需要安装 python3-nautilus；注册后执行 nautilus -q 重启文件管理器生效。"
     },
     "security": {
       "ratio": "压缩炸弹阈值",

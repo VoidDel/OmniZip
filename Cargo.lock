@@ -2975,6 +2975,7 @@ dependencies = [
  "omnizip-core",
  "omnizip-formats",
  "omnizip-i18n",
+ "omnizip-shell-win",
  "rpassword",
  "serde",
  "serde_json",

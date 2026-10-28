@@ -1,7 +1,7 @@
 menu-root = OmniZip
 menu-open = 以 OmniZip 開啟
 menu-extract-here = 解壓縮到此處
-menu-extract-smart = 解壓縮到「{ $name }\」
+menu-extract-smart = 解壓縮到「{ $name }」
 menu-extract-to = 解壓縮到…
 menu-extract-each = 分別解壓縮到獨立資料夾
 menu-mount = 掛載

@@ -97,6 +97,10 @@ pub enum Command {
     Manpages {
         dir: PathBuf,
     },
+    /// The context-menu items for the paths on standard input (one per line), as JSON: what the
+    /// file-manager extensions on Linux show (platform/linux/nautilus/omnizip.py).
+    #[command(hide = true)]
+    ShellMenu,
 }
 
 /// Password sources. A bare `-p` prompts; `-p=SECRET` / `--password=SECRET` gives it inline

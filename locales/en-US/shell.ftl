@@ -3,7 +3,7 @@
 menu-root = OmniZip
 menu-open = Open with OmniZip
 menu-extract-here = Extract here
-menu-extract-smart = Extract to "{ $name }\"
+menu-extract-smart = Extract to "{ $name }"
 menu-extract-to = Extract to…
 menu-extract-each = Extract each to a separate folder
 menu-mount = Mount

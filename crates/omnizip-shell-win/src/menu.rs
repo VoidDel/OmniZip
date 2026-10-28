@@ -197,7 +197,13 @@ pub fn title(verb: Verb, sel: &Selection, l: &Localizer) -> String {
         sel.name.clone()
     };
     match verb {
-        Verb::ExtractSmart | Verb::AddZip | Verb::Add7z => tr!(l, verb.message(), name = name),
+        // A folder: its name ends with the platform's separator (`photos\` / `photos/`).
+        Verb::ExtractSmart => tr!(
+            l,
+            verb.message(),
+            name = format!("{name}{}", std::path::MAIN_SEPARATOR)
+        ),
+        Verb::AddZip | Verb::Add7z => tr!(l, verb.message(), name = name),
         _ => l.get(verb.message()),
     }
 }
@@ -363,7 +369,7 @@ mod tests {
         };
         assert_eq!(
             title(Verb::ExtractSmart, &sel, &Localizer::new("zh-CN")),
-            "解压到“photos\\”"
+            format!("解压到“photos{}”", std::path::MAIN_SEPARATOR)
         );
         assert_eq!(
             title(Verb::AddZip, &sel, &Localizer::new("en-US")),

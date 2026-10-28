@@ -127,6 +127,8 @@
 
 所有菜单项最终调用 `omnizip-desktop --shell <verb> …`，由构建脚本从 `shell-menu.toml` 生成。
 
+**当前实现**（Nautilus）：`platform/linux/nautilus/omnizip.py` 是 nautilus-python 扩展，只做一层外壳：右键时把所选路径交给 `omnizip shell-menu`（命令行的隐藏子命令，读标准输入、输出 JSON），由它按 Windows 菜单同一套规则（`omnizip_shell::menu`：哪些选择显示哪些项、按设置的界面语言生成标题、子菜单或平铺、设置里关掉的项）给出菜单项，设置改动无需重新注册；选中某项时把选择写入临时列表文件，启动 `omnizip-desktop --shell <verb> --cwd <目录> --files-from <列表>`。设置页"添加到右键菜单"或 `omnizip-desktop --register-shell` 把它装到 `$XDG_DATA_HOME/nautilus-python/extensions/`（填入本机两个程序的路径），需要 python3-nautilus，`nautilus -q` 后生效。"解压到‘名称’"中的路径分隔符由代码按平台补上（Linux 为 `/`）。其他文件管理器尚未接入。
+
 ### 5.3 打包形态对集成的影响
 
 | 形态 | 文件关联 | 右键菜单 | 挂载 |

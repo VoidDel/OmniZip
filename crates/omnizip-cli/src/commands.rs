@@ -39,7 +39,9 @@ pub fn dispatch(cmd: Command, ui: &Ui) -> Result<i32> {
         Command::Rename(a) => rename(a, ui),
         Command::Convert(a) => convert(a, ui),
         Command::Formats => formats(ui),
-        Command::Completions { .. } | Command::Manpages { .. } => unreachable!("handled in main"),
+        Command::Completions { .. } | Command::Manpages { .. } | Command::ShellMenu => {
+            unreachable!("handled in main")
+        }
         Command::Gui { files } => gui(&files, ui),
     }
 }

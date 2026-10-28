@@ -93,6 +93,10 @@ fn run() -> i32 {
                 }
             };
         }
+        Command::ShellMenu => {
+            shell_menu();
+            return 0;
+        }
         _ => {}
     }
     let ui = ui::Ui::new(&cli.global, l);
@@ -103,6 +107,28 @@ fn run() -> i32 {
             e.code().exit_code()
         }
     }
+}
+
+/// Prints the context-menu items for the paths on standard input: the rules, titles and settings
+/// of the Windows menu (`omnizip_shell::menu`), in the language of OmniZip's settings.
+fn shell_menu() {
+    use omnizip_shell::menu::{self, MenuConfig, Verb};
+    let paths: Vec<std::path::PathBuf> = io::stdin()
+        .lines()
+        .map_while(Result::ok)
+        .filter(|l| !l.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    let cfg = MenuConfig::load();
+    let l = cfg.localizer();
+    let sel = menu::classify(&paths);
+    let items: Vec<serde_json::Value> = Verb::ALL
+        .into_iter()
+        .filter(|v| cfg.enabled(*v) && menu::applies(*v, &sel))
+        .map(|v| serde_json::json!({ "verb": v.cli(), "title": menu::title(v, &sel, &l) }))
+        .collect();
+    let out = serde_json::json!({ "flat": cfg.flat(), "root": l.get("menu-root"), "items": items });
+    println!("{out}");
 }
 
 fn write_manpages(dir: &std::path::Path, l: &Localizer) -> io::Result<()> {

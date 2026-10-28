@@ -111,11 +111,14 @@ function ShellStatusRow() {
       </Row>
     );
   }
+  const linux = document.documentElement.dataset.platform === 'linux';
   const hint = !status.dll
-    ? t('settings.shell.missingDll')
+    ? t(linux ? 'settings.shell.missingCli' : 'settings.shell.missingDll')
     : status.stale
       ? t('settings.shell.stale')
-      : t(status.win11 === 'on' ? 'settings.shell.win11On' : status.win11 === 'off' ? 'settings.shell.win11Off' : 'settings.shell.win11');
+      : linux
+        ? t('settings.shell.nautilus')
+        : t(status.win11 === 'on' ? 'settings.shell.win11On' : status.win11 === 'off' ? 'settings.shell.win11Off' : 'settings.shell.win11');
   const registered = status.registered && !status.stale;
   const unregister = (
     <button type="button" className="btn" disabled={busy} onClick={() => run(api.shellUnregister)}>{t('settings.shell.unregister')}</button>

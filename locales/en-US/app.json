@@ -441,7 +441,9 @@
       "win11On": "Both the Windows 11 top-level menu and the classic menu (Show more options) are on.",
       "partial": "Classic menu only",
       "reregister": "Register again",
-      "working": "Registering…"
+      "working": "Registering…",
+      "missingCli": "The omnizip command-line program is not next to the app (development builds: build omnizip-cli first)",
+      "nautilus": "Context menu of Nautilus (GNOME Files), which needs python3-nautilus. After registering, run nautilus -q to restart the file manager."
     },
     "security": {
       "ratio": "Decompression bomb threshold",

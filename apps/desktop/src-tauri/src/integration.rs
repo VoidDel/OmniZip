@@ -1,4 +1,6 @@
-//! The Windows context menu (`docs/07-shell-integration.md` §3): the classic menu, registered
+//! The context menu of the file manager (`docs/07-shell-integration.md` §3, §5).
+//!
+//! Windows (§3): the classic menu, registered
 //! under HKCU by `omnizip_shell`, and the Windows 11 top-level menu, which needs package
 //! identity. The full MSIX brings its own; the EXE install ships a context-menu package next to
 //! the app (`omnizip_menu.msix`, a sparse package whose files are those of the install folder),
@@ -41,7 +43,7 @@ pub struct ShellStatus {
     pub win11: Win11Menu,
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn status() -> ShellStatus {
     ShellStatus {
         supported: false,
@@ -52,12 +54,12 @@ pub fn status() -> ShellStatus {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn register() -> omnizip_core::Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn unregister() -> omnizip_core::Result<()> {
     Ok(())
 }
@@ -72,6 +74,81 @@ pub fn trust_cert() -> omnizip_core::Result<()> {
 
 #[cfg(windows)]
 pub use win::{refresh_classic, register, status, trust_cert, unregister};
+
+#[cfg(target_os = "linux")]
+pub use linux::{register, status, unregister};
+
+/// Linux (§5.2): an extension for Nautilus (GNOME Files) through nautilus-python, installed for
+/// the user. It asks `omnizip shell-menu` (the CLI next to the app) for the items of a selection
+/// and starts this app with `--shell <verb>`.
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::path::{Path, PathBuf};
+
+    use omnizip_core::{Error, ErrorCode};
+
+    use super::{ShellStatus, Win11Menu};
+
+    const EXTENSION: &str = include_str!("../../../../platform/linux/nautilus/omnizip.py");
+
+    /// `$XDG_DATA_HOME/nautilus-python/extensions/omnizip.py`.
+    fn extension_file() -> Option<PathBuf> {
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share")))?;
+        Some(data.join("nautilus-python/extensions/omnizip.py"))
+    }
+
+    /// The CLI next to this executable, which the extension asks for the menu items.
+    fn cli() -> Option<PathBuf> {
+        let p = std::env::current_exe().ok()?.with_file_name("omnizip");
+        p.is_file().then_some(p)
+    }
+
+    /// The extension for this install: the placeholders become Python string literals.
+    fn extension(cli: &Path, app: &Path) -> String {
+        let literal = |p: &Path| format!("{:?}", p.to_string_lossy());
+        EXTENSION
+            .replace("\"@CLI@\"", &literal(cli))
+            .replace("\"@APP@\"", &literal(app))
+    }
+
+    pub fn status() -> ShellStatus {
+        let cli = cli();
+        let installed = extension_file().and_then(|f| std::fs::read_to_string(f).ok());
+        let stale = match (&installed, &cli, std::env::current_exe()) {
+            (Some(text), Some(cli), Ok(app)) => *text != extension(cli, &app),
+            _ => false,
+        };
+        ShellStatus {
+            supported: true,
+            registered: installed.is_some(),
+            dll: cli.map(|p| p.to_string_lossy().into_owned()),
+            stale,
+            win11: Win11Menu::None,
+        }
+    }
+
+    pub fn register() -> Result<(), Error> {
+        let cli = cli()
+            .ok_or_else(|| Error::new(ErrorCode::MissingDependency).with("path", "omnizip"))?;
+        let app =
+            std::env::current_exe().map_err(|e| Error::io(e, Path::new("omnizip-desktop")))?;
+        let file = extension_file().ok_or_else(|| Error::internal("no home folder"))?;
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| Error::io(e, dir))?;
+        }
+        std::fs::write(&file, extension(&cli, &app)).map_err(|e| Error::io(e, &file))
+    }
+
+    pub fn unregister() -> Result<(), Error> {
+        match extension_file() {
+            Some(f) if f.exists() => std::fs::remove_file(&f).map_err(|e| Error::io(e, &f)),
+            _ => Ok(()),
+        }
+    }
+}
 
 #[cfg(windows)]
 mod win {

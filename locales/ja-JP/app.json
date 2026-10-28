@@ -441,7 +441,9 @@
       "win11On": "Windows 11 の第 1 階層メニューと従来のメニュー（その他のオプションを表示）の両方が有効です。",
       "partial": "従来のメニューのみ",
       "reregister": "再登録",
-      "working": "登録中…"
+      "working": "登録中…",
+      "missingCli": "アプリの隣に omnizip コマンドラインプログラムがありません（開発ビルドでは先に omnizip-cli をビルドしてください）",
+      "nautilus": "Nautilus（GNOME ファイル）の右クリックメニューです。python3-nautilus が必要です。登録後、nautilus -q でファイルマネージャーを再起動すると有効になります。"
     },
     "security": {
       "ratio": "圧縮爆弾のしきい値",
