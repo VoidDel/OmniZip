@@ -93,9 +93,11 @@ lint ──► unit ──► integration ──► e2e ──► visual ──�
 
 | 工作流 | 触发 | 内容 |
 |---|---|---|
-| `nightly-fuzz.yml` | 每日 | 每个 fuzz target 1 小时；新崩溃自动开 issue 并附样本 |
+| `nightly-fuzz.yml` | 每日（主干 25 小时内无新提交则跳过） | 每个 fuzz target 1 小时；新崩溃自动开 issue 并附样本（保留 30 天）；每个 target 只保留最新的语料缓存 |
 | `bench.yml` | 主干合并 | criterion 基准对比上一主干；回归 > 5% 标记并通知 |
 | `release.yml` | 推送 `v*` tag，需人工批准 | 全平台构建 → 签名 / 公证 → 生成 updater manifest → GitHub Release（附 SBOM、校验和）→ 提交 winget / Homebrew / Flathub / AUR 更新 |
+
+**用量控制（当前实现）**：仓库公开，GitHub 标准运行器不计费；以下做法让流水线在转为私有后也不浪费分钟数与存储——只改文档（`docs/**`、`*.md`、`LICENSE`）不触发 CI；同一分支的新推送取消进行中的运行；每个任务设超时（lint 20 分钟，测试与打包 40 分钟，默认 6 小时）；测试构建关闭调试信息（`CARGO_PROFILE_DEV_DEBUG=0`），编译更快、缓存更小；只有 main 保存构建缓存；fuzz 冒烟只在 Linux 跑；bundle-smoke 的安装包只在 main 与手动运行时上传，保留 1 天。
 
 机密管理：Windows 签名走 Azure OIDC；Apple 用 App Store Connect API Key；minisign 私钥仅在发布 runner 的加密机密中，轮换计划每年一次。
 

@@ -1,6 +1,8 @@
 # Nightly fuzzing of every parser (docs/10-build-release.md §4, §7).
 # Each target runs for an hour; the corpus carries over between nights through the cache.
 # A crash uploads the reproducer and opens an issue.
+# A scheduled night without new commits on main is skipped (it would fuzz the same code again),
+# and only the newest corpus of each target is kept.
 name: Nightly fuzz
 
 on:
@@ -17,7 +19,25 @@ permissions:
   issues: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ -n "$(git log -1 --since='25 hours ago' --format=%H)" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No commits on main since the last night: skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   fuzz:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     strategy:
@@ -53,6 +73,7 @@ jobs:
         with:
           name: fuzz-crash-${{ matrix.target }}
           path: fuzz/artifacts/${{ matrix.target }}
+          retention-days: 30
       - name: Open an issue
         if: failure() && github.event_name == 'schedule'
         env:
@@ -61,3 +82,23 @@ jobs:
           gh issue create \
             --title "fuzz: crash in ${{ matrix.target }} ($(date -u +%F))" \
             --body "The nightly fuzz run found a crash in \`${{ matrix.target }}\`. Reproducer: artifact \`fuzz-crash-${{ matrix.target }}\` of ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. Reproduce with \`cargo +nightly fuzz run ${{ matrix.target }} <file>\`."
+
+  # Each night saves a new corpus per target (the cache key carries the run id); drop the older
+  # ones so that the caches do not pile up towards the repository limit.
+  prune-corpus:
+    needs: fuzz
+    if: always() && needs.fuzz.result != 'skipped'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Keep the newest corpus of each target
+        run: |
+          for t in detect zip sevenz tar rar mount sanitize encoding; do
+            gh cache list --key "fuzz-corpus-$t-" --sort created_at --order desc --limit 100 --json id --jq '.[1:][].id' |
+              xargs -r -n1 gh cache delete
+          done
