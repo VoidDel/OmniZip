@@ -3025,6 +3025,8 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "trash",
+ "windows",
+ "windows-core",
  "windows-registry",
 ]
 

@@ -14,6 +14,7 @@ import { useFmt, useSize } from '../../lib/hooks';
 import { extOf } from '../../lib/format';
 import type { Crumb, Row } from '../../lib/types';
 import { useApp, type SortKey } from '../../store/app';
+import { dragImage, useDragItems } from './drag';
 
 const PAGE = 200;
 
@@ -79,6 +80,8 @@ export function Browser() {
   const fmt = useFmt();
   const archive = useApp((s) => s.archive)!;
   const cwd = useApp((s) => s.cwd);
+  const cwdPath = useApp((s) => s.cwdPath);
+  const clip = useApp((s) => s.clip);
   const sort = useApp((s) => s.sort);
   const queryRaw = useApp((s) => s.query);
   const version = useApp((s) => s.listVersion);
@@ -98,7 +101,10 @@ export function Browser() {
   const searching = query.length > 0;
 
   useEffect(() => {
-    void api.ancestors(archive.id, cwd).then(setCrumbs);
+    void api.ancestors(archive.id, cwd).then((c) => {
+      setCrumbs(c);
+      useApp.setState({ cwdPath: c.map((x) => x.name).join('/') });
+    });
   }, [archive.id, cwd, version]);
 
   const parent = crumbs.length > 1 ? crumbs[crumbs.length - 2].node : crumbs.length === 1 ? 0 : null;
@@ -194,6 +200,16 @@ export function Browser() {
     },
     props: (node: number) => openDialogSpec({ kind: 'props', node }),
     openWith: (node: number) => void api.openExternal(archive.id, node).catch((e) => useApp.getState().reportError(e)),
+    copy: (nodes: number[], cut: boolean) => {
+      if (!nodes.length) return;
+      // Items of an archive that cannot change can only be copied.
+      if (cut && readonly) useApp.getState().toast({ tone: 'info', text: t('toast.cutReadonly') });
+      void api.clipCopy(archive.id, nodes, cut).catch((e) => useApp.getState().reportError(e));
+    },
+    paste: () => {
+      if (readonly) return readonlyToast();
+      void api.clipPaste(archive.id, cwd).catch((e) => useApp.getState().reportError(e));
+    },
     copyPath: async (node: number) => {
       const info = await api.node(archive.id, node);
       await navigator.clipboard.writeText(info.path).catch(() => undefined);
@@ -220,6 +236,45 @@ export function Browser() {
     },
   };
 
+  // Dragging items onto a folder moves them there, or copies them with Ctrl: in this archive
+  // (list, breadcrumb, sidebar tree) or into another open one (its tree in the sidebar). Items of
+  // an archive that cannot change are copied. Out of the window (on Windows), they are extracted
+  // where they are dropped.
+  const dragOut =
+    document.documentElement.dataset.platform === 'win'
+      ? (nodes: number[]) => {
+          const text = nodes.length === 1 ? (rowByNode(nodes[0])?.name ?? '') : t('status.items', { count: nodes.length });
+          void api.dragOut(archive.id, nodes, dragImage(text)).catch((e) => useApp.getState().reportError(e));
+        }
+      : undefined;
+  const dragItems = useDragItems(
+    archive.id,
+    !readonly,
+    (nodes, target, copy) => {
+      const done =
+        target.archive === archive.id && !copy
+          ? api.move(archive.id, nodes, target.dir)
+          : api.transfer(archive.id, nodes, target.archive, target.dir, copy);
+      void done.catch((e) => useApp.getState().reportError(e));
+    },
+    dragOut,
+  );
+  const pressRow = (e: React.PointerEvent, r: Row) => {
+    dragItems.press(
+      e,
+      () => {
+        const sel = useApp.getState().selection;
+        if (sel.has(r.node)) return Array.from(sel);
+        select(new Set([r.node]), r.node);
+        return [r.node];
+      },
+      (n, copy) =>
+        n.length === 1
+          ? t(copy ? 'browser.copyOne' : 'browser.moveOne', { name: rowByNode(n[0])?.name ?? r.name })
+          : t(copy ? 'browser.copyMany' : 'browser.moveMany', { count: n.length }),
+    );
+  };
+
   const rowMenu = (x: number, y: number, r: Row) => {
     const nodes = selection.has(r.node) ? selectedNodes : [r.node];
     if (!selection.has(r.node)) select(new Set([r.node]), r.node);
@@ -236,7 +291,9 @@ export function Browser() {
               { label: t('cmd.extractSelected'), icon: 'extract' as const, kbd: 'Ctrl+E', run: () => cmd.extract(nodes) },
               { separator: true },
             ]),
-        { label: t('cmd.copyPath'), icon: 'copy', run: () => void cmd.copyPath(r.node) },
+        { label: t('cmd.cut'), icon: 'scissors', kbd: 'Ctrl+X', disabled: readonly, run: () => cmd.copy(nodes, true) },
+        { label: t('cmd.copy'), icon: 'copy', kbd: 'Ctrl+C', run: () => cmd.copy(nodes, false) },
+        { label: t('cmd.copyPath'), icon: 'link', run: () => void cmd.copyPath(r.node) },
         { label: t('cmd.rename'), icon: 'edit', kbd: 'F2', disabled: readonly || nodes.length !== 1, run: () => cmd.rename(r) },
         { label: t('cmd.delete'), icon: 'trash', kbd: 'Del', danger: true, disabled: readonly, run: () => cmd.remove(nodes) },
         { separator: true },
@@ -255,10 +312,12 @@ export function Browser() {
             { label: t('draft.addFolder'), icon: 'folderPlus', run: cmd.addFolder },
             { label: t('draft.newFolder'), icon: 'folder', run: cmd.mkdir },
             { separator: true },
+            { label: t('cmd.paste'), icon: 'clipboard', kbd: 'Ctrl+V', run: cmd.paste },
             { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },
           ]
         : [
             { label: t('cmd.add'), icon: 'plus', disabled: readonly, run: () => void cmd.add() },
+            { label: t('cmd.paste'), icon: 'clipboard', kbd: 'Ctrl+V', disabled: readonly, run: cmd.paste },
             { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },
             { separator: true },
             { label: t('cmd.extract'), icon: 'extract', run: () => cmd.extract([]) },
@@ -288,6 +347,14 @@ export function Browser() {
     if (!items.length) return;
     ensure(items[0].index * cols, (items[items.length - 1].index + 1) * cols);
   }, [items, cols, ensure]);
+
+  // Items cut from this archive are dimmed until pasted.
+  const cutPaths = clip?.cut && clip.archive === archive.id ? new Set(clip.paths) : null;
+  const isCut = (r: Row) => {
+    if (!cutPaths) return false;
+    const parent = r.parent ?? cwdPath;
+    return cutPaths.has(parent ? `${parent}/${r.name}` : r.name);
+  };
 
   const scrollToIndex = (i: number) => virt.scrollToIndex(viewMode === 'grid' ? Math.floor(i / cols) : i, { align: 'auto' });
 
@@ -405,7 +472,13 @@ export function Browser() {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const k = e.key.toLowerCase();
-      if (draft && k === 's') {
+      // Copy, cut and paste items, unless text is being edited or selected.
+      const editing = e.target instanceof HTMLElement && e.target.closest('input, textarea, [contenteditable="true"]');
+      if ((k === 'c' || k === 'x' || k === 'v') && !e.shiftKey && !e.altKey && !editing && !window.getSelection()?.toString()) {
+        e.preventDefault();
+        if (k === 'v') cmd.paste();
+        else cmd.copy(Array.from(useApp.getState().selection), k === 'x');
+      } else if (draft && k === 's') {
         e.preventDefault();
         cmd.save();
       } else if (k === 'e' && !draft) {
@@ -537,7 +610,7 @@ export function Browser() {
           </>
         ) : (
           <>
-            <button type="button" className={crumbs.length === 0 ? 'cur' : ''} onClick={() => navigate(0)}>
+            <button type="button" className={crumbs.length === 0 ? 'cur' : ''} data-drop-archive={archive.id} data-drop-dir={readonly ? undefined : 0} onClick={() => navigate(0)}>
               <Icon name="archive" className="fi archive" />
               {archive.name}
               {!draft && <span className="badge" style={formatBadgeStyle(archive.info.format, dark)}>{archive.info.format.toUpperCase()}</span>}
@@ -545,7 +618,7 @@ export function Browser() {
             {crumbs.map((c, i) => (
               <span key={c.node} style={{ display: 'contents' }}>
                 <span className="sep">›</span>
-                <button type="button" className={i === crumbs.length - 1 ? 'cur' : ''} onClick={() => navigate(c.node)}>
+                <button type="button" className={i === crumbs.length - 1 ? 'cur' : ''} data-drop-archive={archive.id} data-drop-dir={readonly ? undefined : c.node} onClick={() => navigate(c.node)}>
                   {c.name}
                 </button>
               </span>
@@ -613,10 +686,13 @@ export function Browser() {
                     data-index={i}
                     role="gridcell"
                     aria-selected={r ? selection.has(r.node) : false}
-                    className={`gcell${r && r.node === focus ? ' focus' : ''}`}
+                    className={`gcell${r && r.node === focus ? ' focus' : ''}${r && isCut(r) ? ' cut' : ''}`}
                     style={{ transform: `translate(${c * w}px, ${line.start}px)`, width: w - 6, height: lineH - 6 }}
                     title={r?.name}
-                    onClick={(e) => r && clickRow(e, i, r)}
+                    data-drop-archive={archive.id}
+                    data-drop-dir={!readonly && r?.isDir ? r.node : undefined}
+                    onPointerDown={(e) => r && pressRow(e, r)}
+                    onClick={(e) => r && !dragItems.dragged.current && clickRow(e, i, r)}
                     onDoubleClick={() => r && openRow(r)}
                   >
                     {r ? (
@@ -650,9 +726,12 @@ export function Browser() {
                     data-index={it.index}
                     role="row"
                     aria-selected={selection.has(r.node)}
-                    className={`trow${r.node === focus ? ' focus' : ''}${searching ? ' srch' : ''}`}
+                    className={`trow${r.node === focus ? ' focus' : ''}${searching ? ' srch' : ''}${isCut(r) ? ' cut' : ''}`}
                     style={{ transform: `translateY(${it.start}px)` }}
-                    onClick={(e) => clickRow(e, it.index, r)}
+                    data-drop-archive={archive.id}
+                    data-drop-dir={!readonly && r.isDir ? r.node : undefined}
+                    onPointerDown={(e) => pressRow(e, r)}
+                    onClick={(e) => !dragItems.dragged.current && clickRow(e, it.index, r)}
                     onDoubleClick={() => openRow(r)}
                   >
                     <div className="nm" role="gridcell">
@@ -679,6 +758,7 @@ export function Browser() {
         )}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {dragItems.ghost}
     </>
   );
 }

@@ -419,3 +419,389 @@ pub fn file_name(p: &Path) -> String {
         |n| n.to_string_lossy().into_owned(),
     )
 }
+
+/// Renames (`from`, `to`) that move `nodes` into the folder `dir`. Items already in `dir` are
+/// left out, and so is an item inside another moved folder (it moves with that folder).
+pub fn move_plan(
+    tree: &omnizip_core::TreeIndex,
+    nodes: &[omnizip_core::NodeId],
+    dir: omnizip_core::NodeId,
+) -> Result<Vec<(String, String)>, Error> {
+    let target = tree.path(dir);
+    let below = |path: &str, folder: &str| {
+        path.strip_prefix(folder)
+            .is_some_and(|rest| rest.starts_with('/'))
+    };
+    let froms: Vec<String> = nodes
+        .iter()
+        .map(|&n| tree.path(n))
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut moves = Vec::new();
+    for from in froms.iter().filter(|p| !froms.iter().any(|q| below(p, q))) {
+        if target == *from || below(&target, from) {
+            return Err(Error::invalid_argument("a folder cannot move into itself"));
+        }
+        let name = from.rsplit('/').next().unwrap_or(from);
+        let to = if target.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{target}/{name}")
+        };
+        if to == *from {
+            continue;
+        }
+        if tree.find(&to).is_some() {
+            return Err(Error::new(ErrorCode::AlreadyExists).with("path", &to));
+        }
+        moves.push((from.clone(), to));
+    }
+    Ok(moves)
+}
+
+/// Whether the content of an open archive can change: new archives, and formats updated in
+/// place (single volume).
+pub fn writable(a: &OpenedArchive) -> bool {
+    a.draft
+        || shared()
+            .capabilities(a.info.format)
+            .contains(omnizip_core::Capabilities::UPDATE)
+            && a.info.volumes <= 1
+}
+
+/// Paths of the top items among `nodes`: an item inside another selected folder comes along
+/// with that folder.
+pub fn top_paths(tree: &omnizip_core::TreeIndex, nodes: &[omnizip_core::NodeId]) -> Vec<String> {
+    let paths: Vec<String> = nodes
+        .iter()
+        .map(|&n| tree.path(n))
+        .filter(|p| !p.is_empty())
+        .collect();
+    let below = |p: &str, q: &str| p.strip_prefix(q).is_some_and(|r| r.starts_with('/'));
+    paths
+        .iter()
+        .filter(|p| !paths.iter().any(|q| below(p, q)))
+        .cloned()
+        .collect()
+}
+
+/// A scratch folder, removed when dropped unless a new archive took it over.
+struct Scratch {
+    dir: PathBuf,
+    keep: bool,
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+}
+
+/// Copies the items at `paths` of the open archive `src` into the folder `dir` of `dst` (another
+/// archive, or the same one), or moves them: they are extracted to `scratch`, added to `dst`,
+/// and for a move deleted from `src`. A new archive (`crate::draft`) takes the extracted files
+/// as they are and keeps `scratch` until it is closed.
+pub fn transfer_work(
+    app: &AppHandle,
+    src: Arc<OpenedArchive>,
+    paths: Vec<String>,
+    dst: Arc<OpenedArchive>,
+    dir: String,
+    moving: bool,
+    scratch: PathBuf,
+) -> (String, Work, Finish) {
+    let title = file_name(&dst.path);
+    let threads = app.state::<AppState>().settings().advanced.threads;
+    // Archive files rewritten by the job, reopened when it ends (also after a failure: their
+    // readers were closed for the rewrite).
+    let mut rewritten = Vec::new();
+    if !dst.draft {
+        rewritten.push(dst.id);
+    }
+    if moving && !src.draft && src.id != dst.id {
+        rewritten.push(src.id);
+    }
+    let app = app.clone();
+    let work: Work = Box::new(move |ctx: &JobCtx| {
+        let mut scratch = Scratch {
+            dir: scratch,
+            keep: false,
+        };
+        let report = transfer(
+            &app,
+            &src,
+            &paths,
+            &dst,
+            &dir,
+            moving,
+            &mut scratch,
+            threads,
+            ctx,
+        )?;
+        Ok((report, Some(dst.path.to_string_lossy().into_owned())))
+    });
+    let finish: Finish = Box::new(move |app: &AppHandle, _| {
+        let state = app.state::<AppState>();
+        for id in rewritten {
+            if let Some(old) = state.archive(id)
+                && let Ok(fresh) = reopen(&old)
+            {
+                state
+                    .archives
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, Arc::new(fresh));
+                let _ = app.emit("archive://changed", id);
+            }
+        }
+    });
+    (title, work, finish)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transfer(
+    app: &AppHandle,
+    src: &OpenedArchive,
+    paths: &[String],
+    dst: &OpenedArchive,
+    dir: &str,
+    moving: bool,
+    scratch: &mut Scratch,
+    threads: u32,
+    ctx: &JobCtx,
+) -> Result<Report, Error> {
+    std::fs::create_dir_all(&scratch.dir).map_err(|e| Error::io(e, &scratch.dir))?;
+    let opts = ExtractOptions {
+        destination: scratch.dir.clone(),
+        path_mode: PathMode::Full,
+        smart_folder: false,
+        overwrite: OverwriteMode::Overwrite,
+        ..ExtractOptions::default()
+    };
+    let report = extract_items(src, paths, &opts, ctx)?;
+    let items: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| scratch.dir.join(p.rsplit('/').next().unwrap_or(p)))
+        .collect();
+
+    let state = app.state::<AppState>();
+    if dst.draft {
+        edit_draft(app, &state, dst.id, |d| {
+            d.add(&items, dir)?;
+            d.scratch.push(scratch.dir.clone());
+            Ok(())
+        })?;
+        scratch.keep = true;
+    } else {
+        let sources = source::collect(
+            &items,
+            &CollectOptions {
+                prefix: dir.to_owned(),
+                ..Default::default()
+            },
+            ctx,
+        )?;
+        rewrite(dst, &[UpdateOp::Add { sources }], threads, ctx)?;
+    }
+    if moving {
+        if src.draft {
+            edit_draft(app, &state, src.id, |d| {
+                paths.iter().for_each(|p| d.delete(p));
+                Ok(())
+            })?;
+        } else {
+            let paths = paths.to_vec();
+            rewrite(src, &[UpdateOp::Delete { paths }], threads, ctx)?;
+        }
+    }
+    Ok(report)
+}
+
+/// Extracts the items at `paths` of `src` (with everything below them) into
+/// `opts.destination`, each under its own name: the items of one parent folder are extracted
+/// together, that folder's path stripped.
+pub fn extract_items(
+    src: &OpenedArchive,
+    paths: &[String],
+    opts: &ExtractOptions,
+    ctx: &JobCtx,
+) -> Result<Report, Error> {
+    let mut groups: std::collections::BTreeMap<&str, Vec<omnizip_core::NodeId>> =
+        Default::default();
+    for p in paths {
+        let parent = p.rsplit_once('/').map_or("", |(parent, _)| parent);
+        if let Some(n) = src.tree.find(p) {
+            groups.entry(parent).or_default().push(n);
+        }
+    }
+    let mut report = Report::default();
+    let mut reader = src.reader.lock().unwrap_or_else(|e| e.into_inner());
+    for (parent, nodes) in &groups {
+        let selection = Selection::of(src.tree.collect_entries(nodes), parent);
+        let r = omnizip_core::extract(reader.as_mut(), opts, selection, ctx)?;
+        merge(&mut report, r);
+    }
+    Ok(report)
+}
+
+/// Options for extracting items leaving the app as files (dragged out, copied to the clipboard)
+/// into the scratch folder `destination`: the security settings of any extraction; the folder is
+/// new, so nothing is in the way.
+pub fn export_options(state: &AppState, destination: PathBuf) -> ExtractOptions {
+    let settings = state.settings();
+    ExtractOptions {
+        destination,
+        path_mode: PathMode::Full,
+        smart_folder: false,
+        overwrite: OverwriteMode::Overwrite,
+        symlinks: symlink_policy(&settings.security.symlinks),
+        propagate_origin: settings.security.propagate_origin,
+        ..ExtractOptions::default()
+    }
+}
+
+/// Applies `ops` to the archive file of `a` (its reader is closed so that the file can be
+/// replaced; the caller reopens it).
+fn rewrite(a: &OpenedArchive, ops: &[UpdateOp], threads: u32, ctx: &JobCtx) -> Result<(), Error> {
+    {
+        let mut r = a.reader.lock().unwrap_or_else(|e| e.into_inner());
+        *r = Box::new(Closed(a.info.clone()));
+    }
+    let wo = WriteOptions {
+        password: a.password.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        threads,
+        ..Default::default()
+    };
+    shared().update(&a.path, ops, &wo, ctx)?;
+    Ok(())
+}
+
+/// Edits a new archive from a job and refreshes its listing.
+fn edit_draft(
+    app: &AppHandle,
+    state: &AppState,
+    id: u32,
+    edit: impl FnOnce(&mut crate::draft::Draft) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut drafts = state.drafts.lock().unwrap_or_else(|e| e.into_inner());
+    let d = drafts
+        .get_mut(&id)
+        .ok_or_else(|| Error::invalid_argument("archive closed"))?;
+    edit(d)?;
+    let opened = d.open(id);
+    drop(drafts);
+    state
+        .archives
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, Arc::new(opened));
+    let _ = app.emit("archive://changed", id);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use omnizip_core::{Entry, EntryKind, TreeIndex};
+
+    use super::*;
+
+    fn tree(paths: &[&str]) -> TreeIndex {
+        let entries: Vec<Entry> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let kind = if p.ends_with('/') {
+                    EntryKind::Dir
+                } else {
+                    EntryKind::File
+                };
+                Entry::new(i as u32, (*p).to_owned(), kind)
+            })
+            .collect();
+        TreeIndex::build(&entries)
+    }
+
+    fn node(t: &TreeIndex, path: &str) -> omnizip_core::NodeId {
+        t.find(path).unwrap()
+    }
+
+    #[test]
+    fn extracts_items_under_their_own_names() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("src");
+        std::fs::create_dir_all(src.join("docs/notes")).unwrap();
+        std::fs::write(src.join("docs/notes/a.txt"), "a").unwrap();
+        std::fs::write(src.join("docs/b.txt"), "b").unwrap();
+        std::fs::write(src.join("top.txt"), "t").unwrap();
+        let ctx = JobCtx::default();
+        let items = [src.join("docs"), src.join("top.txt")];
+        let sources = source::collect(&items, &CollectOptions::default(), &ctx).unwrap();
+        let zip = root.path().join("t.zip");
+        let wo = WriteOptions {
+            format: FormatId::Zip,
+            ..Default::default()
+        };
+        shared().create(&zip, &sources, &wo, &ctx).unwrap();
+
+        let a = open_archive(1, &zip, None, None).unwrap();
+        let out = root.path().join("out");
+        let opts = ExtractOptions {
+            destination: out.clone(),
+            smart_folder: false,
+            overwrite: OverwriteMode::Overwrite,
+            ..Default::default()
+        };
+        let paths = ["docs/notes".to_owned(), "top.txt".to_owned()];
+        extract_items(&a, &paths, &opts, &ctx).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(out.join("notes/a.txt")).unwrap(),
+            "a"
+        );
+        assert_eq!(std::fs::read_to_string(out.join("top.txt")).unwrap(), "t");
+        assert!(!out.join("docs").exists());
+    }
+
+    #[test]
+    fn moves_items_into_a_folder() {
+        let t = tree(&["a.txt", "docs/", "docs/b.txt", "out/", "out/c.txt"]);
+        let plan = move_plan(&t, &[node(&t, "a.txt"), node(&t, "docs")], node(&t, "out")).unwrap();
+        assert_eq!(
+            plan,
+            [
+                ("a.txt".to_owned(), "out/a.txt".to_owned()),
+                ("docs".to_owned(), "out/docs".to_owned())
+            ]
+        );
+        // Back to the root.
+        let plan = move_plan(&t, &[node(&t, "out/c.txt")], TreeIndex::ROOT).unwrap();
+        assert_eq!(plan, [("out/c.txt".to_owned(), "c.txt".to_owned())]);
+    }
+
+    #[test]
+    fn skips_what_needs_no_move_and_refuses_the_impossible() {
+        let t = tree(&[
+            "a.txt",
+            "docs/",
+            "docs/b.txt",
+            "docs/sub/",
+            "out/",
+            "out/a.txt",
+        ]);
+        // Already in the folder; a file inside a moved folder moves with it.
+        let plan = move_plan(&t, &[node(&t, "docs/b.txt")], node(&t, "docs")).unwrap();
+        assert!(plan.is_empty());
+        let plan = move_plan(
+            &t,
+            &[node(&t, "docs"), node(&t, "docs/b.txt")],
+            node(&t, "out"),
+        )
+        .unwrap();
+        assert_eq!(plan, [("docs".to_owned(), "out/docs".to_owned())]);
+        // Into itself or below itself; onto an existing name.
+        assert!(move_plan(&t, &[node(&t, "docs")], node(&t, "docs")).is_err());
+        assert!(move_plan(&t, &[node(&t, "docs")], node(&t, "docs/sub")).is_err());
+        assert!(move_plan(&t, &[node(&t, "a.txt")], node(&t, "out")).is_err());
+    }
+}

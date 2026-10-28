@@ -58,7 +58,10 @@
     "encoding": "文件名编码",
     "open": "打开",
     "closeArchive": "关闭压缩包",
-    "reveal": "在文件夹中显示"
+    "reveal": "在文件夹中显示",
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴"
   },
   "col": {
     "name": "名称",
@@ -104,7 +107,11 @@
   },
   "browser": {
     "deleteTitle": "从压缩包删除",
-    "deleteMessage": "要从 {name} 中删除 {count} 项吗？此操作无法撤销。"
+    "deleteMessage": "要从 {name} 中删除 {count} 项吗？此操作无法撤销。",
+    "moveOne": "移动“{name}”",
+    "moveMany": "移动 {count} 项",
+    "copyOne": "复制“{name}”",
+    "copyMany": "复制 {count} 项"
   },
   "compress": {
     "title": "新建压缩包",
@@ -246,7 +253,11 @@
       "test": "测试",
       "add": "添加",
       "delete": "删除",
-      "rename": "重命名"
+      "rename": "重命名",
+      "move": "移动",
+      "copy": "复制",
+      "clipcopy": "复制到剪贴板",
+      "clipcut": "剪切到剪贴板"
     },
     "remaining": "剩余 {time}",
     "done": "已完成",
@@ -280,7 +291,9 @@
     "show": "显示",
     "skipped": "跳过了 {count} 项",
     "themeImported": "主题已导入",
-    "settingsSaved": "设置已保存"
+    "settingsSaved": "设置已保存",
+    "clipboard": "已放到剪贴板，可在文件管理器或其他压缩包中粘贴",
+    "cutReadonly": "只读格式不能剪切，已改为复制"
   },
   "props": {
     "title": "属性",

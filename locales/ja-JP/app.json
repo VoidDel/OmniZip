@@ -58,7 +58,10 @@
     "encoding": "ファイル名エンコーディング",
     "open": "開く",
     "closeArchive": "アーカイブを閉じる",
-    "reveal": "フォルダーに表示"
+    "reveal": "フォルダーに表示",
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け"
   },
   "col": {
     "name": "名前",
@@ -104,7 +107,11 @@
   },
   "browser": {
     "deleteTitle": "アーカイブから削除",
-    "deleteMessage": "{name} から {count} 項目を削除しますか？この操作は元に戻せません。"
+    "deleteMessage": "{name} から {count} 項目を削除しますか？この操作は元に戻せません。",
+    "moveOne": "「{name}」を移動",
+    "moveMany": "{count} 個の項目を移動",
+    "copyOne": "「{name}」をコピー",
+    "copyMany": "{count} 個の項目をコピー"
   },
   "compress": {
     "title": "新しいアーカイブ",
@@ -246,7 +253,11 @@
       "test": "テスト",
       "add": "追加",
       "delete": "削除",
-      "rename": "名前の変更"
+      "rename": "名前の変更",
+      "move": "移動",
+      "copy": "コピー",
+      "clipcopy": "クリップボードにコピー",
+      "clipcut": "クリップボードに切り取り"
     },
     "remaining": "残り {time}",
     "done": "完了",
@@ -280,7 +291,9 @@
     "show": "表示",
     "skipped": "{count} 項目をスキップしました",
     "themeImported": "テーマを読み込みました",
-    "settingsSaved": "設定を保存しました"
+    "settingsSaved": "設定を保存しました",
+    "clipboard": "クリップボードに入れました。エクスプローラーや他のアーカイブに貼り付けできます",
+    "cutReadonly": "読み取り専用の形式のため、切り取りではなくコピーしました"
   },
   "props": {
     "title": "プロパティ",

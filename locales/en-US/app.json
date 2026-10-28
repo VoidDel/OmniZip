@@ -58,7 +58,10 @@
     "encoding": "File name encoding",
     "open": "Open",
     "closeArchive": "Close archive",
-    "reveal": "Show in folder"
+    "reveal": "Show in folder",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste"
   },
   "col": {
     "name": "Name",
@@ -104,7 +107,11 @@
   },
   "browser": {
     "deleteTitle": "Delete from archive",
-    "deleteMessage": "{count, plural, one {Delete # item} other {Delete # items}} from {name}? This cannot be undone."
+    "deleteMessage": "{count, plural, one {Delete # item} other {Delete # items}} from {name}? This cannot be undone.",
+    "moveOne": "Move “{name}”",
+    "moveMany": "Move {count, plural, one {# item} other {# items}}",
+    "copyOne": "Copy “{name}”",
+    "copyMany": "Copy {count, plural, one {# item} other {# items}}"
   },
   "compress": {
     "title": "New archive",
@@ -246,7 +253,11 @@
       "test": "Test",
       "add": "Add",
       "delete": "Delete",
-      "rename": "Rename"
+      "rename": "Rename",
+      "move": "Move",
+      "copy": "Copy",
+      "clipcopy": "Copy to clipboard",
+      "clipcut": "Cut to clipboard"
     },
     "remaining": "{time} left",
     "done": "Done",
@@ -280,7 +291,9 @@
     "show": "Show",
     "skipped": "{count, plural, one {# item skipped} other {# items skipped}}",
     "themeImported": "Theme imported",
-    "settingsSaved": "Settings saved"
+    "settingsSaved": "Settings saved",
+    "clipboard": "On the clipboard: paste into a file manager or another archive",
+    "cutReadonly": "This format is read-only, so the items were copied instead of cut"
   },
   "props": {
     "title": "Properties",

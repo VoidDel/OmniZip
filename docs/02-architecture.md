@@ -237,6 +237,6 @@ Shell 扩展与 CLI 读取同一份 `config.toml`（语言、菜单项配置）�
 | Win11 现代菜单需要包身份 | MSIX 为主渠道；EXE 安装器注册 Sparse Package 获得身份 |
 | 7z 写入性能不及 7-Zip 原生 | sevenz-rust2 多线程 LZMA2；持续基准；必要时 FFI LZMA SDK |
 | RAR 许可 | 仅解压；unrar 隔离为独立 crate 与（v2）独立进程 |
-| 拖出到资源管理器 / Finder | v1 先支持拖入；拖出用 `tauri-plugin-drag` 或平台原生 drag source（v1.1） |
+| 拖出到资源管理器 / Finder | Windows：自带 OLE drag source（`dragout.rs`，`DoDragDrop` + `SHCreateDataObject` 的 CF_HDROP），松开按钮时才把解压好的文件交出；不用 `tauri-plugin-drag`，它要求拖动开始时文件已就绪。macOS / Linux 待做 |
 | Flatpak 沙箱限制 Shell 集成与挂载 | Flatpak 版本标注集成受限；推荐 .deb/.rpm/AppImage 获取完整体验 |
 | macOS 挂载后端能力（FSKit 对虚拟文件系统的支持） | M0 实测后决定；NFS 回环为保底。WinFsp 许可问题已随 MIT 开源决定解决 |

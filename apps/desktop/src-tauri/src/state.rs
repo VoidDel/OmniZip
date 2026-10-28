@@ -62,6 +62,8 @@ pub struct AppState {
     pub themes_dir: Option<PathBuf>,
     pub data_dir: Option<PathBuf>,
     pub cache_dir: Option<PathBuf>,
+    /// Items copied or cut from an open archive (`crate::clipboard`).
+    pub clip: Mutex<Option<crate::clipboard::Clip>>,
 }
 
 impl AppState {
@@ -94,6 +96,7 @@ impl AppState {
             themes_dir,
             data_dir,
             cache_dir: appdirs::cache_dir(),
+            clip: Mutex::new(None),
         }
     }
 

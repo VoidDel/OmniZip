@@ -20,6 +20,9 @@ pub struct Draft {
     /// Shown as the archive name until it is saved.
     pub name: String,
     pub sources: Vec<Source>,
+    /// Folders holding items copied in from other archives: the draft reads them when it is
+    /// saved, and they are removed when it is closed.
+    pub scratch: Vec<PathBuf>,
 }
 
 /// Whether `path` is `dir` or lies below it.
@@ -43,6 +46,7 @@ impl Draft {
         Self {
             name,
             sources: Vec::new(),
+            scratch: Vec::new(),
         }
     }
 

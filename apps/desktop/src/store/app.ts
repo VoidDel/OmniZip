@@ -8,6 +8,7 @@ import { api, asError } from '../lib/api';
 import type {
   ArchiveSummary,
   Bootstrap,
+  Clip,
   ErrorReport,
   JobInfo,
   ResolvedTheme,
@@ -46,6 +47,20 @@ export interface Toast {
   sticky?: boolean;
 }
 
+/** Where the browser is in an archive: kept for each open archive while another is shown. */
+interface ArchiveView {
+  cwd: number;
+  cwdPath: string;
+  history: number[];
+  histIdx: number;
+  query: string;
+  selection: Set<number>;
+  selectionBytes: number;
+  focus: number | null;
+  anchor: number | null;
+  expanded: Set<string>;
+}
+
 interface State {
   boot: Bootstrap | null;
   settings: Settings | null;
@@ -53,8 +68,15 @@ interface State {
   theme: ResolvedTheme | null;
   view: View;
   settingsTab: SettingsTab;
+  /** The archive shown in the browser; the fields below up to `expanded` are its view. */
   archive: ArchiveSummary | null;
+  /** Every open archive, in the order opened (the sidebar lists them). */
+  opened: ArchiveSummary[];
+  /** Saved views of the open archives that are not shown, by archive id. */
+  views: Record<number, ArchiveView>;
   cwd: number;
+  /** Path of `cwd`: node ids change when an archive is rewritten, the path finds it again. */
+  cwdPath: string;
   history: number[];
   histIdx: number;
   sort: { key: SortKey; desc: boolean };
@@ -65,7 +87,8 @@ interface State {
   focus: number | null;
   anchor: number | null;
   listVersion: number;
-  expanded: Set<number>;
+  /** Folders unfolded in the sidebar by path ('' is the archive itself): unlike node ids, paths survive a rewrite. */
+  expanded: Set<string>;
   jobs: Record<number, JobInfo>;
   drawer: boolean;
   sidebarOpen: boolean;
@@ -76,7 +99,9 @@ interface State {
   shellJob: number | null;
   toasts: Toast[];
   /** Jobs saving a new archive: when one succeeds, the saved archive replaces the draft. */
-  draftSaves: number[];
+  draftSaves: { job: number; draft: number }[];
+  /** Items copied or cut from an open archive (cut ones are dimmed until pasted). */
+  clip: Clip | null;
 }
 
 interface Actions {
@@ -87,13 +112,19 @@ interface Actions {
   updateSettings(f: (s: Settings) => void): Promise<void>;
   setView(v: View): void;
   setSettingsTab(t: SettingsTab): void;
-  /** `force`: replace a new archive with content without asking (it has been saved). */
-  openArchive(path: string, password?: string | null, force?: boolean): Promise<boolean>;
+  /** Opens an archive next to the open ones and shows it (or shows it if it is open). */
+  openArchive(path: string, password?: string | null): Promise<boolean>;
   /** Starts a new archive (optionally with files and folders) and shows it. */
   newArchive(name: string, paths?: string[]): Promise<void>;
-  setArchive(a: ArchiveSummary | null): void;
-  closeArchive(): void;
-  savingDraft(jobId: number): void;
+  /** Shows another open archive where it was left. */
+  switchArchive(id: number): void;
+  /** New summary of an open archive (same node ids). */
+  setArchive(a: ArchiveSummary): void;
+  /** An open archive was rewritten (new node ids): its view goes to the folder `node`, nothing selected. */
+  relocate(a: ArchiveSummary, node: number): void;
+  /** Closes an open archive (the shown one by default); a new archive with content asks first unless `force`. */
+  closeArchive(id?: number, force?: boolean): void;
+  savingDraft(jobId: number, draftId: number): void;
   navigate(node: number, push?: boolean): void;
   back(): void;
   forward(): void;
@@ -103,7 +134,8 @@ interface Actions {
   setSelection(sel: Set<number>, focus?: number | null, anchor?: number | null, bytes?: number): void;
   clearSelection(): void;
   refreshList(): void;
-  toggleExpanded(node: number, open?: boolean): void;
+  /** Unfolds or folds a folder (by path) of an open archive in the sidebar. */
+  toggleExpanded(archive: number, path: string, open?: boolean): void;
   upsertJob(j: JobInfo): void;
   setJobs(j: JobInfo[]): void;
   setDrawer(open: boolean): void;
@@ -121,25 +153,48 @@ const nextId = () => seq++;
 /** Error reports are rendered by the toast host with `errorText`. */
 export const errorHandler: { render: (e: ErrorReport) => string } = { render: (e) => e.message };
 
-/** State for showing an archive (or a new one) from its root. */
-const shown = (a: ArchiveSummary, listVersion: number): Partial<State> => ({
-  archive: a,
-  cwd: 0,
-  history: [0],
+/** The view of an archive just opened: its root. */
+const freshView = (node = 0): ArchiveView => ({
+  cwd: node,
+  cwdPath: '',
+  history: [node],
   histIdx: 0,
   query: '',
   selection: new Set(),
+  selectionBytes: 0,
   focus: null,
   anchor: null,
-  expanded: new Set([0]),
-  view: 'browser',
-  listVersion: listVersion + 1,
+  expanded: new Set(['']),
 });
 
+/** The view of the archive being shown, to keep while another one is. */
+const viewOf = (s: State): ArchiveView => ({
+  cwd: s.cwd,
+  cwdPath: s.cwdPath,
+  history: s.history,
+  histIdx: s.histIdx,
+  query: s.query,
+  selection: s.selection,
+  selectionBytes: s.selectionBytes,
+  focus: s.focus,
+  anchor: s.anchor,
+  expanded: s.expanded,
+});
+
+/** State for showing `a` with `view`, the view of the archive shown so far being kept. */
+function show(s: State, a: ArchiveSummary, view: ArchiveView): Partial<State> {
+  const views = { ...s.views };
+  if (s.archive && s.archive.id !== a.id) views[s.archive.id] = viewOf(s);
+  delete views[a.id];
+  const opened = s.opened.some((x) => x.id === a.id) ? s.opened.map((x) => (x.id === a.id ? a : x)) : [...s.opened, a];
+  return { ...view, archive: a, opened, views, view: 'browser', listVersion: s.listVersion + 1 };
+}
+
+const samePath = (a: string, b: string) => a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase();
+
 /** Asks before a new archive with something in it is thrown away; resolves to whether to go on. */
-function discardDraft(): Promise<boolean> {
+function discardDraft(a: ArchiveSummary | undefined): Promise<boolean> {
   const s = useApp.getState();
-  const a = s.archive;
   if (!a?.draft || a.entries === 0) return Promise.resolve(true);
   return new Promise((resolve) => {
     s.openDialog({
@@ -162,7 +217,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
   view: 'home',
   settingsTab: 'appearance',
   archive: null,
+  opened: [],
+  views: {},
   cwd: 0,
+  cwdPath: '',
   history: [],
   histIdx: -1,
   sort: { key: 'name', desc: false },
@@ -172,7 +230,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   focus: null,
   anchor: null,
   listVersion: 0,
-  expanded: new Set([0]),
+  expanded: new Set(['']),
   jobs: {},
   drawer: false,
   sidebarOpen: false,
@@ -181,6 +239,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   shellJob: null,
   toasts: [],
   draftSaves: [],
+  clip: null,
 
   setBoot: (b) => set({ boot: b, settings: b.settings, themes: b.themes }),
   setTheme: (t) => set({ theme: t }),
@@ -206,13 +265,15 @@ export const useApp = create<State & Actions>()((set, get) => ({
   setView: (v) => set({ view: v, sidebarOpen: false }),
   setSettingsTab: (t) => set({ settingsTab: t, view: 'settings', sidebarOpen: false }),
 
-  openArchive: async (path, password, force) => {
-    if (!force && !(await discardDraft())) return false;
+  openArchive: async (path, password) => {
+    const open = get().opened.find((x) => !x.draft && samePath(x.path, path));
+    if (open) {
+      get().switchArchive(open.id);
+      return true;
+    }
     try {
       const a = await api.openArchive(path, password ?? null, null);
-      const prev = get().archive;
-      if (prev && prev.id !== a.id) void api.closeArchive(prev.id);
-      set(shown(a, get().listVersion));
+      set(show(get(), a, freshView()));
       return true;
     } catch (e) {
       const err = asError(e);
@@ -225,26 +286,59 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
   newArchive: async (name, paths = []) => {
-    if (!(await discardDraft())) return;
     try {
       const a = await api.draftNew(name, paths);
-      const prev = get().archive;
-      if (prev) void api.closeArchive(prev.id);
-      set(shown(a, get().listVersion));
+      set(show(get(), a, freshView()));
     } catch (e) {
       get().reportError(e);
     }
   },
-  setArchive: (a) => set({ archive: a, listVersion: get().listVersion + 1 }),
-  closeArchive: () => {
-    void discardDraft().then((ok) => {
+  switchArchive: (id) => {
+    const s = get();
+    const a = s.opened.find((x) => x.id === id);
+    if (!a) return;
+    if (s.archive?.id === id) return set({ view: 'browser', sidebarOpen: false });
+    // The archive shown unfolds in the sidebar.
+    const view = s.views[id] ?? freshView();
+    set({ ...show(s, a, { ...view, expanded: new Set([...view.expanded, '']) }), sidebarOpen: false });
+  },
+  setArchive: (a) =>
+    set((s) => ({
+      archive: s.archive?.id === a.id ? a : s.archive,
+      opened: s.opened.map((x) => (x.id === a.id ? a : x)),
+      listVersion: s.listVersion + 1,
+    })),
+  relocate: (a, node) =>
+    set((s) => {
+      const opened = s.opened.map((x) => (x.id === a.id ? a : x));
+      // Older history entries would point at other folders now.
+      if (s.archive?.id !== a.id) {
+        const keep = s.views[a.id];
+        return { opened, views: { ...s.views, [a.id]: { ...freshView(node), cwdPath: keep?.cwdPath ?? '', expanded: keep?.expanded ?? new Set(['']) } } };
+      }
+      return { ...freshView(node), cwdPath: s.cwdPath, expanded: s.expanded, archive: a, opened, listVersion: s.listVersion + 1 };
+    }),
+  closeArchive: (id, force) => {
+    const target = get().opened.find((x) => x.id === (id ?? get().archive?.id));
+    if (!target) return;
+    void (force ? Promise.resolve(true) : discardDraft(target)).then((ok) => {
       if (!ok) return;
-      const a = get().archive;
-      if (a) void api.closeArchive(a.id);
-      set({ archive: null, view: 'home', selection: new Set(), query: '' });
+      void api.closeArchive(target.id);
+      const s = get();
+      const at = s.opened.findIndex((x) => x.id === target.id);
+      const opened = s.opened.filter((x) => x.id !== target.id);
+      const views = { ...s.views };
+      delete views[target.id];
+      if (s.archive?.id !== target.id) return set({ opened, views });
+      // The one shown: show its neighbour where it was left, or the start page.
+      const next = opened[Math.max(0, at - 1)];
+      if (!next) return set({ archive: null, opened, views, view: 'home', ...freshView() });
+      const view = views[next.id] ?? freshView();
+      delete views[next.id];
+      set({ ...view, archive: next, opened, views, listVersion: s.listVersion + 1 });
     });
   },
-  savingDraft: (jobId) => set({ draftSaves: [...get().draftSaves, jobId] }),
+  savingDraft: (job, draft) => set({ draftSaves: [...get().draftSaves, { job, draft }] }),
 
   navigate: (node, push = true) => {
     const { history, histIdx } = get();
@@ -287,13 +381,18 @@ export const useApp = create<State & Actions>()((set, get) => ({
     })),
   clearSelection: () => set({ selection: new Set(), selectionBytes: 0, focus: null, anchor: null }),
   refreshList: () => set({ listVersion: get().listVersion + 1 }),
-  toggleExpanded: (node, open) => {
-    const e = new Set(get().expanded);
-    const want = open ?? !e.has(node);
-    if (want) e.add(node);
-    else e.delete(node);
-    set({ expanded: e });
-  },
+  toggleExpanded: (archive, path, open) =>
+    set((s) => {
+      const toggled = (before: Set<string>) => {
+        const e = new Set(before);
+        if (open ?? !e.has(path)) e.add(path);
+        else e.delete(path);
+        return e;
+      };
+      if (s.archive?.id === archive) return { expanded: toggled(s.expanded) };
+      const v = s.views[archive];
+      return v ? { views: { ...s.views, [archive]: { ...v, expanded: toggled(v.expanded) } } } : {};
+    }),
 
   upsertJob: (j) => set((s) => ({ jobs: { ...s.jobs, [j.id]: j } })),
   setJobs: (list) => set({ jobs: Object.fromEntries(list.map((j) => [j.id, j])) }),

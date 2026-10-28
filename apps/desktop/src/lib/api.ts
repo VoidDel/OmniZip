@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   ArchiveSummary,
   Bootstrap,
+  Clip,
   CompressRequest,
   Crumb,
   ErrorReport,
@@ -70,6 +71,22 @@ export const api = {
   add: (id: number, paths: string[], dir: number) => invoke<number>('job_add', { id, paths, dir }),
   remove: (id: number, nodes: number[]) => invoke<number>('job_delete', { id, nodes }),
   rename: (id: number, node: number, name: string) => invoke<number>('job_rename', { id, node, name }),
+  /** Copies items into a folder of an open archive, or moves them into another one. */
+  transfer: (from: number, nodes: number[], to: number, dir: number, copy: boolean) =>
+    invoke<number>('job_transfer', { from, nodes, to, dir, copy }),
+  find: (id: number, path: string) => invoke<number | null>('archive_find', { id, path }),
+  /**
+   * Drags items out of the window as files, extracted where they are dropped; resolves when the
+   * drag ends, to whether they were dropped somewhere.
+   */
+  dragOut: (id: number, nodes: number[], image?: { png: string; x: number; y: number }) =>
+    invoke<boolean>('drag_out', { id, nodes, image: image ?? null }),
+  /** Copies (or cuts) items to paste elsewhere; returns the job putting them on the system clipboard (0 if none). */
+  clipCopy: (id: number, nodes: number[], cut: boolean) => invoke<number>('clipboard_copy', { id, nodes, cut }),
+  /** Pastes what was copied or cut into the folder `dir` of an open archive. */
+  clipPaste: (id: number, dir: number) => invoke<number>('clipboard_paste', { id, dir }),
+  /** Moves items into the folder `dir` (drag and drop in the browser). */
+  move: (id: number, nodes: number[], dir: number) => invoke<number>('job_move', { id, nodes, dir }),
   /** Starts a new archive, optionally with files and folders in it. */
   draftNew: (name: string, paths: string[]) => invoke<ArchiveSummary>('draft_new', { name, paths }),
   mkdir: (id: number, dir: number, name: string) => invoke<void>('draft_mkdir', { id, dir, name }),
@@ -104,4 +121,5 @@ export const events = {
   onPrompt: (f: (p: PromptEvent) => void): Promise<UnlistenFn> => listen<PromptEvent>('job://prompt', (e) => f(e.payload)),
   onArchiveChanged: (f: (id: number) => void): Promise<UnlistenFn> => listen<number>('archive://changed', (e) => f(e.payload)),
   onLaunch: (f: (r: LaunchRequest) => void): Promise<UnlistenFn> => listen<LaunchRequest>('app://launch', (e) => f(e.payload)),
+  onClipboard: (f: (c: Clip | null) => void): Promise<UnlistenFn> => listen<Clip | null>('clipboard://changed', (e) => f(e.payload)),
 };

@@ -10,7 +10,7 @@ import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
 import { effectiveDark } from '../../lib/theme';
-import type { TreeItem } from '../../lib/types';
+import type { ArchiveSummary, TreeItem } from '../../lib/types';
 import { useApp } from '../../store/app';
 import { SETTINGS_TABS } from '../settings/Settings';
 
@@ -158,36 +158,47 @@ export function TitleBar() {
   );
 }
 
-function TreeNode({ id, item, depth }: { id: number; item: TreeItem; depth: number }) {
-  const cwd = useApp((s) => s.cwd);
-  const view = useApp((s) => s.view);
-  const query = useApp((s) => s.query);
-  const expanded = useApp((s) => s.expanded.has(item.node));
+/** Whether the folder at `path` of archive `id` is unfolded in the sidebar. */
+const unfolded = (s: ReturnType<typeof useApp.getState>, id: number, path: string) =>
+  (s.archive?.id === id ? s.expanded : s.views[id]?.expanded)?.has(path) ?? false;
+
+/**
+ * A folder of an open archive, `path` locating it ('/' between names). Clicking it shows it (and
+ * its archive); items dragged onto it go there when the archive can change.
+ */
+function TreeNode({ a, item, path, depth }: { a: ArchiveSummary; item: TreeItem; path: string; depth: number }) {
+  const expanded = useApp((s) => unfolded(s, a.id, path));
+  const current = useApp((s) => s.archive?.id === a.id && s.cwd === item.node && s.view === 'browser' && !s.query);
   const toggle = useApp((s) => s.toggleExpanded);
-  const navigate = useApp((s) => s.navigate);
   const version = useApp((s) => s.listVersion);
   const [children, setChildren] = useState<TreeItem[] | null>(null);
   useEffect(() => {
-    if (expanded && item.hasChildren) void api.dirs(id, item.node).then(setChildren);
-  }, [expanded, id, item.node, item.hasChildren, version]);
-  const current = cwd === item.node && view === 'browser' && !query;
+    if (expanded && item.hasChildren) void api.dirs(a.id, item.node).then(setChildren);
+  }, [expanded, a, item.node, item.hasChildren, version]);
+  const open = () => {
+    const s = useApp.getState();
+    if (s.archive?.id !== a.id) s.switchArchive(a.id);
+    s.navigate(item.node);
+  };
   return (
     <>
       <button
         type="button"
         className="tree-item"
+        data-drop-archive={a.id}
+        data-drop-dir={a.writable ? item.node : undefined}
         role="treeitem"
         aria-expanded={item.hasChildren ? expanded : undefined}
         aria-current={current}
-        style={{ paddingLeft: 10 + (depth - 1) * 14 }}
+        style={{ paddingLeft: 12 + depth * 14 }}
         title={item.name}
-        onClick={() => navigate(item.node)}
+        onClick={open}
       >
         <span
           className="tw"
           onClick={(e) => {
             e.stopPropagation();
-            toggle(item.node);
+            toggle(a.id, path);
           }}
         >
           {item.hasChildren && <Icon name={expanded ? 'chevronDown' : 'chevronRight'} />}
@@ -195,7 +206,86 @@ function TreeNode({ id, item, depth }: { id: number; item: TreeItem; depth: numb
         <Icon name={item.nestedArchive ? 'archive' : expanded ? 'folderOpen' : 'folder'} className={`fi ${item.nestedArchive ? 'archive' : 'folder'}`} />
         <span className="lbl">{item.name}</span>
       </button>
-      {expanded && children?.map((c) => <TreeNode key={c.node} id={id} item={c} depth={depth + 1} />)}
+      {expanded && children?.map((c) => <TreeNode key={c.node} a={a} item={c} path={`${path}/${c.name}`} depth={depth + 1} />)}
+    </>
+  );
+}
+
+/**
+ * An open archive in the sidebar and, while it is unfolded, its folders. Every archive folds on
+ * its own; the one shown is unfolded when it is opened or switched to.
+ */
+function ArchiveTree({ a }: { a: ArchiveSummary }) {
+  const { t } = useTranslation();
+  const shown = useApp((s) => s.archive?.id === a.id);
+  const expanded = useApp((s) => unfolded(s, a.id, ''));
+  const current = useApp((s) => s.archive?.id === a.id && s.cwd === 0 && s.view === 'browser');
+  const toggle = useApp((s) => s.toggleExpanded);
+  const version = useApp((s) => s.listVersion);
+  const [roots, setRoots] = useState<TreeItem[]>([]);
+  useEffect(() => {
+    void api.dirs(a.id, 0).then(setRoots);
+  }, [a, version]);
+  const open = () => {
+    const s = useApp.getState();
+    if (shown) s.navigate(0);
+    else s.switchArchive(a.id);
+  };
+  return (
+    <>
+      {/* A row rather than a button, so that it can hold the close button. Items dragged onto
+          an archive that can change go into its root folder. */}
+      <div
+        className={`tree-item tree-root${shown ? ' shown' : ''}`}
+        data-drop-archive={a.id}
+        data-drop-dir={a.writable ? 0 : undefined}
+        role="treeitem"
+        tabIndex={0}
+        aria-expanded={roots.length ? expanded : undefined}
+        aria-current={current}
+        onClick={open}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            open();
+          } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            toggle(a.id, '', e.key === 'ArrowRight');
+          }
+        }}
+        title={a.draft ? a.name : a.path}
+      >
+        <span
+          className="tw"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle(a.id, '');
+          }}
+        >
+          {roots.length > 0 && <Icon name={expanded ? 'chevronDown' : 'chevronRight'} />}
+        </span>
+        <Icon name="archive" className="fi archive" />
+        <span className="lbl">{a.name}</span>
+        {/* A new archive has no format until it is saved. */}
+        {!a.draft && (
+          <span className="badge" style={formatBadgeStyle(a.info.format, false)}>
+            {a.info.format.toUpperCase()}
+          </span>
+        )}
+        <button
+          type="button"
+          className="tree-close"
+          title={t('cmd.closeArchive')}
+          aria-label={t('cmd.closeArchive')}
+          onClick={(e) => {
+            e.stopPropagation();
+            useApp.getState().closeArchive(a.id);
+          }}
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      {expanded && roots.map((r) => <TreeNode key={r.node} a={a} item={r} path={r.name} depth={1} />)}
     </>
   );
 }
@@ -205,6 +295,7 @@ export function Sidebar() {
   const fmt = useFmt();
   const view = useApp((s) => s.view);
   const archive = useApp((s) => s.archive);
+  const opened = useApp((s) => s.opened);
   const setView = useApp((s) => s.setView);
   const settingsTab = useApp((s) => s.settingsTab);
   const setSettingsTab = useApp((s) => s.setSettingsTab);
@@ -212,16 +303,8 @@ export function Sidebar() {
   const updateSettings = useApp((s) => s.updateSettings);
   const jobs = useApp((s) => s.jobs);
   const setDrawer = useApp((s) => s.setDrawer);
-  const navigate = useApp((s) => s.navigate);
-  const cwd = useApp((s) => s.cwd);
-  const version = useApp((s) => s.listVersion);
   const appVersion = useApp((s) => s.boot?.system.appVersion);
   const collapsed = settings?.appearance.sidebar_collapsed ?? false;
-  const [roots, setRoots] = useState<TreeItem[]>([]);
-  useEffect(() => {
-    if (archive) void api.dirs(archive.id, 0).then(setRoots);
-    else setRoots([]);
-  }, [archive, version]);
 
   const list = Object.values(jobs);
   const running = list.filter((j) => j.state === 'running' || j.state === 'paused');
@@ -258,34 +341,15 @@ export function Sidebar() {
           <span className="lbl">{t('nav.home')}</span>
         </button>
       </nav>
-      {archive ? (
+      {opened.length > 0 && (
         <>
           <hr className="sb-sep" />
           <div className="tree" role="tree" aria-label={t('nav.tree')}>
-            <button
-              type="button"
-              className="tree-item tree-root"
-              role="treeitem"
-              aria-current={cwd === 0 && view === 'browser'}
-              onClick={() => navigate(0)}
-              title={archive.name}
-            >
-              <Icon name="archive" className="fi archive" />
-              <span className="lbl">{archive.name}</span>
-              {/* A new archive has no format until it is saved. */}
-              {!archive.draft && (
-                <span className="badge" style={{ marginLeft: 'auto', ...formatBadgeStyle(archive.info.format, false) }}>
-                  {archive.info.format.toUpperCase()}
-                </span>
-              )}
-            </button>
-            {roots.map((r) => (
-              <TreeNode key={r.node} id={archive.id} item={r} depth={1} />
+            {opened.map((a) => (
+              <ArchiveTree key={a.id} a={a} />
             ))}
           </div>
         </>
-      ) : (
-        <div className="grow" />
       )}
       <div className="sb-bottom">
         {list.length > 0 && (

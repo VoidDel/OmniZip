@@ -225,7 +225,7 @@ export interface Report {
   outputs: string[];
 }
 
-export type JobKind = 'extract' | 'compress' | 'test' | 'add' | 'delete' | 'rename';
+export type JobKind = 'extract' | 'compress' | 'test' | 'add' | 'delete' | 'rename' | 'move' | 'copy' | 'clipcopy' | 'clipcut';
 export type JobState = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 
 export interface JobInfo {
@@ -320,4 +320,11 @@ export interface MountProbe {
   health: 'ready' | 'not-installed' | 'needs-enable' | 'version-mismatch' | 'unsupported';
   detail: string | null;
   built: boolean;
+}
+
+/** Items copied or cut from an open archive. */
+export interface Clip {
+  archive: number;
+  paths: string[];
+  cut: boolean;
 }

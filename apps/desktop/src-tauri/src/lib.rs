@@ -1,7 +1,9 @@
 //! OmniZip desktop application (Tauri 2).
 
+pub mod clipboard;
 pub mod commands;
 pub mod draft;
+pub mod dragout;
 pub mod jobs;
 pub mod launch;
 pub mod ops;
@@ -207,6 +209,12 @@ pub fn run() {
         })
         .setup(move |app| {
             let handle = app.handle().clone();
+            let sweeper = handle.clone();
+            std::thread::spawn(move || {
+                let state = sweeper.state::<AppState>();
+                dragout::sweep(&state);
+                clipboard::sweep_unused(&state);
+            });
             match invocation {
                 Some(inv) if inv.verb.is_background() || inv.verb.is_dialog() => {
                     handle_invocation(&handle, inv, true)
@@ -235,6 +243,7 @@ pub fn run() {
             commands::archive_close,
             commands::archive_list,
             commands::archive_dirs,
+            commands::archive_find,
             commands::archive_ancestors,
             commands::archive_node,
             commands::archive_selection_size,
@@ -249,6 +258,11 @@ pub fn run() {
             commands::job_add,
             commands::job_delete,
             commands::job_rename,
+            commands::job_move,
+            commands::job_transfer,
+            commands::drag_out,
+            commands::clipboard_copy,
+            commands::clipboard_paste,
             commands::job_cancel,
             commands::job_pause,
             commands::job_resume,

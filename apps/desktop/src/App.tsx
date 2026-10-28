@@ -140,7 +140,7 @@ export function App() {
       <div className="maincol">
         <TitleBar />
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
-          {view === 'settings' ? <SettingsView /> : view === 'browser' && archive ? <Browser /> : <Home dragOver={dragOver} />}
+          {view === 'settings' ? <SettingsView /> : view === 'browser' && archive ? <Browser key={archive.id} /> : <Home dragOver={dragOver} />}
           {dragOver && view === 'browser' && archive && (
             <div className="drop-overlay">{archive.writable ? t('cmd.add') : t('toast.readonly', { format: archive.info.format.toUpperCase() })}</div>
           )}

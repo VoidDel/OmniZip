@@ -82,11 +82,19 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .tree-item .tw .ic { width: 14px; height: 14px; }
 .tree-item .lbl { overflow: hidden; text-overflow: ellipsis; }
 .tree-item:hover { background: var(--bg-hover); }
-/* The archive itself lines up with the navigation items above it; its children indent from there. */
-.tree-item.tree-root { height: 32px; padding: 0 10px; gap: 10px; }
+/* An open archive: its chevron folds it, its folders indent under its icon. */
+.tree-item.tree-root { height: 32px; padding: 0 10px 0 6px; gap: 10px; }
+.tree-root .tw { margin-right: -4px; }
 .tree-root .fi { width: 18px; height: 18px; }
+.tree-root { cursor: default; }
+.tree-root .lbl { flex: 1; }
+.tree-root.shown .lbl { font-weight: 600; }
+.tree-close { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--fg-muted); margin-right: -4px; }
+.tree-close .ic { width: 14px; height: 14px; }
+.tree-close:hover { background: var(--bg-pressed); color: var(--fg-primary); }
 .tree-item[aria-current="true"] { background: var(--accent-subtle); color: var(--accent); }
-.sb-bottom { border-top: 1px solid var(--border-subtle); padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 0 1 auto; min-height: 0; }
+/* Pinned to the bottom also when nothing above grows (the folder tree is hidden in the narrow sidebar). */
+.sb-bottom { border-top: 1px solid var(--border-subtle); padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 0 1 auto; min-height: 0; margin-top: auto; }
 /* On a window material the sidebar shows what is behind the window, where the opaque light divider
    reads as a bright line: dividers there are a tint of the text colour instead. */
 :root[data-material="true"] .sidebar,
@@ -473,3 +481,14 @@ pre.code { margin: 0; font-family: var(--font-mono); font-size: .82rem; line-hei
 :root[data-shell="true"][data-material="true"] .scrim { background: transparent; }
 :root[data-shell="true"][data-material="true"] .mini,
 :root[data-shell="true"][data-material="true"] .modal { background: var(--canvas-material); }
+
+/* Moving items by dragging them onto a folder (features/browser/drag.tsx). */
+body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; }
+/* Items cut, until pasted. */
+.trow.cut, .gcell.cut { opacity: .5; }
+.drop-over { background: var(--accent-subtle) !important; box-shadow: inset 0 0 0 1px var(--accent); }
+.drag-ghost {
+  position: fixed; z-index: 60; pointer-events: none; max-width: 320px; padding: 4px 10px; border-radius: var(--radius-md);
+  background: var(--bg-elevated); border: 1px solid var(--border-default); box-shadow: var(--shadow-2);
+  font-size: .86rem; color: var(--fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

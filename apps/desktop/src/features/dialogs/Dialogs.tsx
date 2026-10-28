@@ -314,7 +314,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         openAfter,
         draft: d.draft ?? null,
       }, shell ?? undefined);
-      if (draft) useApp.getState().savingDraft(id);
+      if (d.draft !== undefined) useApp.getState().savingDraft(id, d.draft);
       if (shell) startedInShell(d.id, id);
       else close();
     } catch (e) {
@@ -502,8 +502,7 @@ function OpenPasswordDialog({ d }: { d: Extract<Dialog, { kind: 'openPassword' }
   const submit = async () => {
     if (!pw) return setError(t('pwd.empty'));
     close();
-    // Retrying after the password prompt: a new archive was already confirmed to be dropped.
-    await useApp.getState().openArchive(d.path, pw, true);
+    await useApp.getState().openArchive(d.path, pw);
   };
   return (
     <Modal

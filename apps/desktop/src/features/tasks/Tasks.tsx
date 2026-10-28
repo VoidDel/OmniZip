@@ -8,7 +8,7 @@ import { ProgressBar } from '../../components/ui';
 import { api, events } from '../../lib/api';
 import { basename } from '../../lib/format';
 import { useFmt } from '../../lib/hooks';
-import type { JobInfo, PromptEvent } from '../../lib/types';
+import type { Clip, JobInfo, PromptEvent } from '../../lib/types';
 import { useApp } from '../../store/app';
 
 const shown = new Set<string>();
@@ -43,9 +43,13 @@ export function useJobEvents() {
       s.upsertJob(j);
       const finished = (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') && before !== j.state;
       // A saved new archive takes the place of its draft; after a failure the draft stays.
-      if (finished && s.draftSaves.includes(j.id)) {
-        useApp.setState({ draftSaves: s.draftSaves.filter((x) => x !== j.id) });
-        if (j.state === 'done' && j.output) void s.openArchive(j.output, null, true);
+      const saving = s.draftSaves.find((x) => x.job === j.id);
+      if (finished && saving) {
+        useApp.setState({ draftSaves: s.draftSaves.filter((x) => x !== saving) });
+        if (j.state === 'done' && j.output) {
+          const output = j.output;
+          void s.openArchive(output).then((ok) => ok && useApp.getState().closeArchive(saving.draft, true));
+        }
       }
       // Mini windows report their own jobs.
       if (!finished || (j.window && j.window !== 'main')) return;
@@ -68,6 +72,8 @@ export function useJobEvents() {
             text: t('toast.compressed', { name: j.output ? basename(j.output) : j.title }),
             action: j.output ? { label: t('toast.show'), run: () => void api.reveal(j.output!) } : undefined,
           });
+        } else if (j.kind === 'clipcopy' || j.kind === 'clipcut') {
+          s.toast({ tone: 'success', text: t('toast.clipboard') });
         } else if (j.kind === 'test') {
           s.toast(damaged ? { tone: 'error', text: t('toast.testedErrors', { name: j.title, count: damaged }), sticky: true } : { tone: 'success', text: t('toast.tested', { name: j.title }) });
         } else {
@@ -80,11 +86,19 @@ export function useJobEvents() {
       if (!p.window || p.window === 'main') routePrompt(p);
     };
     void api.prompts().then((list) => list.forEach(onPrompt));
+    // An open archive was rewritten (add, delete, rename, move, copy): its nodes are numbered
+    // anew, so its folder is found again by path and the selection is dropped. That also goes
+    // for archives open but not shown.
     const onChanged = (id: number) => {
       const s = useApp.getState();
-      if (s.archive?.id === id) void api.summary(id).then((a) => useApp.getState().setArchive(a));
+      if (!s.opened.some((x) => x.id === id)) return;
+      const path = s.archive?.id === id ? s.cwdPath : (s.views[id]?.cwdPath ?? '');
+      void Promise.all([api.summary(id), path ? api.find(id, path) : Promise.resolve(0)]).then(([a, node]) =>
+        useApp.getState().relocate(a, node ?? 0),
+      );
     };
-    const subs = [events.onJob(onJob), events.onPrompt(onPrompt), events.onArchiveChanged(onChanged)];
+    const onClipboard = (clip: Clip | null) => useApp.setState({ clip });
+    const subs = [events.onJob(onJob), events.onPrompt(onPrompt), events.onArchiveChanged(onChanged), events.onClipboard(onClipboard)];
     return () => {
       subs.forEach((p) => void p.then((f) => f()));
     };
@@ -95,11 +109,13 @@ export function TaskCard({ j }: { j: JobInfo }) {
   const { t } = useTranslation();
   const fmt = useFmt();
   const p = j.progress;
-  const frac = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.filesTotal ? p.filesDone / p.filesTotal : 0;
+  // A finished job is complete even when it had nothing to count (moves and renames only
+  // rewrite names, with no bytes or files to report).
+  const frac = j.state === 'done' ? 1 : p.bytesTotal ? p.bytesDone / p.bytesTotal : p.filesTotal ? p.filesDone / p.filesTotal : 0;
   const live = j.state === 'running' || j.state === 'paused';
   const status =
     j.state === 'done' ? t('task.done') : j.state === 'failed' ? t('task.failed') : j.state === 'cancelled' ? t('task.cancelled') : j.state === 'paused' ? t('task.paused') : fmt.size(j.speed) + '/s';
-  const icon = j.kind === 'compress' || j.kind === 'add' ? 'package' : j.kind === 'test' ? 'checkCircle' : j.kind === 'extract' ? 'extract' : 'edit';
+  const icon = j.kind === 'compress' || j.kind === 'add' ? 'package' : j.kind === 'test' ? 'checkCircle' : j.kind === 'extract' || j.kind.startsWith('clip') ? 'extract' : 'edit';
   return (
     <div className={`task ${j.state}`}>
       <div className="tt">
@@ -109,7 +125,7 @@ export function TaskCard({ j }: { j: JobInfo }) {
         </b>
         <span className="mono" style={{ fontSize: '.8rem' }}>{fmt.percent(frac, 1)}</span>
       </div>
-      <ProgressBar value={j.state === 'done' ? 1 : frac} indeterminate={live && !p.bytesTotal && !p.filesTotal} />
+      <ProgressBar value={frac} indeterminate={live && !p.bytesTotal && !p.filesTotal} />
       <div className="meta">
         <span>{status}</span>
         <span>{live && j.eta != null ? t('task.remaining', { time: fmt.duration(j.eta) }) : p.bytesTotal ? fmt.size(p.bytesTotal) : ''}</span>
