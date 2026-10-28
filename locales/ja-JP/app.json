@@ -28,7 +28,7 @@
   },
   "title": {
     "search": "アーカイブ内を検索…",
-    "toggleTheme": "ライト / ダークを切り替え",
+    "theme": "テーマ",
     "language": "言語",
     "menu": "メニュー",
     "minimize": "最小化",

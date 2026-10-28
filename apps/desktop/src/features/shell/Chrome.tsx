@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { FileIcon, Icon, Logo, formatBadgeStyle } from '../../components/Icon';
+import { FileIcon, Icon, Logo, formatBadgeStyle, type IconName } from '../../components/Icon';
 import { ContextMenu, ProgressBar, type MenuItem } from '../../components/ui';
 import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
@@ -41,20 +41,65 @@ export function WindowControls() {
   );
 }
 
-export function TitleBar({ onToggleTheme }: { onToggleTheme: () => void }) {
-  const { t } = useTranslation();
+/** Title-bar button that opens a menu below itself; pressing it again closes the menu. */
+function MenuButton({ icon, label, items }: { icon: IconName; label: string; items: () => MenuItem[] }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="iconbtn"
+        title={label}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={at !== null}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setAt(at ? null : { x: r.left, y: r.bottom + 4 });
+        }}
+      >
+        <Icon name={icon} />
+      </button>
+      {at && <ContextMenu x={at.x} y={at.y} items={items()} anchor={ref.current} onClose={() => setAt(null)} />}
+    </>
+  );
+}
+
+export function TitleBar() {
+  const { t, i18n } = useTranslation();
   const view = useApp((s) => s.view);
   const archive = useApp((s) => s.archive);
   const query = useApp((s) => s.query);
   const setQuery = useApp((s) => s.setQuery);
   const settings = useApp((s) => s.settings);
   const boot = useApp((s) => s.boot);
+  const themes = useApp((s) => s.themes);
   const updateSettings = useApp((s) => s.updateSettings);
   const setSidebarOpen = useApp((s) => s.setSidebarOpen);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const dark = settings ? effectiveDark(settings) : false;
-  const langButton = useRef<HTMLButtonElement>(null);
-  const [langMenu, setLangMenu] = useState<{ x: number; y: number } | null>(null);
+  // Light / dark / system, then the themes of the appearance in effect.
+  const themeItems = (): MenuItem[] => {
+    if (!settings) return [];
+    const a = settings.appearance;
+    const mode = (m: typeof a.mode) => () => void updateSettings((s) => (s.appearance.mode = m));
+    const key = dark ? 'theme_dark' : 'theme_light';
+    return [
+      { label: t('settings.appearance.light'), icon: 'sun', checked: a.mode === 'light', run: mode('light') },
+      { label: t('settings.appearance.dark'), icon: 'moon', checked: a.mode === 'dark', run: mode('dark') },
+      { label: t('settings.appearance.system'), icon: 'monitor', checked: a.mode === 'system', run: mode('system') },
+      { separator: true },
+      ...themes
+        .filter((th) => th.appearance === (dark ? 'dark' : 'light'))
+        .map((th): MenuItem => ({
+          label: th.name[i18n.language] ?? th.name['en-US'],
+          checked: a[key] === th.id,
+          run: () => void updateSettings((s) => (s.appearance[key] = th.id)),
+        })),
+    ];
+  };
   const langItems = (): MenuItem[] => {
     if (!settings || !boot) return [];
     const ui = settings.language.ui;
@@ -79,11 +124,13 @@ export function TitleBar({ onToggleTheme }: { onToggleTheme: () => void }) {
     );
   return (
     <header className="titlebar" data-tauri-drag-region>
-      <button type="button" className="iconbtn menu-toggle" aria-label={t('title.menu')} onClick={() => setSidebarOpen(!sidebarOpen)}>
-        <Icon name="menu" />
-      </button>
-      <div className="ttl" data-tauri-drag-region>
-        {title}
+      <div className="tb-side" data-tauri-drag-region>
+        <button type="button" className="iconbtn menu-toggle" aria-label={t('title.menu')} onClick={() => setSidebarOpen(!sidebarOpen)}>
+          <Icon name="menu" />
+        </button>
+        <div className="ttl" data-tauri-drag-region>
+          {title}
+        </div>
       </div>
       {view === 'browser' && (
         <label className="searchbox">
@@ -102,26 +149,11 @@ export function TitleBar({ onToggleTheme }: { onToggleTheme: () => void }) {
           />
         </label>
       )}
-      <button type="button" className="iconbtn" title={t('title.toggleTheme')} aria-label={t('title.toggleTheme')} onClick={onToggleTheme}>
-        <Icon name={dark ? 'sun' : 'moon'} />
-      </button>
-      <button
-        ref={langButton}
-        type="button"
-        className="iconbtn"
-        title={t('title.language')}
-        aria-label={t('title.language')}
-        aria-haspopup="menu"
-        aria-expanded={langMenu !== null}
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          setLangMenu(langMenu ? null : { x: r.left, y: r.bottom + 4 });
-        }}
-      >
-        <Icon name="globe" />
-      </button>
-      {langMenu && <ContextMenu x={langMenu.x} y={langMenu.y} items={langItems()} anchor={langButton.current} onClose={() => setLangMenu(null)} />}
-      <WindowControls />
+      <div className="tb-side end" data-tauri-drag-region>
+        <MenuButton icon={dark ? 'moon' : 'sun'} label={t('title.theme')} items={themeItems} />
+        <MenuButton icon="globe" label={t('title.language')} items={langItems} />
+        <WindowControls />
+      </div>
     </header>
   );
 }
@@ -183,6 +215,7 @@ export function Sidebar() {
   const navigate = useApp((s) => s.navigate);
   const cwd = useApp((s) => s.cwd);
   const version = useApp((s) => s.listVersion);
+  const appVersion = useApp((s) => s.boot?.system.appVersion);
   const collapsed = settings?.appearance.sidebar_collapsed ?? false;
   const [roots, setRoots] = useState<TreeItem[]>([]);
   useEffect(() => {
@@ -203,6 +236,11 @@ export function Sidebar() {
         <Logo />
         <span className="brandname grow" data-tauri-drag-region>
           OmniZip
+          {appVersion && (
+            <span className="ver" data-tauri-drag-region>
+              {appVersion}
+            </span>
+          )}
         </span>
         <button
           type="button"
@@ -298,15 +336,8 @@ export function StatusBar() {
   const selSize = useApp((s) => s.selectionBytes);
   const settings = useApp((s) => s.settings);
   const dark = settings ? effectiveDark(settings) : false;
-  const version = useApp((s) => s.boot?.system.appVersion);
-  if (view !== 'browser' || !archive) {
-    return (
-      <footer className="statusbar">
-        <span className="lft">OmniZip {version}</span>
-        <span className="mid" />
-      </footer>
-    );
-  }
+  // Only an open archive has something to report; the app version is shown next to the logo.
+  if (view !== 'browser' || !archive) return null;
   const i = archive.info;
   return (
     <footer className="statusbar">

@@ -132,13 +132,12 @@ export function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, [t]);
 
-  const toggleTheme = () => void useApp.getState().updateSettings((x) => (x.appearance.mode = effectiveDark(x) ? 'light' : 'dark'));
   const collapsed = settings.appearance.sidebar_collapsed;
   return (
     <div className={`window${collapsed ? ' collapsed' : ''}${sidebarOpen ? ' sb-open' : ''}`}>
       <Sidebar />
       <div className="maincol">
-        <TitleBar onToggleTheme={toggleTheme} />
+        <TitleBar />
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
           {view === 'settings' ? <SettingsView /> : view === 'browser' && archive ? <Browser /> : <Home dragOver={dragOver} />}
           {dragOver && view === 'browser' && archive && (

@@ -3,23 +3,30 @@
 import appIcon from '@icons/app-icon.svg';
 
 const FILE = 'M6.5 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5z M13.5 3.5v4h4';
+// `tone:` parts are the filled second tone of duotone file icons (docs/05-theming.md §7),
+// drawn under the outline and invisible everywhere else.
+const FILE_TONE = 'tone:M6.5 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5z';
 const EYE = 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z';
 
 const PATHS: Record<string, string[]> = {
   home: ['M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z'],
   clock: ['M12 7.5V12l3 2', 'circle:12,12,8.5'],
-  folder: ['M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z'],
+  folder: [
+    'tone:M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z',
+    'M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z',
+  ],
   folderOpen: [
+    'tone:M3.8 19.5h14.6a1 1 0 0 0 .95-.7l2-6.3a.8.8 0 0 0-.77-1H7.3a1 1 0 0 0-.95.7L3.5 19z',
     'M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H18a1.5 1.5 0 0 1 1.5 1.5V11',
     'M3.8 19.5h14.6a1 1 0 0 0 .95-.7l2-6.3a.8.8 0 0 0-.77-1H7.3a1 1 0 0 0-.95.7L3.5 19',
   ],
-  file: [FILE],
-  fileText: [FILE, 'M8.5 12h7M8.5 15.5h7'],
-  fileCode: [FILE, 'M10 11.5l-2 2 2 2M14 11.5l2 2-2 2'],
-  fileImage: [FILE, 'circle:9.5,11.5,1.2', 'M7 18l3.5-3.5 2 2 2-2.5L17 18'],
-  fileVideo: [FILE, 'M10 11.5v5l4.5-2.5z'],
-  fileFont: [FILE, 'M9 17l3-7 3 7M10 15h4'],
-  archive: ['rect:4,5,16,4,1', 'M5.5 9v9A1.5 1.5 0 0 0 7 19.5h10a1.5 1.5 0 0 0 1.5-1.5V9', 'M10 13h4'],
+  file: [FILE_TONE, FILE],
+  fileText: [FILE_TONE, FILE, 'M8.5 12h7M8.5 15.5h7'],
+  fileCode: [FILE_TONE, FILE, 'M10 11.5l-2 2 2 2M14 11.5l2 2-2 2'],
+  fileImage: [FILE_TONE, FILE, 'circle:9.5,11.5,1.2', 'M7 18l3.5-3.5 2 2 2-2.5L17 18'],
+  fileVideo: [FILE_TONE, FILE, 'M10 11.5v5l4.5-2.5z'],
+  fileFont: [FILE_TONE, FILE, 'M9 17l3-7 3 7M10 15h4'],
+  archive: ['tone:M5 5h14a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM5.5 9h13v9a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 18z', 'rect:4,5,16,4,1', 'M5.5 9v9A1.5 1.5 0 0 0 7 19.5h10a1.5 1.5 0 0 0 1.5-1.5V9', 'M10 13h4'],
   lock: ['rect:5.5,10.5,13,9.5,1.5', 'M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5'],
   link: ['M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1', 'M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1'],
   search: ['circle:11,11,6', 'M15.5 15.5L20 20'],
@@ -47,6 +54,7 @@ const PATHS: Record<string, string[]> = {
   pause: ['M8 5.5v13M16 5.5v13'],
   sliders: ['M5 7h14M5 12h14M5 17h14', 'circle-fill:9,7,2', 'circle-fill:15,12,2', 'circle-fill:10,17,2'],
   moon: ['M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z'],
+  monitor: ['M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 15V6A1.5 1.5 0 0 1 5 4.5z', 'M8.5 20h7M12 16.5V20'],
   sun: ['circle:12,12,4', 'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4'],
   globe: ['circle:12,12,8.5', 'M3.5 12h17M12 3.5c3 3 3 14 0 17M12 3.5c-3 3-3 14 0 17'],
   palette: [
@@ -84,6 +92,8 @@ function shape(spec: string, i: number) {
       return <circle key={i} cx={n[0]} cy={n[1]} r={n[2]} fill="var(--bg-elevated)" />;
     case 'rect':
       return <rect key={i} x={n[0]} y={n[1]} width={n[2]} height={n[3]} rx={n[4]} />;
+    case 'tone':
+      return <path key={i} className="tone" d={args} />;
     default:
       return <path key={i} d={spec} />;
   }

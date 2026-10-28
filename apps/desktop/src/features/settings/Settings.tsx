@@ -4,7 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Icon, Logo, type IconName } from '../../components/Icon';
+import { FileIcon, Icon, Logo, type IconName } from '../../components/Icon';
 import { Segmented, Switch } from '../../components/ui';
 import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
@@ -262,6 +262,12 @@ export function SettingsView() {
                 <Segmented value={a.density} onChange={(v) => set((s) => (s.appearance.density = v))} options={[['compact', t('settings.appearance.compact')], ['comfortable', t('settings.appearance.comfortable')], ['spacious', t('settings.appearance.spacious')]]} />
               </Row>
               <Row label={t('settings.appearance.icons')}>
+                <span className="icon-preview" aria-hidden="true">
+                  <FileIcon name="folder" isDir />
+                  {['a.zip', 'a.png', 'a.ts', 'a.md', 'a.mp4'].map((n) => (
+                    <FileIcon key={n} name={n} isDir={false} />
+                  ))}
+                </span>
                 <Segmented value={a.icon_style} onChange={(v) => set((s) => (s.appearance.icon_style = v))} options={[['mono', t('settings.appearance.mono')], ['duotone', t('settings.appearance.duotone')]]} />
               </Row>
               <Row label={t('settings.appearance.fontSize')}>

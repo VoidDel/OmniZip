@@ -28,7 +28,7 @@
   },
   "title": {
     "search": "Search in archive…",
-    "toggleTheme": "Switch light / dark",
+    "theme": "Theme",
     "language": "Language",
     "menu": "Menu",
     "minimize": "Minimize",
