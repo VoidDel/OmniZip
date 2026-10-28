@@ -42,6 +42,7 @@
     "extractHere": "解压到此处",
     "mount": "挂载",
     "test": "测试",
+    "convert": "转换为…",
     "delete": "删除",
     "props": "属性",
     "more": "更多",
@@ -163,6 +164,17 @@
     "noEncryption": "{format} 格式不支持加密。",
     "exists": "{name} 已存在，将被替换。"
   },
+  "convert": {
+    "title": "转换 {name}",
+    "to": "保存到",
+    "format": "转换为",
+    "output": "生成 {name}",
+    "outputs": "生成 {count} 个 {format} 压缩包，与原压缩包同名",
+    "existsMany": "{count} 个同名压缩包已存在，将被替换。",
+    "openAfter": "完成后显示新压缩包",
+    "deleteSource": "完成后将原压缩包移到回收站",
+    "start": "开始转换"
+  },
   "draft": {
     "name": "新建压缩包",
     "addFiles": "添加文件",
@@ -250,6 +262,7 @@
     "kinds": {
       "extract": "解压",
       "compress": "压缩",
+      "convert": "转换",
       "test": "测试",
       "add": "添加",
       "delete": "删除",

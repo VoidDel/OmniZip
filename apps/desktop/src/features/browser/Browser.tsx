@@ -180,6 +180,7 @@ export function Browser() {
     save: () => openDialogSpec({ kind: 'compress', paths: [], draft: archive.id }),
     extract: (nodes: number[]) => openDialogSpec({ kind: 'extract', nodes, relativeTo: nodes.length ? cwd : undefined }),
     test: () => void api.test(archive.id).catch((e) => useApp.getState().reportError(e)),
+    convert: () => openDialogSpec({ kind: 'convert', paths: [archive.path] }),
     mount: () => openDialogSpec({ kind: 'mount' }),
     remove: (nodes: number[]) => {
       if (readonly) return readonlyToast();
@@ -566,7 +567,12 @@ export function Browser() {
               x: r.left,
               y: r.bottom + 4,
               items: [
-                ...(draft ? [] : [{ label: t('cmd.encoding'), icon: 'globe' as const, run: () => cmd.encoding(r.left, r.bottom + 4) }]),
+                ...(draft
+                  ? []
+                  : [
+                      { label: t('cmd.convert'), icon: 'refresh' as const, run: cmd.convert },
+                      { label: t('cmd.encoding'), icon: 'globe' as const, run: () => cmd.encoding(r.left, r.bottom + 4) },
+                    ]),
                 { label: t('cmd.rename'), icon: 'edit', disabled: readonly || n !== 1, run: () => cmd.rename(rowByNode(selectedNodes[0])) },
                 { label: t('cmd.copyPath'), icon: 'copy', disabled: n !== 1, run: () => void cmd.copyPath(selectedNodes[0]) },
                 { label: t('cmd.selectAll'), icon: 'check', kbd: 'Ctrl+A', run: cmd.selectAll },

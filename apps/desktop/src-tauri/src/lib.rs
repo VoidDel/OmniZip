@@ -267,6 +267,7 @@ pub fn run() {
             commands::job_extract,
             commands::job_compress,
             commands::job_test,
+            commands::job_convert,
             commands::job_add,
             commands::job_delete,
             commands::job_rename,

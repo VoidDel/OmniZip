@@ -42,6 +42,7 @@
     "extractHere": "ここに展開",
     "mount": "マウント",
     "test": "テスト",
+    "convert": "変換…",
     "delete": "削除",
     "props": "プロパティ",
     "more": "その他",
@@ -163,6 +164,17 @@
     "noEncryption": "{format} 形式は暗号化できません。",
     "exists": "{name} は既に存在し、置き換えられます。"
   },
+  "convert": {
+    "title": "{name} を変換",
+    "to": "保存先",
+    "format": "変換後の形式",
+    "output": "{name} を作成します",
+    "outputs": "元のアーカイブと同じ名前で {format} アーカイブを {count} 個作成します",
+    "existsMany": "同じ名前のアーカイブが {count} 個あり、置き換えられます。",
+    "openAfter": "完了後に新しいアーカイブを表示",
+    "deleteSource": "完了後に元のアーカイブをごみ箱に移動",
+    "start": "変換"
+  },
   "draft": {
     "name": "新しいアーカイブ",
     "addFiles": "ファイルを追加",
@@ -250,6 +262,7 @@
     "kinds": {
       "extract": "展開",
       "compress": "圧縮",
+      "convert": "変換",
       "test": "テスト",
       "add": "追加",
       "delete": "削除",

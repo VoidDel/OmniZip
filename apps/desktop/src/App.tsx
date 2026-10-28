@@ -33,7 +33,7 @@ function handleLaunch(r: LaunchRequest) {
       void s.openArchive(r.path).then((ok) => ok && s.openDialog({ kind: 'mount' }));
       break;
     case 'convert':
-      s.openDialog({ kind: 'extract', paths: r.paths });
+      s.openDialog({ kind: 'convert', paths: r.paths });
       break;
   }
 }

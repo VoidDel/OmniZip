@@ -7,6 +7,7 @@ import type {
   Bootstrap,
   Clip,
   CompressRequest,
+  ConvertRequest,
   Crumb,
   ErrorReport,
   ExtractRequest,
@@ -66,6 +67,7 @@ export const api = {
 
   extract: (request: ExtractRequest, window?: string) => invoke<number>('job_extract', { request, window: window ?? null }),
   compress: (request: CompressRequest, window?: string) => invoke<number>('job_compress', { request, window: window ?? null }),
+  convert: (request: ConvertRequest, window?: string) => invoke<number>('job_convert', { request, window: window ?? null }),
   test: (archiveId: number | null, paths: string[] = [], password: string | null = null) =>
     invoke<number>('job_test', { archiveId, paths, password }),
   add: (id: number, paths: string[], dir: number) => invoke<number>('job_add', { id, paths, dir }),

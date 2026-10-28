@@ -42,6 +42,7 @@
     "extractHere": "解壓縮到此處",
     "mount": "掛載",
     "test": "測試",
+    "convert": "轉換為…",
     "delete": "刪除",
     "props": "內容",
     "more": "更多",
@@ -163,6 +164,17 @@
     "noEncryption": "{format} 格式不支援加密。",
     "exists": "{name} 已存在，將被取代。"
   },
+  "convert": {
+    "title": "轉換 {name}",
+    "to": "儲存到",
+    "format": "轉換為",
+    "output": "產生 {name}",
+    "outputs": "產生 {count} 個 {format} 壓縮檔，與原壓縮檔同名",
+    "existsMany": "{count} 個同名壓縮檔已存在，將被取代。",
+    "openAfter": "完成後顯示新壓縮檔",
+    "deleteSource": "完成後將原壓縮檔移到資源回收筒",
+    "start": "開始轉換"
+  },
   "draft": {
     "name": "新增壓縮檔",
     "addFiles": "加入檔案",
@@ -250,6 +262,7 @@
     "kinds": {
       "extract": "解壓縮",
       "compress": "壓縮",
+      "convert": "轉換",
       "test": "測試",
       "add": "加入",
       "delete": "刪除",

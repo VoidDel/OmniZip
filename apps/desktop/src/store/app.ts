@@ -26,6 +26,7 @@ export type DialogSpec =
   | { kind: 'extract'; paths?: string[]; nodes?: number[]; relativeTo?: number }
   /** `draft`: save that new archive (its items) instead of compressing `paths`. */
   | { kind: 'compress'; paths: string[]; draft?: number }
+  | { kind: 'convert'; paths: string[] }
   | { kind: 'openPassword'; path: string; wrong: boolean }
   | { kind: 'jobPassword'; jobId: number; promptId: number; archive: string; attempt: number }
   | { kind: 'conflict'; jobId: number; promptId: number; data: Record<string, unknown> }

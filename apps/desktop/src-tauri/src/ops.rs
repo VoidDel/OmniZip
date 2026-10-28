@@ -79,6 +79,29 @@ pub struct CompressRequest {
     pub draft: Option<u32>,
 }
 
+/// Conversion request: archives on disk written again in another format
+/// (`docs/04-ui-design.md` §4.11).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConvertRequest {
+    pub items: Vec<ConvertItem>,
+    pub format: FormatId,
+    pub level: omnizip_core::Level,
+    #[serde(default)]
+    pub verify: bool,
+    #[serde(default)]
+    pub delete_source: bool,
+    #[serde(default)]
+    pub open_after: bool,
+}
+
+/// One archive to convert and the path of its new archive (the dialog shows that path).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConvertItem {
+    pub source: String,
+    pub destination: String,
+}
+
 fn yes() -> bool {
     true
 }
@@ -307,6 +330,79 @@ pub fn test_work(
         Ok((total, None))
     });
     (title, work)
+}
+
+/// New archives must not replace an archive being converted, nor each other.
+fn check_destinations(items: &[ConvertItem]) -> Result<(), Error> {
+    let key = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p));
+    let sources: Vec<PathBuf> = items.iter().map(|i| key(&i.source)).collect();
+    let mut taken = Vec::new();
+    for i in items {
+        let dest = key(&i.destination);
+        if sources.contains(&dest) || taken.contains(&dest) {
+            return Err(Error::new(ErrorCode::AlreadyExists).with("path", &i.destination));
+        }
+        taken.push(dest);
+    }
+    Ok(())
+}
+
+/// Builds the conversion work: each archive is extracted to a staging folder next to its new
+/// archive, which is then written from it (`omnizip_formats::convert`). A password the source
+/// needs is asked for by the job.
+pub fn convert_work(
+    req: ConvertRequest,
+    threads: u32,
+    locale: String,
+) -> Result<(String, Work), Error> {
+    check_destinations(&req.items)?;
+    let title = match req.items.as_slice() {
+        [one] => file_name(Path::new(&one.source)),
+        many => format!(
+            "{} × {}",
+            many.len(),
+            file_name(Path::new(many.first().map_or("", |i| i.source.as_str())))
+        ),
+    };
+    let work: Work = Box::new(move |ctx: &JobCtx| {
+        let mut total = Report::default();
+        for item in &req.items {
+            ctx.check()?;
+            let src = PathBuf::from(&item.source);
+            let dest = PathBuf::from(&item.destination);
+            let oo = OpenOptions {
+                locale: Some(locale.clone()),
+                ..Default::default()
+            };
+            let wo = WriteOptions {
+                format: req.format,
+                level: req.level,
+                threads,
+                ..Default::default()
+            };
+            let report = omnizip_formats::convert(shared(), &src, &dest, &oo, &wo, ctx)?;
+            if req.verify {
+                let mut r = shared().open(&dest, &OpenOptions::default(), ctx)?;
+                let t = omnizip_core::test(r.as_mut(), Selection::all(), ctx)?;
+                if let Some(w) = t.warnings.first() {
+                    return Err(Error::new(w.code).with("path", &w.path));
+                }
+            }
+            // A source with entries that were not carried over (warnings) is kept.
+            if req.delete_source && report.warnings.is_empty() {
+                let _ = trash::delete(&src);
+            }
+            merge(&mut total, report);
+        }
+        let out = total.outputs.first().cloned();
+        if req.open_after
+            && let Some(o) = &out
+        {
+            reveal(o);
+        }
+        Ok((total, out.map(|p| p.to_string_lossy().into_owned())))
+    });
+    Ok((title, work))
 }
 
 /// In-place update of an open archive; on success the archive is reopened and the UI is told
@@ -803,5 +899,42 @@ mod tests {
         assert!(move_plan(&t, &[node(&t, "docs")], node(&t, "docs")).is_err());
         assert!(move_plan(&t, &[node(&t, "docs")], node(&t, "docs/sub")).is_err());
         assert!(move_plan(&t, &[node(&t, "a.txt")], node(&t, "out")).is_err());
+    }
+
+    #[test]
+    fn convert_never_replaces_a_source_or_another_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = |n: &str| dir.path().join(n).to_string_lossy().into_owned();
+        std::fs::write(p("photos.zip"), "").unwrap();
+        std::fs::write(p("photos.7z"), "").unwrap();
+        let item = |s: &str, d: &str| ConvertItem {
+            source: p(s),
+            destination: p(d),
+        };
+        // An existing archive that is not being converted is replaced (the dialog says so).
+        assert!(check_destinations(&[item("photos.zip", "photos.7z")]).is_ok());
+        assert!(check_destinations(&[item("photos.7z", "photos.7z")]).is_err());
+        // Converting both to 7z: the first must not take the second's name, nor share one.
+        assert!(
+            check_destinations(&[
+                item("photos.zip", "photos.7z"),
+                item("photos.7z", "photos (2).7z")
+            ])
+            .is_err()
+        );
+        assert!(
+            check_destinations(&[
+                item("photos.zip", "photos (2).7z"),
+                item("photos.7z", "photos (2).7z")
+            ])
+            .is_err()
+        );
+        assert!(
+            check_destinations(&[
+                item("photos.zip", "photos (2).7z"),
+                item("photos.7z", "photos (3).7z")
+            ])
+            .is_ok()
+        );
     }
 }

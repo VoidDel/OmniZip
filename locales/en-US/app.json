@@ -42,6 +42,7 @@
     "extractHere": "Extract here",
     "mount": "Mount",
     "test": "Test",
+    "convert": "Convert to…",
     "delete": "Delete",
     "props": "Properties",
     "more": "More",
@@ -163,6 +164,17 @@
     "noEncryption": "{format} archives cannot be encrypted.",
     "exists": "{name} already exists and will be replaced."
   },
+  "convert": {
+    "title": "Convert {name}",
+    "to": "Save to",
+    "format": "Convert to",
+    "output": "Creates {name}",
+    "outputs": "{count, plural, one {# {format} archive} other {# {format} archives}}, named after the originals",
+    "existsMany": "{count, plural, one {# archive} other {# archives}} with the same name already {count, plural, one {exists} other {exist}} and will be replaced.",
+    "openAfter": "Show the new archive when done",
+    "deleteSource": "Move the original archive to the Recycle Bin when done",
+    "start": "Convert"
+  },
   "draft": {
     "name": "New archive",
     "addFiles": "Add files",
@@ -250,6 +262,7 @@
     "kinds": {
       "extract": "Extract",
       "compress": "Compress",
+      "convert": "Convert",
       "test": "Test",
       "add": "Add",
       "delete": "Delete",

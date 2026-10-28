@@ -227,7 +227,7 @@ export interface Report {
   outputs: string[];
 }
 
-export type JobKind = 'extract' | 'compress' | 'test' | 'add' | 'delete' | 'rename' | 'move' | 'copy' | 'clipcopy' | 'clipcut';
+export type JobKind = 'extract' | 'compress' | 'convert' | 'test' | 'add' | 'delete' | 'rename' | 'move' | 'copy' | 'clipcopy' | 'clipcut';
 export type JobState = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 
 export interface JobInfo {
@@ -293,6 +293,16 @@ export interface CompressRequest {
   openAfter?: boolean;
   /** Save this new archive instead of collecting `paths`. */
   draft?: number | null;
+}
+
+/** Archives on disk written again in another format, each to the path shown in the dialog. */
+export interface ConvertRequest {
+  items: { source: string; destination: string }[];
+  format: FormatId;
+  level: Level;
+  verify?: boolean;
+  deleteSource?: boolean;
+  openAfter?: boolean;
 }
 
 export interface RecentItem {

@@ -25,7 +25,7 @@ use crate::{
     integration::{self, ShellStatus},
     jobs::{Finish, JobInfo, JobSpec, JobState, PromptAnswer},
     launch::LaunchRequest,
-    ops::{self, CompressRequest, ExtractRequest},
+    ops::{self, CompressRequest, ConvertRequest, ExtractRequest},
     preview::{self, Preview},
     settings::{self, Settings},
     state::{AppState, OpenedArchive, RecentItem},
@@ -793,6 +793,26 @@ pub fn job_test(
         ..JobSpec::new("test", title, policy(&state))
     };
     Ok(state.jobs.spawn(&app, spec, work, None))
+}
+
+#[tauri::command]
+pub fn job_convert(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: ConvertRequest,
+    window: Option<String>,
+) -> CmdResult<u32> {
+    let locale = omnizip_i18n::detect_language(Some(&state.settings().language.ui)).to_owned();
+    let (title, work) = ops::convert_work(request, threads(&state), locale).map_err(err)?;
+    Ok(state.jobs.spawn(
+        &app,
+        JobSpec {
+            window,
+            ..JobSpec::new("convert", title, policy(&state))
+        },
+        work,
+        None,
+    ))
 }
 
 fn spawn_update(
