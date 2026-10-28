@@ -63,6 +63,11 @@ export function Modal({ title, onClose, children, footer, width, sheet, sticky }
   const ref = useRef<HTMLDivElement>(null);
   // In a standalone dialog window the header is the title bar.
   const drag = useApp((s) => !!s.shellLabel) || isShellWindow() || undefined;
+  // Focus moves into the dialog once, when it opens. `onClose` is usually a new function on every
+  // render; were it a dependency, each keystroke would re-run this and pull the focus back to the
+  // first field (typing a password into a later field ended up in the file name).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
@@ -71,7 +76,7 @@ export function Modal({ title, onClose, children, footer, width, sheet, sticky }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
       if (e.key === 'Tab' && el) {
         const items = Array.from(el.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, [tabindex]:not([tabindex="-1"]), summary'));
@@ -89,9 +94,11 @@ export function Modal({ title, onClose, children, footer, width, sheet, sticky }
     el?.addEventListener('keydown', onKey);
     return () => {
       el?.removeEventListener('keydown', onKey);
-      prev?.focus?.();
+      // A frame later: the rest of the key press that closed the dialog (Enter) must not reach
+      // the button that opened it, which would open the dialog again.
+      requestAnimationFrame(() => prev?.focus?.());
     };
-  }, [onClose]);
+  }, []);
   return createPortal(
     <div className={`scrim${sheet ? ' sheet' : ''}`} onMouseDown={(e) => !sticky && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="modal" role="dialog" aria-modal="true" style={{ ['--mw' as string]: `${width ?? 520}px` }}>
