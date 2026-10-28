@@ -72,6 +72,23 @@ function Save-Logo([string]$name, [int]$size, [double]$fill = 1.0) {
   $bmp.Save((Join-Path $stage "Assets/$name"), [System.Drawing.Imaging.ImageFormat]::Png)
   $bmp.Dispose()
 }
+# The package logo (StoreLogo) is shown by App Installer on a square plate of the accent colour,
+# which would show around the icon's rounded corners: it is the square inside the artwork's
+# rounded one instead (icons/app-icon.svg: a 896-unit square from 64, corner radius 208, so the
+# corners cut ~61 units in along the diagonal; 68 leaves a margin), scaled up to fill the tile.
+function Save-Tile([string]$name, [int]$size) {
+  $bmp = New-Object System.Drawing.Bitmap $size, $size
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+  $side = $size * 1024.0 / 760.0
+  $off = ($size - $side) / 2
+  $g.DrawImage($art, (New-Object System.Drawing.RectangleF $off, $off, $side, $side))
+  $g.Dispose()
+  $bmp.Save((Join-Path $stage "Assets/$name"), [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+}
 foreach ($t in 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256) {
   Save-Logo "Square44x44Logo.targetsize-$t.png" $t
   Save-Logo "Square44x44Logo.targetsize-${t}_altform-unplated.png" $t
@@ -80,7 +97,7 @@ foreach ($s in 100, 125, 150, 200, 400) {
   $k = $s / 100
   Save-Logo "Square44x44Logo.scale-$s.png" ([math]::Ceiling(44 * $k))
   Save-Logo "Square150x150Logo.scale-$s.png" ([math]::Ceiling(150 * $k)) 0.66
-  Save-Logo "StoreLogo.scale-$s.png" ([math]::Ceiling(50 * $k))
+  Save-Tile "StoreLogo.scale-$s.png" ([math]::Ceiling(50 * $k))
 }
 $art.Dispose()
 
