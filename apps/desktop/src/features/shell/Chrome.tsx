@@ -1,11 +1,12 @@
 // Title bar, sidebar and status bar (docs/04-ui-design.md §3).
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FileIcon, Icon, Logo, formatBadgeStyle } from '../../components/Icon';
-import { ProgressBar } from '../../components/ui';
+import { ContextMenu, ProgressBar, type MenuItem } from '../../components/ui';
+import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
 import { effectiveDark } from '../../lib/theme';
@@ -47,10 +48,24 @@ export function TitleBar({ onToggleTheme }: { onToggleTheme: () => void }) {
   const query = useApp((s) => s.query);
   const setQuery = useApp((s) => s.setQuery);
   const settings = useApp((s) => s.settings);
-  const setView = useApp((s) => s.setView);
+  const boot = useApp((s) => s.boot);
+  const updateSettings = useApp((s) => s.updateSettings);
   const setSidebarOpen = useApp((s) => s.setSidebarOpen);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const dark = settings ? effectiveDark(settings) : false;
+  const langButton = useRef<HTMLButtonElement>(null);
+  const [langMenu, setLangMenu] = useState<{ x: number; y: number } | null>(null);
+  const langItems = (): MenuItem[] => {
+    if (!settings || !boot) return [];
+    const ui = settings.language.ui;
+    const pick = (lang: string) => () => void updateSettings((s) => (s.language.ui = lang));
+    const sysLang = boot.languages.find(([l]) => l === normalizeLang(boot.system.locale))?.[1] ?? boot.system.locale;
+    return [
+      { label: t('settings.language.auto', { lang: sysLang }), checked: ui === 'auto', run: pick('auto') },
+      { separator: true },
+      ...boot.languages.map(([l, name]): MenuItem => ({ label: name, checked: ui === l, run: pick(l) })),
+    ];
+  };
   const title =
     view === 'settings' ? (
       <b>{t('settings.title')}</b>
@@ -91,15 +106,21 @@ export function TitleBar({ onToggleTheme }: { onToggleTheme: () => void }) {
         <Icon name={dark ? 'sun' : 'moon'} />
       </button>
       <button
+        ref={langButton}
         type="button"
         className="iconbtn"
-        title={t('title.settings')}
-        aria-label={t('title.settings')}
-        aria-pressed={view === 'settings'}
-        onClick={() => setView(view === 'settings' ? (archive ? 'browser' : 'home') : 'settings')}
+        title={t('title.language')}
+        aria-label={t('title.language')}
+        aria-haspopup="menu"
+        aria-expanded={langMenu !== null}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setLangMenu(langMenu ? null : { x: r.left, y: r.bottom + 4 });
+        }}
       >
-        <Icon name="sliders" />
+        <Icon name="globe" />
       </button>
+      {langMenu && <ContextMenu x={langMenu.x} y={langMenu.y} items={langItems()} anchor={langButton.current} onClose={() => setLangMenu(null)} />}
       <WindowControls />
     </header>
   );

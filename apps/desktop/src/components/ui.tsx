@@ -120,8 +120,9 @@ export interface MenuItem {
   run?: () => void;
 }
 
-/** Context menu positioned at a point and kept inside the viewport. */
-export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
+/** Context menu positioned at a point and kept inside the viewport. A press on `anchor` (the
+ *  button that toggles the menu) is left to that button instead of closing the menu. */
+export function ContextMenu({ x, y, items, onClose, anchor }: { x: number; y: number; items: MenuItem[]; onClose: () => void; anchor?: HTMLElement | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   const [active, setActive] = useState(-1);
@@ -136,7 +137,8 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
   }, [x, y]);
   useEffect(() => {
     const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !anchor?.contains(target)) onClose();
     };
     const blur = () => onClose();
     window.addEventListener('mousedown', close, true);
@@ -147,7 +149,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
       window.removeEventListener('blur', blur);
       window.removeEventListener('resize', blur);
     };
-  }, [onClose]);
+  }, [onClose, anchor]);
   const enabled = items.map((it, i) => (!it.separator && !it.disabled ? i : -1)).filter((i) => i >= 0);
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
