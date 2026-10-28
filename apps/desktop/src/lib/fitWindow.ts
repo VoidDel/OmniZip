@@ -4,6 +4,8 @@
 import { LogicalSize, PhysicalPosition, currentMonitor, getCurrentWindow, type Window } from '@tauri-apps/api/window';
 import { useEffect, useRef } from 'react';
 
+import { nextFrame } from './frame';
+
 /**
  * Size of a job window: the progress view and the questions it asks (password, confirmations)
  * share it, so the window neither moves nor changes size between them. Questions that need
@@ -46,10 +48,10 @@ export function useFitWindowToDialog(width: number | null, options: FitOptions =
     const win = getCurrentWindow();
     let fitted = false;
     let last: number | undefined;
-    let frame = 0;
+    let cancel = () => {};
     const fit = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
+      cancel();
+      cancel = nextFrame(() => {
         const modal = document.querySelector<HTMLElement>('.modal');
         if (!modal) return;
         // The content's own height, from its parts: the modal box itself follows the window
@@ -78,7 +80,7 @@ export function useFitWindowToDialog(width: number | null, options: FitOptions =
     fit();
     return () => {
       observer.disconnect();
-      cancelAnimationFrame(frame);
+      cancel();
     };
   }, [width]);
 }

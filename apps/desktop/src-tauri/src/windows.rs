@@ -117,9 +117,12 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     {
         b = b.decorations(false).transparent(transparent);
     }
+    // Linux draws its own title bar and window buttons too (the window manager still resizes it
+    // from its edges).
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
         let _ = transparent;
+        b = b.decorations(false);
     }
     if let Some(fx) = current_effects(app) {
         b = b.effects(fx);
@@ -141,7 +144,7 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
         .visible(false)
         .always_on_top(true)
         .background_color(window_background(app));
-    // Rebinding per platform keeps every target free of an unused mut (Linux has no tweak).
+    // Rebinding per platform keeps every target free of an unused mut.
     #[cfg(target_os = "macos")]
     let b = b
         .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -150,6 +153,8 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
     let b = b
         .decorations(false)
         .transparent(system::material_supported());
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let b = b.decorations(false);
     with_material(app, b).build()
 }
 
@@ -175,6 +180,8 @@ pub fn shell_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow
     let b = b
         .decorations(false)
         .transparent(system::material_supported());
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let b = b.decorations(false);
     with_material(app, b).build()
 }
 

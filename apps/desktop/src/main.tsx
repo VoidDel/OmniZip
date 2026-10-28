@@ -9,6 +9,7 @@ import { MiniApp } from './MiniApp';
 import { ShellApp } from './ShellApp';
 import i18next, { errorText, initI18n, resolveLang } from './i18n';
 import { api } from './lib/api';
+import { nextFrame } from './lib/frame';
 import { applyTheme } from './lib/theme';
 import { errorHandler, useApp } from './store/app';
 
@@ -37,7 +38,7 @@ async function main() {
   );
   // Show the window only once the first frame is painted (no white flash, docs/05-theming.md §8).
   // A dialog window shows itself once it has been sized to its dialog.
-  if (!shell) requestAnimationFrame(() => requestAnimationFrame(() => void api.windowReady()));
+  if (!shell) nextFrame(() => nextFrame(() => void api.windowReady()));
 }
 
 void main().catch((e) => {

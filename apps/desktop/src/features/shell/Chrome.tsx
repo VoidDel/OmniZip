@@ -14,6 +14,52 @@ import type { ArchiveSummary, TreeItem } from '../../lib/types';
 import { useApp } from '../../store/app';
 import { SETTINGS_TABS } from '../settings/Settings';
 
+const EDGES = [
+  ['n', 'North'],
+  ['s', 'South'],
+  ['e', 'East'],
+  ['w', 'West'],
+  ['ne', 'NorthEast'],
+  ['nw', 'NorthWest'],
+  ['se', 'SouthEast'],
+  ['sw', 'SouthWest'],
+] as const;
+
+/**
+ * The edges a Linux window is resized by. The window has no frame there (the title bar is the
+ * app's own), and the web view takes the pointer before the window could start a resize from its
+ * border, so the page hands the press to the window manager. Not while maximized.
+ */
+export function ResizeEdges() {
+  const [max, setMax] = useState(false);
+  const linux = document.documentElement.dataset.platform === 'linux';
+  useEffect(() => {
+    if (!linux) return;
+    const w = getCurrentWindow();
+    void w.isMaximized().then(setMax);
+    const un = w.onResized(() => void w.isMaximized().then(setMax));
+    return () => {
+      void un.then((f) => f());
+    };
+  }, [linux]);
+  if (!linux || max) return null;
+  return (
+    <div className="resize-edges" aria-hidden="true">
+      {EDGES.map(([cls, dir]) => (
+        <div
+          key={cls}
+          className={cls}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            void getCurrentWindow().startResizeDragging(dir);
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function WindowControls() {
   const { t } = useTranslation();
   const [max, setMax] = useState(false);

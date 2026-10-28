@@ -162,7 +162,7 @@ Windows 11 上材质可在设置中选择 Mica（只取桌面壁纸、模糊最�
 
 1. **ThemeService（Rust）**：扫描内置目录与用户目录 → JSON Schema 校验（`jsonschema` crate）→ 解析派生 → 对比度守卫 → 生成 `ResolvedTheme`（完整令牌表）→ 通过事件推送前端；监视用户目录实现热重载。
 2. **前端应用**：把令牌写入 `document.documentElement.style` 的 CSS 变量；设置 `data-appearance="dark|light"` 与 `color-scheme`，让原生滚动条、表单控件、`<select>` 跟随。
-3. **防首屏闪白**：Rust 启动时先读配置得到上次 `bg.canvas`，用它设置窗口 `backgroundColor`；窗口 `visible: false` 创建，前端首帧渲染后再 `show()`；关键令牌内联在 `index.html` 中。
+3. **防首屏闪白**：Rust 启动时先读配置得到上次 `bg.canvas`，用它设置窗口 `backgroundColor`；窗口 `visible: false` 创建，前端首帧渲染后再 `show()`（等两次动画帧；WebKitGTK 不给隐藏的窗口发动画帧，因此最多等 100 ms 也照常显示，见 `src/lib/frame.ts`）；关键令牌内联在 `index.html` 中。
 4. **切换过渡**：支持 View Transitions API 时做 200 ms 交叉淡入；否则直接切换；`prefers-reduced-motion` 下禁用。
 5. **多窗口同步**：ThemeService 为唯一真相源，所有窗口订阅同一事件。
 6. **Shell 扩展**：Windows 右键菜单图标提供浅 / 深两套资源，依据 `HKCU\...\Themes\Personalize\AppsUseLightTheme` 选择。

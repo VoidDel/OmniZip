@@ -9,7 +9,7 @@ import { Browser } from './features/browser/Browser';
 import { DialogHost } from './features/dialogs/Dialogs';
 import { Home, pickArchive } from './features/home/Home';
 import { SettingsView } from './features/settings/Settings';
-import { Sidebar, StatusBar, TitleBar } from './features/shell/Chrome';
+import { ResizeEdges, Sidebar, StatusBar, TitleBar } from './features/shell/Chrome';
 import { TaskDrawer, useJobEvents } from './features/tasks/Tasks';
 import i18n, { resolveLang, setLanguage } from './i18n';
 import { api, events } from './lib/api';
@@ -151,6 +151,7 @@ export function App() {
       {sidebarOpen && <div className="sb-scrim" onClick={() => setSidebarOpen(false)} />}
       <DialogHost />
       <Toasts />
+      <ResizeEdges />
     </div>
   );
 }
