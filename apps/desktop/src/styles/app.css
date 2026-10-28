@@ -71,7 +71,7 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .nav-item:hover { background: var(--bg-hover); }
 .nav-item[aria-current="true"] { background: var(--accent-subtle); color: var(--accent); }
 .nav-item .lbl { overflow: hidden; text-overflow: ellipsis; }
-.sb-label { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); padding: 12px 18px 4px; white-space: nowrap; flex: none; }
+.sb-sep { border: 0; border-top: 1px solid var(--border-subtle); margin: 8px 16px 6px; flex: none; }
 .tree { flex: 1; overflow: auto; padding: 0 8px 8px; min-height: 40px; }
 .tree-item {
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; border-radius: 6px; font-size: .9rem;
@@ -82,11 +82,15 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .tree-item .tw .ic { width: 14px; height: 14px; }
 .tree-item .lbl { overflow: hidden; text-overflow: ellipsis; }
 .tree-item:hover { background: var(--bg-hover); }
+/* The archive itself lines up with the navigation items above it; its children indent from there. */
+.tree-item.tree-root { height: 32px; padding: 0 10px; gap: 10px; }
+.tree-root .fi { width: 18px; height: 18px; }
 .tree-item[aria-current="true"] { background: var(--accent-subtle); color: var(--accent); }
 .sb-bottom { border-top: 1px solid var(--border-subtle); padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 0 1 auto; min-height: 0; }
 /* On a window material the sidebar shows what is behind the window, where the opaque light divider
    reads as a bright line: dividers there are a tint of the text colour instead. */
 :root[data-material="true"] .sidebar,
+:root[data-material="true"] .sb-sep,
 :root[data-material="true"] .sb-bottom { border-color: color-mix(in srgb, var(--fg-primary) 10%, transparent); }
 /* Settings sections unfold upwards from the Settings item; in a short window the list scrolls. */
 .sb-sub { display: grid; grid-template-rows: 0fr; min-height: 0; transition: grid-template-rows var(--dur); }
@@ -103,7 +107,7 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .progress > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width 200ms linear; }
 .progress.indeterminate > i { width: 30% !important; animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
-.window.collapsed .lbl, .window.collapsed .sb-label, .window.collapsed .tree, .window.collapsed .brandname,
+.window.collapsed .lbl, .window.collapsed .sb-sep, .window.collapsed .tree, .window.collapsed .brandname,
 .window.collapsed .task-sum .progress { display: none; }
 .window.collapsed .nav-item, .window.collapsed .sb-sub .nav-item { justify-content: center; padding: 0; }
 .window.collapsed .nav-item .chev { display: none; }

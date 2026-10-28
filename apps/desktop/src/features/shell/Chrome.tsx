@@ -179,7 +179,7 @@ function TreeNode({ id, item, depth }: { id: number; item: TreeItem; depth: numb
         role="treeitem"
         aria-expanded={item.hasChildren ? expanded : undefined}
         aria-current={current}
-        style={{ paddingLeft: 6 + depth * 14 }}
+        style={{ paddingLeft: 10 + (depth - 1) * 14 }}
         title={item.name}
         onClick={() => navigate(item.node)}
       >
@@ -260,17 +260,16 @@ export function Sidebar() {
       </nav>
       {archive ? (
         <>
-          <div className="sb-label">{t('nav.tree')}</div>
-          <div className="tree" role="tree">
+          <hr className="sb-sep" />
+          <div className="tree" role="tree" aria-label={t('nav.tree')}>
             <button
               type="button"
-              className="tree-item"
+              className="tree-item tree-root"
               role="treeitem"
               aria-current={cwd === 0 && view === 'browser'}
               onClick={() => navigate(0)}
               title={archive.name}
             >
-              <span className="tw" />
               <Icon name="archive" className="fi archive" />
               <span className="lbl">{archive.name}</span>
               <span className="badge" style={{ marginLeft: 'auto', ...formatBadgeStyle(archive.info.format, false) }}>
