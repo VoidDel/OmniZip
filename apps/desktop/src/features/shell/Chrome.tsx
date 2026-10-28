@@ -11,6 +11,7 @@ import { useFmt } from '../../lib/hooks';
 import { effectiveDark } from '../../lib/theme';
 import type { TreeItem } from '../../lib/types';
 import { useApp } from '../../store/app';
+import { SETTINGS_TABS } from '../settings/Settings';
 
 export function WindowControls() {
   const { t } = useTranslation();
@@ -152,6 +153,8 @@ export function Sidebar() {
   const view = useApp((s) => s.view);
   const archive = useApp((s) => s.archive);
   const setView = useApp((s) => s.setView);
+  const settingsTab = useApp((s) => s.settingsTab);
+  const setSettingsTab = useApp((s) => s.setSettingsTab);
   const settings = useApp((s) => s.settings);
   const updateSettings = useApp((s) => s.updateSettings);
   const jobs = useApp((s) => s.jobs);
@@ -171,12 +174,7 @@ export function Sidebar() {
   const total = running.reduce((s, j) => s + j.progress.bytesTotal, 0);
   const done = running.reduce((s, j) => s + j.progress.bytesDone, 0);
   const label = running.length ? t('task.running', { count: running.length }) : t('task.summary', { count: list.length });
-  const nav = (id: 'home' | 'settings', icon: 'home' | 'sliders', text: string) => (
-    <button type="button" className="nav-item" aria-current={view === id} title={text} onClick={() => setView(id)}>
-      <Icon name={icon} />
-      <span className="lbl">{text}</span>
-    </button>
-  );
+  const inSettings = view === 'settings';
   const toggleLabel = t(collapsed ? 'nav.expand' : 'nav.collapse');
   return (
     <aside className="sidebar">
@@ -195,7 +193,12 @@ export function Sidebar() {
           <Icon name="sidebar" />
         </button>
       </div>
-      <nav className="sb-nav">{nav('home', 'home', t('nav.home'))}</nav>
+      <nav className="sb-nav">
+        <button type="button" className="nav-item" aria-current={view === 'home'} title={t('nav.home')} onClick={() => setView('home')}>
+          <Icon name="home" />
+          <span className="lbl">{t('nav.home')}</span>
+        </button>
+      </nav>
       {archive ? (
         <>
           <div className="sb-label">{t('nav.tree')}</div>
@@ -234,7 +237,32 @@ export function Sidebar() {
             {running.length > 0 && <ProgressBar value={total ? done / total : 0} indeterminate={!total} />}
           </button>
         )}
-        {nav('settings', 'sliders', t('nav.settings'))}
+        {/* The settings sections unfold upwards from the Settings item while settings are shown. */}
+        <div id="sb-settings" className="sb-sub" data-open={inSettings} role="group" aria-label={t('nav.settings')} inert={!inSettings}>
+          <div>
+            {SETTINGS_TABS.map(([id, icon]) => {
+              const text = t(`settings.tabs.${id}`);
+              return (
+                <button key={id} type="button" className="nav-item" aria-current={inSettings && settingsTab === id} title={text} onClick={() => setSettingsTab(id)}>
+                  <Icon name={icon} />
+                  <span className="lbl">{text}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="nav-item"
+          aria-expanded={inSettings}
+          aria-controls="sb-settings"
+          title={t('nav.settings')}
+          onClick={() => setView(inSettings ? (archive ? 'browser' : 'home') : 'settings')}
+        >
+          <Icon name="sliders" />
+          <span className="lbl grow">{t('nav.settings')}</span>
+          <Icon name="chevronUp" className="chev" />
+        </button>
       </div>
     </aside>
   );

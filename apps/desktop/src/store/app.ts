@@ -161,7 +161,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   setView: (v) => set({ view: v, sidebarOpen: false }),
-  setSettingsTab: (t) => set({ settingsTab: t, view: 'settings' }),
+  setSettingsTab: (t) => set({ settingsTab: t, view: 'settings', sidebarOpen: false }),
 
   openArchive: async (path, password) => {
     try {

@@ -12,7 +12,8 @@ import { useFmt } from '../../lib/hooks';
 import type { MountProbe, Settings as S, ShellStatus, ThemeSummary } from '../../lib/types';
 import { type SettingsTab, useApp } from '../../store/app';
 
-const TABS: [SettingsTab, IconName][] = [
+/** Sections of the settings page: listed in the sidebar, and above the page in narrow windows. */
+export const SETTINGS_TABS: [SettingsTab, IconName][] = [
   ['general', 'layout'],
   ['appearance', 'palette'],
   ['language', 'globe'],
@@ -539,7 +540,7 @@ export function SettingsView() {
   return (
     <div className="settings">
       <nav className="set-nav">
-        {TABS.map(([id, icon]) => (
+        {SETTINGS_TABS.map(([id, icon]) => (
           <button key={id} type="button" className="nav-item" aria-current={tab === id} onClick={() => setTab(id)}>
             <Icon name={icon} />
             <span className="lbl">{t(`settings.tabs.${id}`)}</span>

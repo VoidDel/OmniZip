@@ -82,7 +82,18 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .tree-item .lbl { overflow: hidden; text-overflow: ellipsis; }
 .tree-item:hover { background: var(--bg-hover); }
 .tree-item[aria-current="true"] { background: var(--accent-subtle); color: var(--accent); }
-.sb-bottom { border-top: 1px solid var(--border-subtle); padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: none; }
+.sb-bottom { border-top: 1px solid var(--border-subtle); padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 0 1 auto; min-height: 0; }
+/* On a window material the sidebar shows what is behind the window, where the opaque light divider
+   reads as a bright line: dividers there are a tint of the text colour instead. */
+:root[data-material="true"] .sidebar,
+:root[data-material="true"] .sb-bottom { border-color: color-mix(in srgb, var(--fg-primary) 10%, transparent); }
+/* Settings sections unfold upwards from the Settings item; in a short window the list scrolls. */
+.sb-sub { display: grid; grid-template-rows: 0fr; min-height: 0; transition: grid-template-rows var(--dur); }
+.sb-sub[data-open="true"] { grid-template-rows: 1fr; }
+.sb-sub > div { min-height: 0; overflow: hidden auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 2px; }
+.sb-sub .nav-item { padding-left: 22px; flex: none; }
+.nav-item .chev { color: var(--fg-muted); transition: transform var(--dur); }
+.nav-item[aria-expanded="true"] .chev { transform: rotate(180deg); }
 .task-sum { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border-radius: var(--radius-md); width: 100%; font-size: .86rem; }
 .task-sum:hover { background: var(--bg-hover); }
 .task-sum .row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
@@ -93,7 +104,8 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 @keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
 .window.collapsed .lbl, .window.collapsed .sb-label, .window.collapsed .tree, .window.collapsed .brandname,
 .window.collapsed .task-sum .progress { display: none; }
-.window.collapsed .nav-item { justify-content: center; padding: 0; }
+.window.collapsed .nav-item, .window.collapsed .sb-sub .nav-item { justify-content: center; padding: 0; }
+.window.collapsed .nav-item .chev { display: none; }
 .window.collapsed .sb-top { justify-content: center; padding: 0; gap: 4px; }
 :root[data-platform="mac"] .window.collapsed .sb-top { padding-left: 72px; }
 .window.collapsed .sb-top .logo, .window.collapsed .sb-top .brandname { display: none; }
@@ -218,8 +230,9 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .card .meta span { font-size: .8rem; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------------------------------------------------------------- settings */
-.settings { display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; }
-.set-nav { border-right: 1px solid var(--border-subtle); padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.settings { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; }
+/* The sections are listed in the sidebar; a narrow window (sidebar in a drawer) shows them above the page. */
+.set-nav { display: none; padding: 8px; gap: 2px; overflow: auto; border-bottom: 1px solid var(--border-subtle); }
 .set-body { overflow: auto; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px; }
 .set-body > * { max-width: 760px; flex: none; } /* never squeezed: the body scrolls instead (groups clip with overflow: hidden) */
 .set-body h2 { margin: 0; font-size: 1.25rem; font-weight: 600; }
@@ -392,7 +405,7 @@ details.adv .advbody { display: flex; flex-direction: column; gap: 12px; padding
   .window.sb-open .sidebar { transform: none; box-shadow: var(--shadow-2); }
   .menu-toggle { display: inline-flex; }
   .settings { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .set-nav { flex-direction: row; overflow: auto; border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+  .set-nav { display: flex; }
   .set-nav .nav-item { width: auto; flex: none; }
   .set-body { padding: 16px; }
   .frow { grid-template-columns: 1fr; }
