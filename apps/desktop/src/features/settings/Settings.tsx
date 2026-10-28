@@ -1,7 +1,8 @@
 // Settings (docs/04-ui-design.md §4.9, docs/05-theming.md, docs/06-i18n.md).
 
 import { open } from '@tauri-apps/plugin-dialog';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { FileIcon, GitHubMark, Icon, Logo, type IconName } from '../../components/Icon';
@@ -85,6 +86,91 @@ function ThemeCard({ th, selected, onPick, lang }: { th: ThemeSummary; selected:
 }
 
 /** Registration state of the Windows context menu, with register / remove actions. */
+/** Context-menu items in menu order (`Verb::ALL` in crates/omnizip-shell-win/src/menu.rs). */
+const MENU_ITEMS = ['open', 'extract_here', 'extract_smart', 'extract_to', 'extract_each', 'mount', 'test', 'convert', 'add_zip', 'add_7z', 'add'] as const;
+type MenuItem = (typeof MENU_ITEMS)[number];
+
+/** What the preview menu is opened on, and the items that apply to it (`applies` in menu.rs). */
+const MENU_TARGETS: Record<'archive' | 'archives' | 'files', readonly MenuItem[]> = {
+  archive: ['open', 'extract_here', 'extract_smart', 'extract_to', 'mount', 'test', 'convert'],
+  archives: ['extract_here', 'extract_smart', 'extract_to', 'extract_each', 'test', 'convert'],
+  files: ['add_zip', 'add_7z', 'add'],
+};
+
+/** Item icons: the glyphs of the real menu (scripts/gen-menu-icons.mjs); `open` has the app icon. */
+const MENU_ICONS: Record<Exclude<MenuItem, 'open'>, IconName> = {
+  extract_here: 'extract',
+  extract_smart: 'menuExtractSmart',
+  extract_to: 'menuExtractTo',
+  extract_each: 'menuExtractEach',
+  mount: 'drive',
+  test: 'checkCircle',
+  convert: 'refresh',
+  add_zip: 'package',
+  add_7z: 'package',
+  add: 'menuAdd',
+};
+
+/** Whether an item is shown; one missing from the settings is, except "Convert" (`MenuConfig::enabled`). */
+const itemOn = (shell: S['shell'], k: MenuItem) => shell.items[k] ?? k !== 'convert';
+
+/** Title of an item; "Extract to" names a folder, so its name ends with the path separator. */
+function itemTitle(t: TFunction, k: MenuItem) {
+  const sep = document.documentElement.dataset.platform === 'win' ? '\\' : '/';
+  const name = t('settings.shell.name');
+  return t(`settings.shell.items_${k}`, { name: k === 'extract_smart' ? name + sep : name });
+}
+
+/** The context menu as the file manager shows it for the chosen selection. */
+function MenuPreview({ shell }: { shell: S['shell'] }) {
+  const { t } = useTranslation();
+  const [target, setTarget] = useState<keyof typeof MENU_TARGETS>('archive');
+  // Nautilus shows no icons in its menus.
+  const icons = shell.icons && document.documentElement.dataset.platform !== 'linux';
+  const cascade = shell.style === 'cascade';
+  const items = MENU_ITEMS.filter((k) => MENU_TARGETS[target].includes(k) && itemOn(shell, k));
+  // The submenu opens level with its entry.
+  const root = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(0);
+  useLayoutEffect(() => setTop(root.current?.offsetTop ?? 0), [cascade, items.length]);
+  const line = (key: string, icon: ReactNode, label: string, cls?: string) => (
+    <div className={cls} key={key} ref={key === 'root' ? root : undefined}>
+      {icons ? icon : <i className="ic" />}
+      <span>{label}</span>
+      {key === 'root' && <Icon name="chevronRight" className="more" />}
+    </div>
+  );
+  const item = (k: MenuItem) => line(k, k === 'open' ? <Logo size={16} /> : <Icon name={MENU_ICONS[k]} />, itemTitle(t, k));
+  return (
+    <div className="menu-prev-box">
+      <Segmented
+        label={t('settings.shell.preview')}
+        value={target}
+        onChange={setTarget}
+        options={[['archive', t('settings.shell.onArchive')], ['archives', t('settings.shell.onArchives')], ['files', t('settings.shell.onFiles')]]}
+      />
+      <div className="menu-prev-row">
+        <div className="menu-prev">
+          {line('open', <Icon name="folderOpen" />, t('cmd.open'))}
+          <hr />
+          {items.length > 0 && (
+            <>
+              {cascade ? line('root', <Logo size={16} />, 'OmniZip', 'hl') : items.map(item)}
+              <hr />
+            </>
+          )}
+          {line('copy', <Icon name="copy" />, t('cmd.copyPath'))}
+        </div>
+        {cascade && items.length > 0 && (
+          <div className="menu-prev" style={{ marginTop: Math.max(0, top - 4) }}>
+            {items.map(item)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ShellStatusRow() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<ShellStatus | null>(null);
@@ -426,14 +512,6 @@ export function SettingsView() {
           </>
         );
       case 'shell': {
-        const items = Object.keys(settings.shell.items);
-        const on = items.filter((k) => settings.shell.items[k]);
-        const line = (icon: IconName, label: string, cls = '') => (
-          <div className={cls} key={label}>
-            {settings.shell.icons ? <Icon name={icon} /> : <i className="ic" />}
-            <span>{label}</span>
-          </div>
-        );
         return (
           <>
             <div className="set-group">
@@ -443,34 +521,20 @@ export function SettingsView() {
               </Row>
               <Row col label={t('settings.shell.items')}>
                 <div className="inline" style={{ gap: '8px 18px' }}>
-                  {items.map((k) => (
+                  {MENU_ITEMS.map((k) => (
                     <label key={k} className="chk">
-                      <input type="checkbox" checked={settings.shell.items[k]} onChange={(e) => set((s) => (s.shell.items[k] = e.target.checked))} /> {t(`settings.shell.items_${k}`)}
+                      <input type="checkbox" checked={itemOn(settings.shell, k)} onChange={(e) => set((s) => (s.shell.items[k] = e.target.checked))} /> {itemTitle(t, k)}
                     </label>
                   ))}
                 </div>
               </Row>
-              <Row label={t('settings.shell.icons')}>
-                <Switch label={t('settings.shell.icons')} checked={settings.shell.icons} onChange={(v) => set((s) => (s.shell.icons = v))} />
-              </Row>
+              {document.documentElement.dataset.platform !== 'linux' && (
+                <Row label={t('settings.shell.icons')}>
+                  <Switch label={t('settings.shell.icons')} checked={settings.shell.icons} onChange={(v) => set((s) => (s.shell.icons = v))} />
+                </Row>
+              )}
               <Row col label={t('settings.shell.preview')}>
-                <div className="menu-prev">
-                  {line('folderOpen', t('cmd.open'))}
-                  <hr />
-                  {settings.shell.style === 'cascade' ? (
-                    <>
-                      {line('archive', 'OmniZip', 'hl')}
-                      {on.map((k) => line(k.startsWith('add') ? 'package' : k === 'mount' ? 'drive' : k === 'test' ? 'checkCircle' : 'extract', t(`settings.shell.items_${k}`), 'sub'))}
-                    </>
-                  ) : (
-                    <>
-                      {on.slice(0, 4).map((k) => line(k.startsWith('add') ? 'package' : 'extract', t(`settings.shell.items_${k}`)))}
-                      {on.length > 4 && line('archive', 'OmniZip ›', 'sub')}
-                    </>
-                  )}
-                  <hr />
-                  {line('copy', t('cmd.copyPath'))}
-                </div>
+                <MenuPreview shell={settings.shell} />
               </Row>
             </div>
           </>

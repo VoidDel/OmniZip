@@ -6,6 +6,10 @@
 //! the app (`omnizip_menu.msix`, a sparse package whose files are those of the install folder),
 //! registered here by the installer (`--register-shell`) or from the settings page.
 //!
+//! Windows lists the package's menu in the classic menu ("Show more options") as well, so with
+//! the package registered the classic registration would show OmniZip twice: it is the fallback
+//! for when there is no package or it cannot be registered (the flat style then applies).
+//!
 //! Windows registers a package only when it trusts the certificate it is signed with. Built on a
 //! developer machine, the package is signed with the project's self-signed test certificate,
 //! which this program carries (`build.rs`): when the computer does not trust it yet, registering
@@ -34,7 +38,7 @@ pub enum Win11Menu {
 pub struct ShellStatus {
     /// The platform has a context-menu integration in this build.
     pub supported: bool,
-    /// The classic menu is registered.
+    /// The menu is registered: the classic menu or the context-menu package.
     pub registered: bool,
     /// The extension next to this executable.
     pub dll: Option<String>,
@@ -399,27 +403,39 @@ mod win {
         };
         ShellStatus {
             supported: true,
-            registered: s.registered,
+            registered: s.registered || win11 == Win11Menu::On,
             dll: dll.map(|p| p.to_string_lossy().into_owned()),
             stale,
             win11,
         }
     }
 
-    /// Registers the classic menu with the current menu settings and, where the app ships it,
-    /// the context-menu package for this install folder (replacing one registered for another
-    /// copy).
+    /// Registers the context-menu package for this install folder where the app ships it
+    /// (replacing one registered for another copy) and removes the classic menu, which would
+    /// list OmniZip a second time. Without a package, or when it cannot be registered, the
+    /// classic menu is registered with the current menu settings instead.
     pub fn register() -> Result<(), Error> {
         let dll = dll().ok_or_else(|| {
             Error::new(ErrorCode::MissingDependency).with("path", "omnizip_shell.dll")
         })?;
-        let cfg = omnizip_shell::menu::MenuConfig::load();
-        omnizip_shell::register::register(&dll, &cfg).map_err(Error::from)?;
-
-        let (Some(file), Some(dir)) = (package_file(), app_dir()) else {
-            return Ok(());
+        let classic = || {
+            let cfg = omnizip_shell::menu::MenuConfig::load();
+            omnizip_shell::register::register(&dll, &cfg).map_err(Error::from)
         };
-        if !TEST_CERT.is_empty() && signed(&file) && !test_cert_trusted() {
+        let (Some(file), Some(dir)) = (package_file(), app_dir()) else {
+            return classic();
+        };
+        match register_package(&file, &dir) {
+            Ok(()) => omnizip_shell::register::unregister().map_err(Error::from),
+            Err(e) => {
+                classic()?;
+                Err(e)
+            }
+        }
+    }
+
+    fn register_package(file: &Path, dir: &Path) -> Result<(), Error> {
+        if !TEST_CERT.is_empty() && signed(file) && !test_cert_trusted() {
             run_elevated("--trust-cert")?;
         }
         let pm = PackageManager::new().map_err(|e| fail("package manager", e))?;
@@ -429,7 +445,7 @@ mod win {
         let uri = |p: &Path| Uri::CreateUri(&HSTRING::from(p.as_os_str()));
         let options = AddPackageOptions::new().map_err(|e| fail("package options", e))?;
         options
-            .SetExternalLocationUri(&uri(&dir).map_err(|e| fail("install folder", e))?)
+            .SetExternalLocationUri(&uri(dir).map_err(|e| fail("install folder", e))?)
             .map_err(|e| fail("install folder", e))?;
         options
             .SetForceUpdateFromAnyVersion(true)
@@ -438,7 +454,7 @@ mod win {
         options
             .SetForceAppShutdown(true)
             .map_err(|e| fail("package options", e))?;
-        let package = uri(&file).map_err(|e| fail("context-menu package", e))?;
+        let package = uri(file).map_err(|e| fail("context-menu package", e))?;
         let result = pm
             .AddPackageByUriAsync(&package, &options)
             .and_then(|op| op.join())

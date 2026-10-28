@@ -83,6 +83,15 @@ const PATHS: Record<string, string[]> = {
   clipboard: ['rect:8.5,3,7,3.5,1', 'M15.5 5h2A1.5 1.5 0 0 1 19 6.5v12a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-12A1.5 1.5 0 0 1 6.5 5h2'],
   sidebar: ['rect:3.5,4.5,17,15,1.5', 'M9.5 4.5v15'],
   folderPlus: ['M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z', 'M12 11v5M9.5 13.5h5'],
+  // Context-menu items not drawn above: the glyphs scripts/gen-menu-icons.mjs makes for the file
+  // manager (the settings preview shows them).
+  menuExtractSmart: ['M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z', 'M12 10.5v6M9.5 14l2.5 2.5 2.5-2.5'],
+  menuExtractTo: [
+    'M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1',
+    'M3.5 7.5V18a1.5 1.5 0 0 0 1.5 1.5h12.6a1.5 1.5 0 0 0 1.4-1l2-6a1 1 0 0 0-.9-1.3H7.3a1.5 1.5 0 0 0-1.4 1L3.5 18',
+  ],
+  menuExtractEach: ['rect:8.5,8.5,11,11,1.5', 'M5 15V5.5A1 1 0 0 1 6 4.5h9.5'],
+  menuAdd: ['M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9', 'circle-fill:18,18,4.5', 'M18 15.8v4.4M15.8 18h4.4'],
 };
 
 function shape(spec: string, i: number) {
@@ -92,7 +101,7 @@ function shape(spec: string, i: number) {
     case 'circle':
       return <circle key={i} cx={n[0]} cy={n[1]} r={n[2]} />;
     case 'circle-fill':
-      return <circle key={i} cx={n[0]} cy={n[1]} r={n[2]} fill="var(--bg-elevated)" />;
+      return <circle key={i} cx={n[0]} cy={n[1]} r={n[2]} fill="var(--bg-elevated)" stroke="none" />;
     case 'rect':
       return <rect key={i} x={n[0]} y={n[1]} width={n[2]} height={n[3]} rx={n[4]} />;
     case 'tone':

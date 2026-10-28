@@ -2,7 +2,8 @@
 // the style of the app's icons (Icon.tsx: 24 px grid, 1.6 px strokes), one set for light and one
 // for dark menus. Writes icons/menu/<verb>-light.ico and <verb>-dark.ico (16–48 px, for 100–300 %
 // scaling); the menu extension picks the set by the apps theme. "Open with OmniZip" and the
-// submenu itself carry the app icon.
+// submenu itself carry the app icon. The settings preview draws the same glyphs (Icon.tsx: the
+// app's icons and the menu* ones).
 //
 //   node scripts/gen-menu-icons.mjs
 import { mkdirSync, writeFileSync } from 'node:fs';

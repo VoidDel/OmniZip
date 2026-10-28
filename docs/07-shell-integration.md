@@ -32,7 +32,7 @@
 | Windows 11 现代菜单（一级） | `IExplorerCommand` COM 服务器 + AppxManifest `desktop4:FileExplorerContextMenus` | 必须有包身份（MSIX 或 Sparse Package） |
 | 经典菜单（Win10、Win11 "显示更多选项"、Shift+F10） | 同一 COM 类注册到 `HKCR\*\shellex\ContextMenuHandlers\OmniZip`、`HKCR\Directory\shellex\ContextMenuHandlers\OmniZip`、`HKCR\Directory\Background\shellex\…` | 无需身份 |
 
-一个 Rust 编写的 COM DLL 同时服务两者；Win11 上两处都出现同一组菜单。菜单样式"平铺"只作用于经典菜单（注册表里按样式注册对应的类）；Win11 一级菜单始终是一个"OmniZip"子菜单，设置页在 Windows 上注明这一点。
+一个 Rust 编写的 COM DLL 同时服务两者；Win11 上两处都出现同一组菜单。Windows 会把包里登记的菜单同时列进经典菜单（"显示更多选项"），因此有包身份时不再注册经典菜单（否则经典菜单里出现两个 OmniZip），菜单在两处都是一个"OmniZip"子菜单；只有没有包、或菜单包注册失败时才注册经典菜单作为后备，菜单样式"平铺"只在这时生效（注册表里按样式注册对应的类），设置页在 Windows 上注明这一点。
 
 ### 3.2 COM 扩展 `omnizip_shell.dll`（Rust + `windows-rs`）
 
@@ -61,7 +61,7 @@
 | Scoop / 便携版 | 无身份 | 仅经典菜单；设置页提供"注册 Win11 菜单"按钮（执行 Sparse Package 注册） |
 
 升级与卸载：
-- Explorer 可能持有旧 DLL 句柄：新版本安装到版本化目录（`shell\<ver>\omnizip_shell.dll`）并更新注册表指向；旧目录在下次启动时清理；必要时提示一键"重启资源管理器"。**M1 实现**（NSIS，`platform/windows/nsis/hooks.nsh`）：安装前把旧 DLL 改名为 `.old` 并标记重启删除，安装后运行 `omnizip-desktop.exe --register-shell`（不开窗口）：注册经典菜单，并注册随安装包附带的菜单包 `omnizip_menu.msix`，再把安装目录加入用户 PATH；卸载时 `--unregister-shell` 反向执行。菜单包是 Sparse Package（`platform/windows/msix/AppxManifest.sparse.xml`，名称 `OmniZip.ContextMenu`，`uap10:AllowExternalContent`），以安装目录为外部位置，只声明 Win11 一级菜单及其 COM 代理服务器，文件全部来自安装目录，不在开始菜单列出（`AppListEntry="none"`），程序本身照常以普通 EXE 运行、没有包身份——与 Bandizip 等 EXE 分发的软件做法相同。注册前先移除已注册的旧菜单包（例如另一安装目录的），因此升级与换目录都会重新指向当前安装。系统只注册受信任证书签名的包。正式证书到位前，菜单包用自签测试证书签名，程序在构建时内置该证书的公钥（`build.rs`，取自仓库中的 `platform/windows/msix/omnizip-test.cer`，用正式证书构建时为空；私钥不进仓库）：注册已签名的菜单包前若本机"受信任的人"（本地计算机）中没有它，就以管理员身份再启动自身（`--trust-cert`，弹出 UAC）导入，然后由用户自己的进程注册菜单包（注册按用户进行）。因此安装时自动导入，只需在 UAC 中确认一次；拒绝时安装照常完成，只有经典菜单，设置页显示"仅经典菜单"并可重试。导入的只是公钥证书，私钥不随程序分发；卸载时不移除证书。完整 MSIX（`platform/windows/msix/AppxManifest.xml`）保留给商店渠道，与菜单包不要同时安装，否则一级菜单出现两次。
+- Explorer 可能持有旧 DLL 句柄：新版本安装到版本化目录（`shell\<ver>\omnizip_shell.dll`）并更新注册表指向；旧目录在下次启动时清理；必要时提示一键"重启资源管理器"。**M1 实现**（NSIS，`platform/windows/nsis/hooks.nsh`）：安装前把旧 DLL 改名为 `.old` 并标记重启删除，安装后运行 `omnizip-desktop.exe --register-shell`（不开窗口）：注册随安装包附带的菜单包 `omnizip_menu.msix` 并移除经典菜单的注册（菜单包注册失败时改为注册经典菜单），再把安装目录加入用户 PATH；卸载时 `--unregister-shell` 反向执行。菜单包是 Sparse Package（`platform/windows/msix/AppxManifest.sparse.xml`，名称 `OmniZip.ContextMenu`，`uap10:AllowExternalContent`），以安装目录为外部位置，只声明 Win11 一级菜单及其 COM 代理服务器，文件全部来自安装目录，不在开始菜单列出（`AppListEntry="none"`），程序本身照常以普通 EXE 运行、没有包身份——与 Bandizip 等 EXE 分发的软件做法相同。注册前先移除已注册的旧菜单包（例如另一安装目录的），因此升级与换目录都会重新指向当前安装。系统只注册受信任证书签名的包。正式证书到位前，菜单包用自签测试证书签名，程序在构建时内置该证书的公钥（`build.rs`，取自仓库中的 `platform/windows/msix/omnizip-test.cer`，用正式证书构建时为空；私钥不进仓库）：注册已签名的菜单包前若本机"受信任的人"（本地计算机）中没有它，就以管理员身份再启动自身（`--trust-cert`，弹出 UAC）导入，然后由用户自己的进程注册菜单包（注册按用户进行）。因此安装时自动导入，只需在 UAC 中确认一次；拒绝时安装照常完成，只有经典菜单，设置页显示"仅经典菜单"并可重试。导入的只是公钥证书，私钥不随程序分发；卸载时不移除证书。完整 MSIX（`platform/windows/msix/AppxManifest.xml`）保留给商店渠道，与菜单包不要同时安装，否则一级菜单出现两次。
 - 卸载：注销 COM 与 ProgID、移除 Sparse Package、`SHChangeNotify(SHCNE_ASSOCCHANGED)`。
 
 ### 3.4 文件关联与默认程序
@@ -160,7 +160,7 @@ omnizip-desktop [--open <archive>]
 ## 7. 设置页"右键菜单与集成"
 
 - 平台检测与状态：已注册 / 未注册 / 需要重启资源管理器 / 需要启用 Finder 扩展 / 缺少 nautilus-python。
-- 菜单样式（级联 / 平铺）、显示项勾选、图标开关、实时预览。
+- 菜单样式（级联 / 平铺）、显示项勾选（按菜单顺序）、图标开关（Linux 不显示：Nautilus 菜单没有图标）、实时预览：按"一个压缩包 / 多个压缩包 / 文件和文件夹"分别显示实际会出现的项（与 `applies` 相同），图标与菜单里的一致。
 - "设为默认压缩软件"按钮 + 系统设置引导。
 - CLI：加入 PATH、安装 Shell 补全（见 08）。
 - "修复集成"一键重新注册。
