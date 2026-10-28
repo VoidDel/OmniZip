@@ -361,6 +361,15 @@ details.adv summary .ic { width: 14px; height: 14px; transition: transform var(-
 details.adv[open] summary .ic { transform: rotate(90deg); }
 details.adv summary .hint { margin-left: 4px; }
 details.adv .advbody { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
+details.adv .advbody > .seg { align-self: flex-start; }
+/* Tab panels stacked in one cell, so the section keeps the height of the tallest. */
+details.adv .tabpanels { display: grid; }
+details.adv .tabpanel { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+details.adv .tabpanel.off { visibility: hidden; }
+/* Format and compression level side by side; the slider is as tall as the select so they line up. */
+.fmt-level { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; align-items: start; }
+.fmt-level select.sel { width: 100%; }
+.fmt-level input[type="range"] { width: 100%; height: var(--ctrl-h); margin: 0; }
 .levels { display: flex; justify-content: space-between; font-size: .72rem; color: var(--fg-muted); padding: 0 2px; }
 .est { display: flex; align-items: center; gap: 8px; font-size: .86rem; color: var(--fg-secondary); font-variant-numeric: tabular-nums; }
 .est b { color: var(--fg-primary); font-weight: 600; }

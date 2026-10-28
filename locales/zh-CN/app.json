@@ -109,7 +109,6 @@
   "compress": {
     "title": "新建压缩包",
     "format": "格式",
-    "more": "更多",
     "saveTo": "保存为",
     "level": "压缩级别",
     "levels": {
@@ -136,7 +135,13 @@
     },
     "customSize": "分卷大小（MB）",
     "advanced": "高级",
-    "advancedHint": "方法 · 固实 · 注释 · 排除规则",
+    "advancedHint": "密码 · 分卷 · 方法 · 固实 · 注释 · 排除规则",
+    "tabs": {
+      "encrypt": "加密",
+      "volume": "分卷",
+      "method": "方法",
+      "other": "其他"
+    },
     "method": "方法",
     "auto": "自动",
     "solid": "固实压缩",

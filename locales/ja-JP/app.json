@@ -109,7 +109,6 @@
   "compress": {
     "title": "新しいアーカイブ",
     "format": "形式",
-    "more": "その他",
     "saveTo": "保存先",
     "level": "圧縮レベル",
     "levels": {
@@ -136,7 +135,13 @@
     },
     "customSize": "分割サイズ（MB）",
     "advanced": "詳細",
-    "advancedHint": "方式 · ソリッド · コメント · 除外ルール",
+    "advancedHint": "パスワード · 分割 · 方式 · ソリッド · コメント · 除外ルール",
+    "tabs": {
+      "encrypt": "暗号化",
+      "volume": "分割",
+      "method": "方式",
+      "other": "その他"
+    },
     "method": "方式",
     "auto": "自動",
     "solid": "ソリッド圧縮",

@@ -109,7 +109,6 @@
   "compress": {
     "title": "新增壓縮檔",
     "format": "格式",
-    "more": "更多",
     "saveTo": "另存為",
     "level": "壓縮等級",
     "levels": {
@@ -136,7 +135,13 @@
     },
     "customSize": "分割大小（MB）",
     "advanced": "進階",
-    "advancedHint": "方法 · 固實 · 註解 · 排除規則",
+    "advancedHint": "密碼 · 分卷 · 方法 · 固實 · 註解 · 排除規則",
+    "tabs": {
+      "encrypt": "加密",
+      "volume": "分卷",
+      "method": "方法",
+      "other": "其他"
+    },
     "method": "方法",
     "auto": "自動",
     "solid": "固實壓縮",

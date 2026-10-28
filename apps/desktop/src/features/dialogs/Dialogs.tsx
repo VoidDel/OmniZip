@@ -209,6 +209,9 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
 
 // ---------------------------------------------------------------------------------- compress
 
+/** Tabs of the Advanced section of the compress dialog. */
+type AdvTab = 'encrypt' | 'volume' | 'method' | 'other';
+
 const WRITABLE: FormatId[] = ['zip', '7z', 'tar.zst', 'tar.gz', 'tar.xz', 'tar.bz2', 'tar', 'gz', 'xz', 'zst', 'bz2'];
 
 function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
@@ -237,6 +240,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const [openAfter, setOpenAfter] = useState(false);
   const [exists, setExists] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [advTab, setAdvTab] = useState<AdvTab>('encrypt');
 
   useEffect(() => {
     void api.pathStats(d.paths).then((s) => {
@@ -262,6 +266,14 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const secs = bytes / (LEVEL_SPEED[level] * 1024 * 1024);
   const volumeSize =
     volume === 'fat32' ? 4 * 1024 ** 3 - 1 : volume === 'dvd' ? 4_700_000_000 : volume === 'email' ? 25 * 1024 * 1024 : volume === 'custom' ? customMb * 1024 * 1024 : null;
+  // Formats without a choice of method (and not 7z, which has solid mode) have no Method tab.
+  const tabs: AdvTab[] = ['encrypt', 'volume', ...(methods.length > 0 || format === '7z' ? (['method'] as const) : []), 'other'];
+  const tab = tabs.includes(advTab) ? advTab : 'encrypt';
+  const panel = (id: AdvTab) => ({ className: `tabpanel${tab === id ? '' : ' off'}`, inert: tab !== id });
+  const activeAdvanced = [
+    canEncrypt && password ? t('props.encrypted') : null,
+    volume !== 'none' ? `${t('compress.volume')} ${volume === 'custom' ? `${customMb} MB` : t(`compress.volumes.${volume}`)}` : null,
+  ].filter((x): x is string => x !== null);
   const strength = useMemo(() => {
     let s = 0;
     if (password.length >= 8) s += 1;
@@ -296,7 +308,6 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
     }
   };
 
-  const primaryFormats: FormatId[] = ['zip', '7z', 'tar.zst'];
   return (
     <Modal
       title={t('compress.title')}
@@ -313,26 +324,6 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         </>
       }
     >
-      <div className="field">
-        <span className="flabel">{t('compress.format')}</span>
-        <div className="inline">
-          <Segmented
-            large
-            value={primaryFormats.includes(format) ? format : ('more' as FormatId)}
-            onChange={(v) => {
-              setFormat(v);
-              setMethod('');
-            }}
-            options={primaryFormats.map((f) => [f, f.toUpperCase()] as [FormatId, string])}
-          />
-          <select className="sel" style={{ flex: 'none', minWidth: 0, width: 120 }} value={primaryFormats.includes(format) ? '' : format} onChange={(e) => e.target.value && setFormat(e.target.value as FormatId)} aria-label={t('compress.more')}>
-            <option value="">{t('compress.more')} …</option>
-            {WRITABLE.filter((f) => !primaryFormats.includes(f)).map((f) => (
-              <option key={f} value={f}>{f.toUpperCase()}</option>
-            ))}
-          </select>
-        </div>
-      </div>
       <div className="field">
         <label htmlFor="cf-name">{t('compress.saveTo')}</label>
         <div className="inline">
@@ -357,55 +348,37 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         {exists && <div className="note warn"><Icon name="alert" /><span>{t('compress.exists', { name: stem + ext })}</span></div>}
         {tooMany && <div className="note warn"><Icon name="alert" /><span>{t('compress.singleFile', { format: format.toUpperCase() })}</span></div>}
       </div>
-      <div className="field">
-        <label htmlFor="cf-level">
-          {t('compress.level')} · <b style={{ color: 'var(--fg-primary)' }}>{t(`compress.levels.${LEVELS[level]}`)}</b>
-        </label>
-        <input id="cf-level" type="range" min={0} max={6} value={level} style={{ width: '100%' }} onChange={(e) => setLevel(Number(e.target.value))} />
-        <div className="levels">
-          {LEVELS.map((l) => (
-            <span key={l}>{t(`compress.levels.${l}`)}</span>
-          ))}
-        </div>
-        {bytes > 0 && (
-          <div className="est">
-            {t('compress.estimate', { from: fmt.size(bytes), to: fmt.size(out) })} · {fmt.duration(secs)}
-          </div>
-        )}
-      </div>
-      <div className="field">
-        <span className="flabel">{t('compress.password')}</span>
-        {canEncrypt ? (
-          <>
-            <div className="inline">
-              <PasswordInput value={password} onChange={setPassword} label={t('compress.password')} />
-              <span className="hint">{t('compress.strength')}</span>
-              <span className="strength" aria-hidden="true">
-                {[0, 1, 2, 3].map((i) => (
-                  <i key={i} className={i < strength ? `on${strength <= 2 ? ' w' : ''}` : ''} />
-                ))}
-              </span>
-            </div>
-            {format === '7z' && (
-              <label className="chk">
-                <input type="checkbox" checked={encryptNames} onChange={(e) => setEncryptNames(e.target.checked)} /> {t('compress.encryptNames')}
-              </label>
-            )}
-          </>
-        ) : (
-          <div className="hint">{t('compress.noEncryption', { format: format.toUpperCase() })}</div>
-        )}
-      </div>
-      <div className="frow">
-        <label htmlFor="cf-vol">{t('compress.volume')}</label>
-        <div className="inline">
-          <select id="cf-vol" className="sel" value={volume} onChange={(e) => setVolume(e.target.value as typeof volume)}>
-            {(['none', 'fat32', 'dvd', 'email', 'custom'] as const).map((v) => (
-              <option key={v} value={v}>{t(`compress.volumes.${v}`)}</option>
+      <div className="fmt-level">
+        <div className="field">
+          <label htmlFor="cf-format">{t('compress.format')}</label>
+          <select
+            id="cf-format"
+            className="sel"
+            value={format}
+            onChange={(e) => {
+              setFormat(e.target.value as FormatId);
+              setMethod('');
+            }}
+          >
+            {WRITABLE.map((f) => (
+              <option key={f} value={f}>{f.toUpperCase()}</option>
             ))}
           </select>
-          {volume === 'custom' && (
-            <input className="inp" type="number" min={1} style={{ width: 100, flex: 'none' }} value={customMb} aria-label={t('compress.customSize')} onChange={(e) => setCustomMb(Math.max(1, Number(e.target.value)))} />
+        </div>
+        <div className="field">
+          <label htmlFor="cf-level">
+            {t('compress.level')} · <b style={{ color: 'var(--fg-primary)' }}>{t(`compress.levels.${LEVELS[level]}`)}</b>
+          </label>
+          <input id="cf-level" type="range" min={0} max={6} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
+          <div className="levels">
+            {LEVELS.map((l) => (
+              <span key={l}>{t(`compress.levels.${l}`)}</span>
+            ))}
+          </div>
+          {bytes > 0 && (
+            <div className="est">
+              {t('compress.estimate', { from: fmt.size(bytes), to: fmt.size(out) })} · {fmt.duration(secs)}
+            </div>
           )}
         </div>
       </div>
@@ -413,34 +386,84 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         <summary>
           <Icon name="chevronRight" />
           {t('compress.advanced')}
-          <span className="hint">{t('compress.advancedHint')}</span>
+          {/* Once set, encryption and volumes stay visible while the section is collapsed. */}
+          <span className="hint">{activeAdvanced.length > 0 ? activeAdvanced.join(' · ') : t('compress.advancedHint')}</span>
         </summary>
         <div className="advbody">
-          {methods.length > 0 && (
-            <div className="frow">
-              <label htmlFor="cf-method">{t('compress.method')}</label>
-              <select id="cf-method" className="sel" value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="">{t('compress.auto')}</option>
-                {methods.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+          <Segmented value={tab} onChange={setAdvTab} label={t('compress.advanced')} options={tabs.map((id) => [id, t(`compress.tabs.${id}`)])} />
+          {/* The panels share one cell: the section is as tall as the tallest, so switching tabs
+              does not resize the window. */}
+          <div className="tabpanels">
+            <div {...panel('encrypt')}>
+              <div className="field">
+                <span className="flabel">{t('compress.password')}</span>
+                {canEncrypt ? (
+                  <>
+                    <div className="inline">
+                      <PasswordInput value={password} onChange={setPassword} label={t('compress.password')} />
+                      <span className="hint">{t('compress.strength')}</span>
+                      <span className="strength" aria-hidden="true">
+                        {[0, 1, 2, 3].map((i) => (
+                          <i key={i} className={i < strength ? `on${strength <= 2 ? ' w' : ''}` : ''} />
+                        ))}
+                      </span>
+                    </div>
+                    {format === '7z' && (
+                      <label className="chk">
+                        <input type="checkbox" checked={encryptNames} onChange={(e) => setEncryptNames(e.target.checked)} /> {t('compress.encryptNames')}
+                      </label>
+                    )}
+                  </>
+                ) : (
+                  <div className="hint">{t('compress.noEncryption', { format: format.toUpperCase() })}</div>
+                )}
+              </div>
             </div>
-          )}
-          {format === '7z' && (
-            <label className="chk">
-              <input type="checkbox" checked={solid} onChange={(e) => setSolid(e.target.checked)} /> {t('compress.solid')}
-            </label>
-          )}
-          {format === 'zip' && (
-            <div className="field">
-              <label htmlFor="cf-comment">{t('compress.comment')}</label>
-              <input id="cf-comment" className="inp" value={comment} onChange={(e) => setComment(e.target.value)} />
+            <div {...panel('volume')}>
+              <div className="frow">
+                <label htmlFor="cf-vol">{t('compress.volume')}</label>
+                <div className="inline">
+                  <select id="cf-vol" className="sel" value={volume} onChange={(e) => setVolume(e.target.value as typeof volume)}>
+                    {(['none', 'fat32', 'dvd', 'email', 'custom'] as const).map((v) => (
+                      <option key={v} value={v}>{t(`compress.volumes.${v}`)}</option>
+                    ))}
+                  </select>
+                  {volume === 'custom' && (
+                    <input className="inp" type="number" min={1} style={{ width: 100, flex: 'none' }} value={customMb} aria-label={t('compress.customSize')} onChange={(e) => setCustomMb(Math.max(1, Number(e.target.value)))} />
+                  )}
+                </div>
+              </div>
             </div>
-          )}
-          <div className="field">
-            <label htmlFor="cf-exclude">{t('compress.exclude')}</label>
-            <textarea id="cf-exclude" className="inp mono" rows={3} value={exclude} placeholder={'node_modules\n*.log'} onChange={(e) => setExclude(e.target.value)} />
+            <div {...panel('method')}>
+              {methods.length > 0 && (
+                <div className="frow">
+                  <label htmlFor="cf-method">{t('compress.method')}</label>
+                  <select id="cf-method" className="sel" value={method} onChange={(e) => setMethod(e.target.value)}>
+                    <option value="">{t('compress.auto')}</option>
+                    {methods.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {format === '7z' && (
+                <label className="chk">
+                  <input type="checkbox" checked={solid} onChange={(e) => setSolid(e.target.checked)} /> {t('compress.solid')}
+                </label>
+              )}
+            </div>
+            <div {...panel('other')}>
+              {format === 'zip' && (
+                <div className="field">
+                  <label htmlFor="cf-comment">{t('compress.comment')}</label>
+                  <input id="cf-comment" className="inp" value={comment} onChange={(e) => setComment(e.target.value)} />
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="cf-exclude">{t('compress.exclude')}</label>
+                <textarea id="cf-exclude" className="inp mono" rows={3} value={exclude} placeholder={'node_modules\n*.log'} onChange={(e) => setExclude(e.target.value)} />
+              </div>
+            </div>
           </div>
         </div>
       </details>

@@ -109,7 +109,6 @@
   "compress": {
     "title": "New archive",
     "format": "Format",
-    "more": "More",
     "saveTo": "Save as",
     "level": "Compression level",
     "levels": {
@@ -136,7 +135,13 @@
     },
     "customSize": "Volume size (MB)",
     "advanced": "Advanced",
-    "advancedHint": "Method · solid · comment · exclusions",
+    "advancedHint": "Password · volumes · method · solid · comment · exclusions",
+    "tabs": {
+      "encrypt": "Encryption",
+      "volume": "Volumes",
+      "method": "Method",
+      "other": "Other"
+    },
     "method": "Method",
     "auto": "Automatic",
     "solid": "Solid compression",
