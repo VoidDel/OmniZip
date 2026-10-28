@@ -1,5 +1,7 @@
 // Line icons (24×24 grid, 1.6px stroke), drawn for OmniZip in the style of Lucide.
 
+import appIcon from '@icons/app-icon.svg';
+
 const FILE = 'M6.5 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5z M13.5 3.5v4h4';
 const EYE = 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z';
 
@@ -109,13 +111,9 @@ export function Icon({ name, className, title }: { name: IconName | string; clas
   );
 }
 
+/** The app icon: the same artwork as the exe and package icons. */
 export function Logo({ size = 22 }: { size?: number }) {
-  return (
-    <svg className="logo" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="2" y="2" width="20" height="20" rx="6" fill="var(--accent)" />
-      <path d="M8 8h8l-8 8h8" fill="none" stroke="var(--accent-fg)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <img className="logo" src={appIcon} width={size} height={size} alt="" draggable={false} />;
 }
 
 const IMAGE = /^(jpe?g|png|gif|webp|svg|bmp|heic|ico|icns|tiff?|avif)$/;

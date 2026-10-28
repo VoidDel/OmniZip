@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@locales': fileURLToPath(new URL('../../locales', import.meta.url)),
+      '@icons': fileURLToPath(new URL('../../icons', import.meta.url)),
     },
   },
   server: {

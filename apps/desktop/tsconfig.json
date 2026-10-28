@@ -16,7 +16,7 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "types": ["vite/client"],
-    "paths": { "@locales/*": ["../../locales/*"] }
+    "paths": { "@locales/*": ["../../locales/*"], "@icons/*": ["../../icons/*"] }
   },
   "include": ["src", "../../locales/**/*.json"]
 }

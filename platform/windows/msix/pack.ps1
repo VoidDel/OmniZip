@@ -51,14 +51,54 @@ foreach ($src in $files.Keys) {
   Copy-Item $src (Join-Path $stage $files[$src])
 }
 Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE.txt")
-$icons = Join-Path $root "apps/desktop/src-tauri/icons"
-foreach ($logo in "StoreLogo", "Square44x44Logo", "Square150x150Logo") {
-  Copy-Item (Join-Path $icons "$logo.png") (Join-Path $stage "Assets/$logo.png")
+
+# Logos. The shell picks the taskbar, Start and file-type icons by pixel size through
+# resources.pri; given only the plain 44x44 logo it scales that onto a plate, which looks small
+# and blurred next to the exe icon. The variants are rendered from the artwork of the exe icon.
+Add-Type -AssemblyName System.Drawing
+$art = [System.Drawing.Image]::FromFile((Join-Path $root "apps/desktop/src-tauri/icons/icon.png"))
+function Save-Logo([string]$name, [int]$size, [double]$fill = 1.0) {
+  $bmp = New-Object System.Drawing.Bitmap $size, $size
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+  $side = [int][math]::Round($size * $fill)
+  $off = [int][math]::Floor(($size - $side) / 2)
+  $wrap = New-Object System.Drawing.Imaging.ImageAttributes
+  $wrap.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
+  $g.DrawImage($art, (New-Object System.Drawing.Rectangle $off, $off, $side, $side), 0, 0, $art.Width, $art.Height, [System.Drawing.GraphicsUnit]::Pixel, $wrap)
+  $g.Dispose()
+  $bmp.Save((Join-Path $stage "Assets/$name"), [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
 }
+foreach ($t in 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256) {
+  Save-Logo "Square44x44Logo.targetsize-$t.png" $t
+  Save-Logo "Square44x44Logo.targetsize-${t}_altform-unplated.png" $t
+}
+foreach ($s in 100, 125, 150, 200, 400) {
+  $k = $s / 100
+  Save-Logo "Square44x44Logo.scale-$s.png" ([math]::Ceiling(44 * $k))
+  Save-Logo "Square150x150Logo.scale-$s.png" ([math]::Ceiling(150 * $k)) 0.66
+  Save-Logo "StoreLogo.scale-$s.png" ([math]::Ceiling(50 * $k))
+}
+$art.Dispose()
 
 $manifest = Get-Content -Raw (Join-Path $PSScriptRoot "AppxManifest.xml")
 $manifest = $manifest.Replace('$VERSION$', $msixVersion).Replace('$PUBLISHER$', $Publisher).Replace('$ARCH$', $Arch)
 Set-Content -Path (Join-Path $stage "AppxManifest.xml") -Value $manifest -Encoding utf8
+
+# resources.pri maps each logo of the manifest to its scale and target-size variants. The
+# default config splits scales into separate resource packs, which only a bundle installs, so
+# everything is kept in the one resources.pri.
+$makepri = Find-SdkTool "makepri.exe"
+$priConfig = Join-Path $root "target/msix/priconfig-$Arch.xml"
+& $makepri createconfig /cf $priConfig /dq en-US /pv 10.0.0 /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed ($LASTEXITCODE)" }
+$cfg = (Get-Content -Raw $priConfig) -replace '(?s)\s*<packaging>.*?</packaging>', ''
+Set-Content -Path $priConfig -Value $cfg -Encoding utf8
+& $makepri new /pr $stage /cf $priConfig /mn (Join-Path $stage "AppxManifest.xml") /of (Join-Path $stage "resources.pri") /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri new failed ($LASTEXITCODE)" }
 
 if (-not $Out) { $Out = Join-Path $root "target/release/bundle/msix/OmniZip_${Version}_$Arch.msix" }
 New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null
