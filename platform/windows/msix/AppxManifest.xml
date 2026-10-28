@@ -13,9 +13,11 @@
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 desktop desktop4 desktop5 com rescap">
+  IgnorableNamespaces="uap uap3 desktop desktop4 desktop5 desktop6 virtualization com rescap">
 
   <Identity Name="OmniZip.OmniZip" Publisher="$PUBLISHER$" Version="$VERSION$" ProcessorArchitecture="$ARCH$" />
 
@@ -24,6 +26,18 @@
     <PublisherDisplayName>OmniZip Contributors</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Archive manager: create, extract, test, convert and mount archives.</Description>
+    <!-- The configuration (with the user's theme folder) and data directories are the real ones,
+         as with the NSIS install: packaged apps otherwise get new AppData folders redirected to
+         a private copy that File Explorer cannot open ("Open theme folder" failed on a fresh
+         install). Windows 11 exempts just these two folders; Windows 10 only knows the switch
+         for all of AppData. Both need the unvirtualizedResources capability. -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <virtualization:FileSystemWriteVirtualization>
+      <virtualization:ExcludedDirectories>
+        <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\OmniZip</virtualization:ExcludedDirectory>
+        <virtualization:ExcludedDirectory>$(KnownFolder:LocalAppData)\OmniZip</virtualization:ExcludedDirectory>
+      </virtualization:ExcludedDirectories>
+    </virtualization:FileSystemWriteVirtualization>
   </Properties>
 
   <Dependencies>
@@ -39,6 +53,7 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 
   <Applications>
