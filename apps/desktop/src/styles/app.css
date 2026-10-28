@@ -234,8 +234,8 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 /* The sections are listed in the sidebar; a narrow window (sidebar in a drawer) shows them above the page. */
 .set-nav { display: none; padding: 8px; gap: 2px; overflow: auto; border-bottom: 1px solid var(--border-subtle); }
 .set-body { overflow: auto; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px; }
-.set-body > * { max-width: 760px; flex: none; } /* never squeezed: the body scrolls instead (groups clip with overflow: hidden) */
-.set-body h2 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+.set-body > * { width: 100%; max-width: 760px; margin-inline: auto; flex: none; } /* centred; never squeezed: the body scrolls instead (groups clip with overflow: hidden) */
+.set-body h2 { margin-block: 0; font-size: 1.25rem; font-weight: 600; }
 .set-group { display: flex; flex-direction: column; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; min-height: 52px; border-top: 1px solid var(--border-subtle); }
 .set-row:first-child { border-top: 0; }
