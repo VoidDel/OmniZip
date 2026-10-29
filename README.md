@@ -2,7 +2,7 @@
 
 > 一款面向 Windows / macOS / Linux 的现代化压缩与解压软件：统一的 Rust 核心、美观大气的界面、多语言、多主题、广泛的格式支持、深度的 Shell 集成（右键菜单 + 文件关联 + 命令行），以及把任意压缩包像 ISO 一样直接挂载为虚拟磁盘的能力。
 
-本仓库已按路线图进入实施，当前为 **M1 MVP（Windows 优先）**：核心库、ZIP / 7z / TAR 系列 / RAR 引擎、`omnizip` 命令行、Tauri 桌面应用、Windows 右键菜单扩展、挂载核心与 Windows 安装包均已可构建并通过测试。Win11 一级右键菜单已用自签证书的 MSIX 实机验证；Windows 上已可用 WinFsp 把压缩包只读挂载为盘符或文件夹；ZIP / gzip 多线程压缩、大量小文件的解压与 .xz 解码已优化，与 Bandizip 的对比见 [11 §8.4](docs/11-roadmap.md#84-性能与正确性2026-10-29)；挂载守护进程、正式代码签名、macOS 与 Linux 尚未完成。逐项进度见 [11 §8 实施状态](docs/11-roadmap.md#8-实施状态2026-10-29windows-优先)，设计文档位于 [docs/](docs/)。
+本仓库已按路线图进入实施，当前为 **M1 MVP（Windows 优先）**：核心库、ZIP / 7z / TAR 系列 / RAR 引擎、`omnizip` 命令行、Tauri 桌面应用、Windows 右键菜单扩展、挂载核心与 Windows 安装包均已可构建并通过测试。Win11 一级右键菜单已用自签证书的 MSIX 实机验证；Windows 上已可用 WinFsp 把压缩包挂载为盘符或文件夹（可带临时可写层，卸载时保存回压缩包或放弃），由挂载守护进程保持、OmniZip 退出后仍在；ZIP / gzip 多线程压缩、大量小文件的解压与 .xz 解码已优化，与 Bandizip 的对比见 [11 §8.4](docs/11-roadmap.md#84-性能与正确性2026-10-29)；正式代码签名、macOS 与 Linux 尚未完成。逐项进度见 [11 §8 实施状态](docs/11-roadmap.md#8-实施状态2026-10-29windows-优先)，设计文档位于 [docs/](docs/)。
 
 ## 一句话定位
 

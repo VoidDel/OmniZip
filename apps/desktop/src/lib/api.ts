@@ -121,7 +121,9 @@ export const api = {
   /** Drive letters free for a mount (`Z:`, `Y:`, …). */
   freeLetters: () => invoke<string[]>('mount_free_letters'),
   mount: (request: MountRequest) => invoke<MountInfo>('mount_start', { request }),
-  unmount: (id: number) => invoke<void>('mount_stop', { id }),
+  /** Unmounts; a writable mount's changes are saved into the archive by the job whose id comes
+   * back (`save`), or discarded. `0` when there was nothing to save. */
+  unmount: (id: number, save = false) => invoke<number>('mount_stop', { id, save }),
   openMountDriverPage: () => invoke<void>('open_mount_driver_page'),
   shellRegister: () => invoke<ShellStatus>('shell_register'),
   shellUnregister: () => invoke<ShellStatus>('shell_unregister'),

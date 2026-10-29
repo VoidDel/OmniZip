@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use omnizip_core::{Error, ErrorReport};
+pub use omnizip_vfs::Changes;
 use serde::{Deserialize, Serialize};
 
 /// Which daemon: the user's own, or the elevated one that hosts "mount as administrator".
@@ -21,10 +22,18 @@ pub enum Request {
     Mount {
         spec: MountSpec,
     },
+    /// Unmounts; the changes of a writable mount are kept for saving when `keep_changes` is set
+    /// (`Unmounted`), and discarded otherwise.
     Unmount {
         id: u64,
+        #[serde(default)]
+        keep_changes: bool,
     },
-    UnmountAll,
+    /// Unmounts everything, except writable mounts with changes when `keep_changed` is set.
+    UnmountAll {
+        #[serde(default)]
+        keep_changed: bool,
+    },
     List,
     /// Keeps the connection, sending `Changed` whenever the list changes.
     Watch,
@@ -48,6 +57,9 @@ pub struct MountSpec {
     pub cache_bytes: u64,
     /// Decode a solid archive into the cache right away.
     pub warm: bool,
+    /// Writes go to a temporary layer, saved into the archive or discarded at unmount.
+    #[serde(default)]
+    pub writable: bool,
 }
 
 /// A mount as the daemon reports it.
@@ -67,16 +79,50 @@ pub struct MountStatus {
     pub warming: bool,
     /// A drive registered with the Mount Manager, visible to every session.
     pub global: bool,
+    /// Accepts writes into a temporary layer.
+    pub writable: bool,
+    /// The layer holds changes.
+    pub dirty: bool,
+    /// The changes can be saved into the archive (`save::can_save`).
+    pub saveable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "camelCase")]
 pub enum Response {
-    Mounted { mount: MountStatus },
-    Mounts { mounts: Vec<MountStatus> },
+    Mounted {
+        mount: MountStatus,
+    },
+    Mounts {
+        mounts: Vec<MountStatus>,
+    },
+    /// The changes kept by `Unmount`, if any.
+    Unmounted {
+        saved: Option<SavedLayer>,
+    },
     Done,
     Changed,
-    Failed { error: ErrorReport },
+    Failed {
+        error: ErrorReport,
+    },
+}
+
+/// The changes of a writable mount, kept at unmount for saving into the archive. The layer
+/// directory holds the changed files at their volume paths; whoever saves removes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedLayer {
+    pub archive: PathBuf,
+    pub layer: PathBuf,
+    pub changes: Changes,
+    /// The archive's password and name encoding, as mounted.
+    pub password: Option<String>,
+    pub encoding: Option<String>,
+}
+
+/// Where kept layers wait to be saved: a directory no daemon clears at start-up.
+pub fn saving_dir() -> Option<PathBuf> {
+    omnizip_core::appdirs::cache_dir().map(|d| d.join("mount-saving"))
 }
 
 /// A mount to restore at start-up. The user's daemon keeps the list of its mounts in
@@ -87,6 +133,9 @@ pub struct SavedMount {
     pub archive: String,
     pub mount_point: String,
     pub label: String,
+    /// Mounted with a writable layer (restored with an empty one).
+    #[serde(default)]
+    pub writable: bool,
 }
 
 /// Where the user's daemon saves its list.

@@ -67,7 +67,7 @@
 
 ## 6. M4 · v1.x 待办（按价值排序）
 
-1. ZIP 可写挂载（overlay）
+1. ~~ZIP 可写挂载（overlay）~~ 已于 2026-10-29 在 Windows 上实现，并覆盖 7z 与 tar 系列（重新打包），见 12 §6
 2. 主题编辑器
 3. 沙箱 Worker 进程承载 C 引擎
 4. SFX 自解压创建（Windows）
@@ -117,14 +117,14 @@
 | 主题与语言 | 已完成且超出范围：12 套内置主题、跟随系统、系统强调色；zh-CN、en-US、zh-TW、ja-JP 四种语言 |
 | Shell | 已完成：经典右键菜单（设置页一键注册 / 移除）、轻量进度窗、单实例转发。安装器钩子自动注册与文件关联已写入安装包，但未实际安装验证。Win11 一级菜单已用自签证书的 MSIX 实机验证。macOS：文件关联与每格式文档图标、Finder 打开文件已实机验证，右键菜单（Services、Finder 扩展）未做 |
 | CLI | 已完成：`x e a l t i formats completions`，另有 `d rn convert gui` |
-| 挂载 | Windows 已完成：WinFsp 只读挂载、挂载对话框、侧栏与设置页的已挂载列表、退出时卸载 / 启动时恢复；挂载守护进程 `omnizip-mountd`（OmniZip 退出后挂载仍在）与以管理员身份挂载（挂载管理器全局盘符）。CLI `mount` 未做 |
+| 挂载 | Windows 已完成：WinFsp 只读挂载、挂载对话框、侧栏与设置页的已挂载列表、退出时卸载 / 启动时恢复；挂载守护进程 `omnizip-mountd`（OmniZip 退出后挂载仍在）与以管理员身份挂载（挂载管理器全局盘符）；临时可写层（卸载时保存到压缩包或放弃）。CLI `mount` 未做 |
 | 打包 | NSIS 安装包已产出（含 CLI、Shell DLL、安装 / 卸载钩子）；MSIX 可用自签测试证书签名并安装（`platform/windows/msix/new-test-cert.ps1`），正式签名待证书；macOS 可产出未签名的 `.app` 与 `.dmg`（本机架构） |
 | CI | `ci`、`release`、`nightly-fuzz` 工作流；仓库已推送到 GitHub，`ci` 在 Windows / macOS / Linux 上通过 |
 | 验收 | 已做一轮性能基准与优化（§8.4）。未开始：内部一周试用、崩溃率统计、性能预算全面测量 |
 
 ### 8.3 后续优先级
 
-1. 挂载的临时可写层（卸载时保存到压缩包或放弃）；CLI `mount` / `unmount` / `mounts`（客户端已在 `omnizip-mountd` 库中）；安装包中的 WinFsp 可选组件。
+1. CLI `mount` / `unmount` / `mounts`（客户端已在 `omnizip-mountd` 库中）；安装包中的 WinFsp 可选组件。
 2. 申请正式代码签名证书（自签证书已验证 Win11 一级菜单）；补 ARM64 DLL 与 Sparse Package。
 3. tar 根目录条目 `./`（`tar -C dir .` 打的包）被当作越界路径拒绝，退出码 8；应视为目标目录本身。
 4. 完成 M0 未做的测量项：百万条目列表、与 7-Zip 本身的速度与互操作、编码探测准确率、AppVerifier。

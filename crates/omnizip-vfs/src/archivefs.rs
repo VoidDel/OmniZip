@@ -652,4 +652,8 @@ impl VirtualFs for ArchiveFs {
     fn statfs(&self) -> FsResult<FsStats> {
         Ok(self.stats.clone())
     }
+
+    fn archive_path(&self, node: NodeId) -> Option<String> {
+        self.tree.node(node).map(|_| self.tree.path(node))
+    }
 }

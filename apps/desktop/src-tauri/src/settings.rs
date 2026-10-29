@@ -215,6 +215,8 @@ pub struct Mount {
     pub restore_on_start: bool,
     pub warm_solid: bool,
     pub offline_attribute: bool,
+    /// Mount with a temporary writable layer (the mount dialog's default).
+    pub writable: bool,
 }
 
 impl Default for Mount {
@@ -225,6 +227,7 @@ impl Default for Mount {
             restore_on_start: false,
             warm_solid: true,
             offline_attribute: false,
+            writable: true,
         }
     }
 }

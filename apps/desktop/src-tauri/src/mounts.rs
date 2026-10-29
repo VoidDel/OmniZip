@@ -5,7 +5,8 @@
 //!
 //! This module is their client: it lists both daemons, routes unmounts to the right one, and
 //! turns their change notifications into `mounts://changed` events. The user's daemon saves its
-//! list for "restore on start".
+//! list for "restore on start". A writable mount's changes, kept at unmount, come back as a
+//! [`SavedLayer`] for a job to save into the archive (`ops::save_mount_work`).
 
 use std::{
     collections::HashSet,
@@ -14,7 +15,7 @@ use std::{
 };
 
 use omnizip_core::{Error, ErrorCode};
-use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response, SavedMount};
+use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -41,6 +42,12 @@ pub struct MountInfo {
     pub elevated: bool,
     /// A drive visible to every session (registered with the Mount Manager).
     pub global: bool,
+    /// Writes go to a temporary layer.
+    pub writable: bool,
+    /// The layer holds changes not saved into the archive.
+    pub dirty: bool,
+    /// The changes can be saved into the archive (not RAR, not split, not self-extracting).
+    pub saveable: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -58,6 +65,8 @@ pub struct MountRequest {
     /// Mount through the elevated daemon (asks for administrator rights).
     #[serde(default)]
     pub elevated: bool,
+    /// With a temporary writable layer (the setting when absent).
+    pub writable: Option<bool>,
 }
 
 /// Mount ids are per daemon; the app's id also says which daemon (odd: the elevated one).
@@ -86,6 +95,9 @@ fn info(level: Level, s: MountStatus) -> MountInfo {
         warming: s.warming,
         elevated: level == Level::Admin,
         global: s.global,
+        writable: s.writable,
+        dirty: s.dirty,
+        saveable: s.saveable,
     }
 }
 
@@ -250,6 +262,7 @@ impl MountManager {
             offline_attribute: settings.offline_attribute,
             cache_bytes: u64::from(settings.cache_gb.max(1)) << 30,
             warm: req.warm.unwrap_or(settings.warm_solid),
+            writable: req.writable.unwrap_or(settings.writable),
         };
         let exe = daemon_exe()?;
         let (level, status) = if req.elevated {
@@ -269,24 +282,33 @@ impl MountManager {
     }
 
     /// Unmounts one archive. Waits for file system calls in progress (a solid block being
-    /// decoded) to finish.
-    pub fn unmount(&self, app: &AppHandle, id: u64) {
+    /// decoded) to finish. The changes of a writable mount are discarded, or kept for saving
+    /// (`keep_changes`) and returned.
+    pub fn unmount(
+        &self,
+        app: &AppHandle,
+        id: u64,
+        keep_changes: bool,
+    ) -> Result<Option<SavedLayer>, Error> {
         let (level, id) = daemon_id(id);
-        if let Err(e) = daemons::call(level, &Request::Unmount { id }) {
-            tracing::warn!(code = e.code().id(), "unmounting");
-        }
+        let r = daemons::call(level, &Request::Unmount { id, keep_changes });
         Self::changed(app);
+        match r? {
+            Response::Unmounted { saved } => Ok(saved),
+            r => Err(Error::internal(format!("unexpected answer {r:?}"))),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
         self.list().is_empty()
     }
 
-    /// Unmounts everything (OmniZip quits and the settings say so).
+    /// Unmounts everything (OmniZip quits and the settings say so), except writable mounts
+    /// with changes: they wait for the user to save or discard them.
     pub fn unmount_all(&self) {
         for level in [Level::User, Level::Admin] {
             if daemons::running(level) {
-                let _ = daemons::call(level, &Request::UnmountAll);
+                let _ = daemons::call(level, &Request::UnmountAll { keep_changed: true });
             }
         }
     }
@@ -313,6 +335,7 @@ impl MountManager {
                 warm: None,
                 password: None,
                 elevated: false,
+                writable: Some(s.writable),
             };
             let r = self
                 .mount(app, req(Some(s.mount_point.clone())))
@@ -328,7 +351,7 @@ impl MountManager {
     }
 }
 
-fn same_path(a: &Path, b: &Path) -> bool {
+pub fn same_path(a: &Path, b: &Path) -> bool {
     if cfg!(windows) {
         let norm = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
         norm(a) == norm(b)

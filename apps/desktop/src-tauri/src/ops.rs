@@ -448,6 +448,50 @@ pub fn update_work(
     (title, work, finish)
 }
 
+/// Saves the changes of a writable mount, kept at its unmount, into the archive
+/// (`omnizip_mountd::save`). Archives open in the browser with that path are closed meanwhile
+/// and opened again afterwards.
+pub fn save_mount_work(
+    app: &AppHandle,
+    saved: omnizip_mountd::SavedLayer,
+) -> (String, Work, Finish) {
+    let title = file_name(&saved.archive);
+    let state = app.state::<AppState>();
+    let threads = state.settings().advanced.threads;
+    let opened: Vec<Arc<OpenedArchive>> = state
+        .archives
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .values()
+        .filter(|a| !a.draft && crate::mounts::same_path(&a.path, &saved.archive))
+        .cloned()
+        .collect();
+    let ids: Vec<u32> = opened.iter().map(|a| a.id).collect();
+    let work: Work = Box::new(move |ctx: &JobCtx| {
+        for a in &opened {
+            *a.reader.lock().unwrap_or_else(|e| e.into_inner()) = Box::new(Closed(a.info.clone()));
+        }
+        let report = omnizip_mountd::save::save(&saved, threads, ctx)?;
+        Ok((report, Some(saved.archive.to_string_lossy().into_owned())))
+    });
+    let finish: Finish = Box::new(move |app: &AppHandle, _| {
+        let state = app.state::<AppState>();
+        for id in ids {
+            if let Some(old) = state.archive(id)
+                && let Ok(fresh) = reopen(&old)
+            {
+                state
+                    .archives
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, Arc::new(fresh));
+                let _ = app.emit("archive://changed", id);
+            }
+        }
+    });
+    (title, work, finish)
+}
+
 /// A placeholder reader used while an archive file is being rewritten.
 struct Closed(omnizip_core::ArchiveInfo);
 

@@ -3,6 +3,7 @@
 //! * [`VirtualFs`] — the node-based interface every platform backend drives (WinFsp on
 //!   Windows, FUSE on Linux, FSKit or an NFS loopback on macOS);
 //! * [`ArchiveFs`] — any archive OmniZip can read, presented as a read-only file system;
+//! * [`OverlayFs`] — a writable layer over it, kept in a directory on disk;
 //! * [`cache`] — turns sequential decoders into random access (memory for small entries,
 //!   spool files for large ones, both bounded and least-recently-used);
 //! * [`names`] — how stored names are shown on the target system;
@@ -15,6 +16,7 @@ pub mod archivefs;
 pub mod backend;
 pub mod cache;
 pub mod names;
+pub mod overlay;
 
 use std::{ffi::OsStr, fmt, path::PathBuf, time::SystemTime};
 
@@ -25,6 +27,7 @@ pub use backend::{
 };
 pub use cache::{CacheLimits, Content, ContentCache};
 pub use names::NameRules;
+pub use overlay::{Changes, OverlayFs};
 
 /// A node of the volume. The root is [`ROOT`].
 pub type NodeId = omnizip_core::NodeId;
@@ -52,7 +55,7 @@ pub struct Attr {
     /// Bytes: the declared uncompressed size, or the link text for symbolic links.
     pub size: u64,
     pub mtime: SystemTime,
-    /// Unix permission bits: never writable, never setuid or setgid.
+    /// Unix permission bits: never setuid or setgid, writable only on a writable volume.
     pub mode: u32,
     pub nlink: u32,
 }
@@ -109,6 +112,10 @@ pub enum FsError {
     /// Decoding failed, the data is corrupt, or an entry produced more than it declared.
     Io,
     Interrupted,
+    /// The name is taken.
+    Exists,
+    /// A directory to remove still has entries.
+    NotEmpty,
 }
 
 impl FsError {
@@ -117,6 +124,7 @@ impl FsError {
         match self {
             FsError::NotFound => 2,
             FsError::Interrupted => 4,
+            FsError::Exists => 17,
             FsError::Io => 5,
             FsError::BadHandle => 9,
             FsError::Access => 13,
@@ -125,6 +133,7 @@ impl FsError {
             FsError::Invalid => 22,
             FsError::TooManyOpen => 24,
             FsError::ReadOnly => 30,
+            FsError::NotEmpty => 39,
         }
     }
 
@@ -141,6 +150,8 @@ impl FsError {
             FsError::Invalid => 0xC000_000D,     // STATUS_INVALID_PARAMETER
             FsError::Io => 0xC000_00E9,          // STATUS_UNEXPECTED_IO_ERROR
             FsError::Interrupted => 0xC000_0120, // STATUS_CANCELLED
+            FsError::Exists => 0xC000_0035,      // STATUS_OBJECT_NAME_COLLISION
+            FsError::NotEmpty => 0xC000_0101,    // STATUS_DIRECTORY_NOT_EMPTY
         }
     }
 }
@@ -172,6 +183,8 @@ impl From<std::io::Error> for FsError {
             std::io::ErrorKind::NotFound => FsError::NotFound,
             std::io::ErrorKind::PermissionDenied => FsError::Access,
             std::io::ErrorKind::Interrupted => FsError::Interrupted,
+            std::io::ErrorKind::AlreadyExists => FsError::Exists,
+            std::io::ErrorKind::DirectoryNotEmpty => FsError::NotEmpty,
             _ => FsError::Io,
         }
     }
@@ -179,7 +192,8 @@ impl From<std::io::Error> for FsError {
 
 pub type FsResult<T> = Result<T, FsError>;
 
-/// A read-only file system that a backend can mount.
+/// A file system that a backend can mount: read-only unless [`writable`](Self::writable), in
+/// which case the methods after it change it.
 ///
 /// Every method may be called from several threads at once.
 pub trait VirtualFs: Send + Sync {
@@ -202,6 +216,54 @@ pub trait VirtualFs: Send + Sync {
     fn release(&self, fh: FileHandle);
     fn readlink(&self, node: NodeId) -> FsResult<PathBuf>;
     fn statfs(&self) -> FsResult<FsStats>;
+    /// The path of the archive entry a node shows, which the shown name may differ from
+    /// (characters the system forbids, ` (2)` for a duplicate).
+    fn archive_path(&self, _node: NodeId) -> Option<String> {
+        None
+    }
+
+    fn writable(&self) -> bool {
+        false
+    }
+    /// Where changes are kept, for the free space a backend reports.
+    fn layer_dir(&self) -> Option<PathBuf> {
+        None
+    }
+    /// A new empty file or directory `name` in `parent`; [`FsError::Exists`] when taken.
+    fn create(&self, _parent: NodeId, _name: &OsStr, _dir: bool) -> FsResult<Attr> {
+        Err(FsError::ReadOnly)
+    }
+    /// Writes all of `data` at `offset`, growing the file as needed.
+    fn write(&self, _fh: FileHandle, _offset: u64, _data: &[u8]) -> FsResult<u32> {
+        Err(FsError::ReadOnly)
+    }
+    /// Truncates or extends a file.
+    fn set_size(&self, _node: NodeId, _size: u64) -> FsResult<()> {
+        Err(FsError::ReadOnly)
+    }
+    fn set_mtime(&self, _node: NodeId, _mtime: SystemTime) -> FsResult<()> {
+        Err(FsError::ReadOnly)
+    }
+    /// Removes a file, or an empty directory ([`FsError::NotEmpty`] otherwise).
+    fn remove(&self, _parent: NodeId, _name: &OsStr) -> FsResult<()> {
+        Err(FsError::ReadOnly)
+    }
+    /// Moves `name` of `parent` to `new_name` of `new_parent`. An existing file there is
+    /// replaced when `replace` is set; an existing directory never is.
+    fn rename(
+        &self,
+        _parent: NodeId,
+        _name: &OsStr,
+        _new_parent: NodeId,
+        _new_name: &OsStr,
+        _replace: bool,
+    ) -> FsResult<()> {
+        Err(FsError::ReadOnly)
+    }
+    /// Makes what was written through `fh` durable.
+    fn flush(&self, _fh: FileHandle) -> FsResult<()> {
+        Ok(())
+    }
 }
 
 /// Resolves a volume-relative path (`/` or `\` separated) by successive lookups.

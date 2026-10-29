@@ -4,13 +4,16 @@
 
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     sync::mpsc,
     time::{Duration, Instant},
 };
 
 use omnizip_core::{CollectOptions, ErrorCode, FormatId, JobCtx, WriteOptions, source};
-use omnizip_mountd::{Level, MountSpec, Request, Response, SavedMount, client, saved_list_path};
+use omnizip_mountd::{
+    Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount, client,
+    proto::saving_dir, save, saved_list_path,
+};
 
 #[test]
 fn mounts_through_the_daemon_until_it_is_idle() {
@@ -49,7 +52,12 @@ fn mounts_through_the_daemon_until_it_is_idle() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            let _ = client::call(Level::User, &Request::UnmountAll);
+            let _ = client::call(
+                Level::User,
+                &Request::UnmountAll {
+                    keep_changed: false,
+                },
+            );
         }
     }
     let _cleanup = Cleanup;
@@ -109,10 +117,19 @@ fn mounts_through_the_daemon_until_it_is_idle() {
     assert_eq!(e.code(), ErrorCode::NotFound, "{e:?}");
     assert!(!client::running(Level::Admin));
 
-    client::call(Level::User, &Request::Unmount { id: mount.id }).unwrap();
+    client::call(
+        Level::User,
+        &Request::Unmount {
+            id: mount.id,
+            keep_changes: false,
+        },
+    )
+    .unwrap();
     rx.recv_timeout(Duration::from_secs(5))
         .expect("watchers hear of the unmount");
     assert!(!Path::new(&root).exists());
+
+    writable_mounts(&zip);
 
     // With no mount left, the daemon exits once its idle time is up.
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -120,4 +137,77 @@ fn mounts_through_the_daemon_until_it_is_idle() {
         assert!(Instant::now() < deadline, "the daemon did not exit");
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+fn mount_writable(zip: &Path) -> (MountStatus, PathBuf) {
+    let spec = MountSpec {
+        archive: zip.to_owned(),
+        cache_bytes: 1 << 30,
+        writable: true,
+        ..Default::default()
+    };
+    let Response::Mounted { mount } = client::call(Level::User, &Request::Mount { spec }).unwrap()
+    else {
+        panic!("not mounted")
+    };
+    assert!(mount.writable && !mount.dirty && mount.saveable);
+    let root = PathBuf::from(format!("{}\\", mount.mount_point.display()));
+    (mount, root)
+}
+
+fn status(id: u64) -> Option<MountStatus> {
+    let Response::Mounts { mounts } = client::call(Level::User, &Request::List).unwrap() else {
+        panic!("no list")
+    };
+    mounts.into_iter().find(|m| m.id == id)
+}
+
+fn unmount(id: u64, keep_changes: bool) -> Option<SavedLayer> {
+    match client::call(Level::User, &Request::Unmount { id, keep_changes }).unwrap() {
+        Response::Unmounted { saved } => saved,
+        r => panic!("{r:?}"),
+    }
+}
+
+/// Writes through a writable mount; the changes are kept and saved, or discarded, at unmount.
+/// Unmounting everything for OmniZip's exit leaves mounts with changes alone.
+fn writable_mounts(zip: &Path) {
+    let original = fs::read(zip).unwrap();
+    let (mount, root) = mount_writable(zip);
+    fs::write(root.join("docs").join("readme.txt"), "changed").unwrap();
+    fs::write(root.join("docs").join("new.txt"), "new").unwrap();
+    assert!(status(mount.id).unwrap().dirty);
+    // The archive is untouched until the changes are saved.
+    assert_eq!(fs::read(zip).unwrap(), original);
+
+    let saved = unmount(mount.id, true).expect("changes kept");
+    assert!(!root.exists());
+    assert!(saved.layer.starts_with(saving_dir().unwrap()));
+    assert_eq!(saved.changes.files, ["docs/new.txt", "docs/readme.txt"]);
+    save::save(&saved, 0, &JobCtx::default()).unwrap();
+    assert!(!saved.layer.exists());
+    let (mount, root) = mount_writable(zip);
+    assert_eq!(
+        fs::read_to_string(root.join("docs").join("readme.txt")).unwrap(),
+        "changed"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("docs").join("new.txt")).unwrap(),
+        "new"
+    );
+
+    // Discarded: the archive stays as it is.
+    let saved_once = fs::read(zip).unwrap();
+    fs::remove_file(root.join("docs").join("new.txt")).unwrap();
+    assert_eq!(unmount(mount.id, false), None);
+    assert_eq!(fs::read(zip).unwrap(), saved_once);
+
+    // Unchanged mounts go; changed ones stay until the user decides.
+    let (changed, root) = mount_writable(zip);
+    fs::write(root.join("scratch.txt"), "x").unwrap();
+    client::call(Level::User, &Request::UnmountAll { keep_changed: true }).unwrap();
+    assert!(status(changed.id).is_some_and(|m| m.dirty));
+    assert_eq!(unmount(changed.id, false), None);
+    assert!(status(changed.id).is_none());
+    assert_eq!(fs::read(zip).unwrap(), saved_once);
 }

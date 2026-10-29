@@ -418,7 +418,7 @@ export function Sidebar() {
             <button
               type="button"
               className="nav-item"
-              title={`${m.label} (${m.mountPoint})${m.elevated ? ` · ${t('mount.elevatedBadge')}` : ''}\n${m.archive}`}
+              title={`${m.label} (${m.mountPoint})${m.elevated ? ` · ${t('mount.elevatedBadge')}` : ''}${m.writable ? ` · ${t('mount.writableBadge')}` : ''}\n${m.archive}`}
               onClick={() => void api.reveal(mountRoot(m))}
             >
               <Icon name={m.elevated ? 'shield' : 'drive'} />

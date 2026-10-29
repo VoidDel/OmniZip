@@ -51,6 +51,8 @@ export interface Settings {
     restore_on_start: boolean;
     warm_solid: boolean;
     offline_attribute: boolean;
+    /** Mount with a temporary writable layer (the mount dialog's default). */
+    writable: boolean;
   };
   advanced: { threads: number; log_level: string };
 }
@@ -355,6 +357,12 @@ export interface MountInfo {
   elevated: boolean;
   /** A drive visible to every session (registered with the Mount Manager). */
   global: boolean;
+  /** Writes go to a temporary layer. */
+  writable: boolean;
+  /** The layer holds changes not saved into the archive. */
+  dirty: boolean;
+  /** The changes can be saved into the archive (not RAR, not split, not self-extracting). */
+  saveable: boolean;
 }
 
 export interface MountRequest {
@@ -368,6 +376,8 @@ export interface MountRequest {
   password?: string | null;
   /** Mount through the elevated daemon (asks for administrator rights). */
   elevated?: boolean;
+  /** With a temporary writable layer (the setting when absent). */
+  writable?: boolean;
 }
 
 /** Items copied or cut from an open archive. */

@@ -11,7 +11,7 @@ use std::{
 
 use omnizip_core::{CollectOptions, FormatId, JobCtx, Level, OpenOptions, WriteOptions, source};
 use omnizip_mount_winfsp::{WinFsp, free_drive_letters};
-use omnizip_vfs::{ArchiveFs, FsOptions, Mount, MountBackend, MountError, MountOptions};
+use omnizip_vfs::{ArchiveFs, FsOptions, Mount, MountBackend, MountError, MountOptions, OverlayFs};
 
 fn ready() -> bool {
     let ok = omnizip_vfs::probe(true).can_mount();
@@ -264,4 +264,123 @@ fn free_letters_shrink_while_mounted() {
     assert!(!free_drive_letters().contains(&letter));
     drop(m);
     assert!(free_drive_letters().contains(&letter));
+}
+
+/// A writable layer over the archive, changed through the ordinary file APIs: new files and
+/// folders, overwrite, append, truncate, rename (also over an existing file, as editors save),
+/// delete, copy, times. The archive stays as it was; the layer lists what changed.
+#[test]
+fn writable_layer_through_the_file_apis() {
+    if !ready() {
+        return;
+    }
+    use std::io::Write;
+    let d = tempfile::tempdir().unwrap();
+    let (zip, big) = archive(d.path(), "photos.zip", FormatId::Zip);
+    let lower = volume(&zip);
+    let overlay = Arc::new(OverlayFs::new(lower.clone(), d.path().join("layer")).unwrap());
+    let point = d.path().join("mnt");
+    let m = WinFsp
+        .mount(
+            overlay.clone(),
+            &MountOptions {
+                mount_point: Some(point.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let photos = point.join("photos");
+    let readme = photos.join("docs").join("readme.txt");
+
+    fs::write(photos.join("new.txt"), "fresh").unwrap();
+    assert_eq!(fs::read_to_string(photos.join("new.txt")).unwrap(), "fresh");
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&readme)
+        .unwrap()
+        .write_all(b"more\n")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(&readme).unwrap(),
+        "read me\n".repeat(100) + "more\n"
+    );
+    fs::write(photos.join("相册").join("a.txt"), "beta").unwrap();
+    assert_eq!(
+        fs::read_to_string(photos.join("相册").join("A.TXT")).unwrap(),
+        "beta"
+    );
+
+    fs::create_dir(photos.join("notes")).unwrap();
+    fs::write(photos.join("notes").join("n.txt"), "n").unwrap();
+    assert_eq!(
+        names(&photos),
+        ["docs", "empty", "media", "new.txt", "notes", "相册"]
+    );
+
+    // An editor's save: write a temporary file, then move it over the original.
+    fs::write(photos.join("notes").join("n.tmp"), "n2").unwrap();
+    fs::rename(
+        photos.join("notes").join("n.tmp"),
+        photos.join("notes").join("n.txt"),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(photos.join("notes").join("n.txt")).unwrap(),
+        "n2"
+    );
+    assert_eq!(names(&photos.join("notes")), ["n.txt"]);
+
+    fs::rename(photos.join("media"), photos.join("videos")).unwrap();
+    assert_eq!(
+        fs::read(photos.join("videos").join("big.bin")).unwrap(),
+        big
+    );
+    fs::copy(
+        photos.join("videos").join("big.bin"),
+        photos.join("copy.bin"),
+    )
+    .unwrap();
+    assert_eq!(fs::read(photos.join("copy.bin")).unwrap(), big);
+    let f = fs::OpenOptions::new()
+        .write(true)
+        .open(photos.join("copy.bin"))
+        .unwrap();
+    f.set_len(10).unwrap();
+    let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    f.set_modified(when).unwrap();
+    drop(f);
+    let meta = fs::metadata(photos.join("copy.bin")).unwrap();
+    assert_eq!((meta.len(), meta.modified().unwrap()), (10, when));
+
+    let e = fs::remove_dir(photos.join("docs")).expect_err("not empty");
+    assert_eq!(e.raw_os_error(), Some(145), "{e}"); // ERROR_DIR_NOT_EMPTY
+    fs::remove_file(&readme).unwrap();
+    fs::remove_dir(photos.join("docs")).unwrap();
+    fs::remove_dir(photos.join("empty")).unwrap();
+    assert!(!readme.exists());
+    assert_eq!(
+        names(&photos),
+        ["copy.bin", "new.txt", "notes", "videos", "相册"]
+    );
+
+    drop(m);
+    let c = overlay.changes();
+    assert_eq!(
+        c.files,
+        [
+            "photos/copy.bin",
+            "photos/new.txt",
+            "photos/notes/n.txt",
+            "photos/videos/big.bin",
+            "photos/相册/a.txt"
+        ]
+    );
+    assert_eq!(c.dirs, ["photos/notes", "photos/videos"]);
+    assert_eq!(c.deleted, ["photos/docs", "photos/empty", "photos/media"]);
+    // The archive below is untouched.
+    let original = omnizip_vfs::resolve(&*lower, "photos/docs/readme.txt").unwrap();
+    assert_eq!(
+        omnizip_vfs::read_all(&*lower, original.node, 4096).unwrap(),
+        "read me\n".repeat(100).as_bytes()
+    );
 }

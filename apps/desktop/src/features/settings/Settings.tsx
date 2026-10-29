@@ -619,6 +619,9 @@ export function SettingsView() {
             <Row label={t('settings.mount.warm')}>
               <Switch label={t('settings.mount.warm')} checked={settings.mount.warm_solid} onChange={(v) => set((s) => (s.mount.warm_solid = v))} />
             </Row>
+            <Row label={t('settings.mount.writable')} hint={t('settings.mount.writableHint')}>
+              <Switch label={t('settings.mount.writable')} checked={settings.mount.writable} onChange={(v) => set((s) => (s.mount.writable = v))} />
+            </Row>
             {sys.platform === 'win' && (
               <Row label={t('settings.mount.offline')} hint={t('settings.mount.offlineHint')}>
                 <Switch label={t('settings.mount.offline')} checked={settings.mount.offline_attribute} onChange={(v) => set((s) => (s.mount.offline_attribute = v))} />

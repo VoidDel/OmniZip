@@ -80,7 +80,7 @@
 
 - Windows DLL：无网络、无写文件、无 UI；`catch_unwind` 兜底；只读注册表与配置文件；与主程序同一证书签名。主程序启动时 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR)` 防 DLL 搜索劫持。
 - 命名管道 / Unix socket：ACL 限当前用户；消息上限 16 MB；JSON 严格解析；拒绝相对路径。
-- `omnizip-mountd`：当前用户权限；不开启 `allow_other`；总内存上限；崩溃不影响主程序。管道只允许当前用户连接，客户端核对管道属主（本用户或 Administrators）后才发送请求（含密码）。以管理员身份挂载时另有提权守护进程：它只接受提权客户端的挂载请求、只挂到盘符；未提权的进程只能列出与卸载（见 12 §4）。
+- `omnizip-mountd`：当前用户权限；不开启 `allow_other`；总内存上限；崩溃不影响主程序。管道只允许当前用户连接，客户端核对管道属主（本用户或 Administrators）后才发送请求（含密码）。以管理员身份挂载时另有提权守护进程：它只接受提权客户端的挂载请求、只挂到盘符；未提权的进程只能列出与卸载（见 12 §4）。可写挂载的临时层在用户缓存目录中；保存改动时只接受卷内相对路径（拒绝 `..`、绝对路径与盘符），重新打包的临时目录与原子替换沿用格式转换的做法。
 - macOS 扩展：通过 App Group 容器与 URL scheme 通信，参数白名单校验。
 
 ## 9. 供应链与发布

@@ -791,6 +791,19 @@ function AskDialog({ d }: { d: Extract<Dialog, { kind: 'ask' }> }) {
       footer={
         <>
           <button type="button" className="btn" onClick={cancel}>{t('common.cancel')}</button>
+          {d.alternative && (
+            <button
+              type="button"
+              className="btn"
+              style={d.alternative.danger ? { color: 'var(--danger)' } : undefined}
+              onClick={() => {
+                closeDialog();
+                d.alternative?.onClick();
+              }}
+            >
+              {d.alternative.label}
+            </button>
+          )}
           <button
             type="button"
             className={`btn primary`}
@@ -1013,6 +1026,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
   const [folder, setFolder] = useState('');
   const [label, setLabel] = useState('');
   const [warm, setWarm] = useState(settings.mount.warm_solid);
+  const [writable, setWritable] = useState(settings.mount.writable);
   // Shown once mounting reports that a password is needed.
   const [password, setPassword] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1038,6 +1052,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
         warm: solid && warm,
         password,
         elevated,
+        writable,
       });
       if (password) void api.setArchivePassword(archive.id, password);
       close();
@@ -1187,6 +1202,12 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
           <PasswordInput value={password} onChange={setPassword} autoFocus onEnter={() => void start()} label={t('mount.password')} />
         </div>
       )}
+      <div className="field">
+        <label className="chk">
+          <input type="checkbox" checked={writable} onChange={(e) => setWritable(e.target.checked)} /> {t('mount.writable')}
+        </label>
+        <span className="hint">{archive.info.format === 'rar' ? t('mount.writableHintNoSave') : t('mount.writableHint')}</span>
+      </div>
       {solid && (
         <label className="chk">
           <input type="checkbox" checked={warm} onChange={(e) => setWarm(e.target.checked)} /> {t('mount.warm')}

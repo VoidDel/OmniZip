@@ -1434,10 +1434,27 @@ pub async fn mount_start(app: AppHandle, request: MountRequest) -> CmdResult<Mou
     .map_err(err)
 }
 
-/// Unmounts; waits for a file system call in progress (a solid block being decoded).
+/// Unmounts; waits for a file system call in progress (a solid block being decoded). The
+/// changes of a writable mount are saved into the archive (`save`) or discarded; saving runs
+/// as a job, whose id is returned (`0` when there is nothing to save).
 #[tauri::command]
-pub async fn mount_stop(app: AppHandle, id: u64) -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().mounts.unmount(&app, id))
+pub async fn mount_stop(app: AppHandle, id: u64, save: bool) -> CmdResult<u32> {
+    let saved = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            app.state::<AppState>().mounts.unmount(&app, id, save)
+        })
         .await
-        .map_err(|e| err(Error::internal(e)))
+        .map_err(|e| err(Error::internal(e)))?
+        .map_err(err)?
+    };
+    let Some(saved) = saved else { return Ok(0) };
+    let state = app.state::<AppState>();
+    let (title, work, finish) = ops::save_mount_work(&app, saved);
+    Ok(state.jobs.spawn(
+        &app,
+        JobSpec::new("mountSave", title, policy(&state)),
+        work,
+        Some(finish),
+    ))
 }

@@ -10,6 +10,11 @@
 //! letters: a program of the user must not get archives parsed with administrator rights, nor
 //! volumes placed where only administrators may write.
 //!
+//! A writable mount puts a layer over the archive (`cache/mount*/layer-<id>`). At unmount its
+//! changes are discarded, or kept for the app to save: the layer then moves to
+//! `cache/mount-saving`, which no daemon clears, and the app removes it once saved. A layer left
+//! behind by a daemon that did not exit cleanly is cleared with the other cache files.
+//!
 //! Either exits once it has had no mount for five minutes.
 
 use std::{
@@ -25,12 +30,16 @@ use std::{
 };
 
 use omnizip_core::{Error, ErrorCode, MountClass, appdirs};
-use omnizip_vfs::{ArchiveFs, Mount, MountBackend, MountError, MountOptions};
+use omnizip_vfs::{ArchiveFs, Mount, MountBackend, MountError, MountOptions, OverlayFs, VirtualFs};
 
 use crate::{
     client,
     pipe::{self, Access},
-    proto::{Level, MountSpec, MountStatus, Request, Response, SavedMount, saved_list_path},
+    proto::{
+        Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount, saved_list_path,
+        saving_dir,
+    },
+    save::can_save,
     volume::open_volume,
 };
 
@@ -113,11 +122,62 @@ struct Hosted {
     archive: PathBuf,
     label: String,
     fs: Arc<ArchiveFs>,
+    /// The writable layer over `fs`, which is then what is mounted.
+    overlay: Option<Arc<OverlayFs>>,
+    /// As mounted, for saving the changes.
+    password: Option<String>,
+    encoding: Option<String>,
     mount: Box<dyn Mount>,
     warming: Arc<AtomicBool>,
 }
 
 impl Hosted {
+    /// Unmounts, waiting for file system calls in progress, and keeps the changes of a writable
+    /// mount for saving (`keep`, when there are any) or discards them.
+    fn finish(self, keep: bool) -> Option<SavedLayer> {
+        let Hosted {
+            id,
+            archive,
+            overlay,
+            password,
+            encoding,
+            mount,
+            ..
+        } = self;
+        // Closes every handle of the volume, so the layer can move.
+        drop(mount);
+        let overlay = overlay?;
+        let layer = overlay.layer_dir().to_owned();
+        let changes = overlay.changes();
+        drop(overlay);
+        if keep && !changes.is_empty() {
+            let kept = saving_dir().and_then(|d| {
+                let dest = d.join(format!("{}-{id}", std::process::id()));
+                std::fs::create_dir_all(&d).ok()?;
+                std::fs::rename(&layer, &dest).ok()?;
+                Some(dest)
+            });
+            match kept {
+                Some(layer) => {
+                    return Some(SavedLayer {
+                        archive,
+                        layer,
+                        changes,
+                        password,
+                        encoding,
+                    });
+                }
+                None => tracing::warn!(layer = %layer.display(), "could not keep the changes"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&layer);
+        None
+    }
+
+    fn dirty(&self) -> bool {
+        self.overlay.as_ref().is_some_and(|o| o.is_dirty())
+    }
+
     fn status(&self) -> MountStatus {
         let (mem, disk) = self.fs.cache().usage();
         MountStatus {
@@ -129,6 +189,9 @@ impl Hosted {
             cache_bytes: mem + disk,
             warming: self.warming.load(Ordering::SeqCst),
             global: self.mount.global(),
+            writable: self.overlay.is_some(),
+            dirty: self.dirty(),
+            saveable: self.overlay.is_some() && can_save(self.fs.info()),
         }
     }
 }
@@ -178,12 +241,11 @@ impl Host {
                 Err(Error::new(ErrorCode::PermissionDenied).with("path", spec.archive.display()))
             }
             Request::Mount { spec } => self.mount(spec).map(|mount| Response::Mounted { mount }),
-            Request::Unmount { id } => {
-                self.unmount(|h| h.id == id);
-                Ok(Response::Done)
-            }
-            Request::UnmountAll => {
-                self.unmount(|_| true);
+            Request::Unmount { id, keep_changes } => Ok(Response::Unmounted {
+                saved: self.unmount(|h| h.id == id, keep_changes).pop(),
+            }),
+            Request::UnmountAll { keep_changed } => {
+                self.unmount(|h| !(keep_changed && h.dirty()), false);
                 Ok(Response::Done)
             }
             Request::List => Ok(Response::Mounts {
@@ -211,21 +273,51 @@ impl Host {
             return Err(Error::new(ErrorCode::PermissionDenied).with("path", p.display()));
         }
         let (fs, label) = open_volume(&spec, self.cache_dir.clone())?;
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let overlay = if spec.writable {
+            let layer = self
+                .cache_dir
+                .clone()
+                .unwrap_or_else(std::env::temp_dir)
+                .join(format!("layer-{id}"));
+            let _ = std::fs::remove_dir_all(&layer);
+            let o = OverlayFs::new(fs.clone(), layer.clone()).map_err(|e| {
+                Error::new(ErrorCode::Io)
+                    .with("path", layer.display())
+                    .detail(e.to_string())
+            })?;
+            Some(Arc::new(o))
+        } else {
+            None
+        };
         let opts = MountOptions {
             mount_point: point,
             label: Some(label.clone()),
-            read_only: true,
+            read_only: overlay.is_none(),
             offline_attribute: spec.offline_attribute,
         };
-        let mount = omnizip_mount_winfsp::WinFsp
-            .mount(fs.clone(), &opts)
-            .map_err(mount_error)?;
+        let volume: Arc<dyn VirtualFs> = match &overlay {
+            Some(o) => o.clone(),
+            None => fs.clone(),
+        };
+        let mount = match omnizip_mount_winfsp::WinFsp.mount(volume, &opts) {
+            Ok(m) => m,
+            Err(e) => {
+                if let Some(o) = &overlay {
+                    let _ = std::fs::remove_dir_all(o.layer_dir());
+                }
+                return Err(mount_error(e));
+            }
+        };
         let warm = spec.warm && fs.mount_class() == MountClass::C;
         let hosted = Hosted {
-            id: self.next.fetch_add(1, Ordering::Relaxed),
+            id,
             archive: spec.archive.clone(),
             label,
             fs: fs.clone(),
+            overlay,
+            password: spec.password.clone(),
+            encoding: spec.encoding.clone(),
             mount,
             warming: Arc::new(AtomicBool::new(warm)),
         };
@@ -246,19 +338,21 @@ impl Host {
         Ok(status)
     }
 
-    /// Unmounts the mounts `which` selects. Waits for file system calls in progress (a solid
-    /// block being decoded).
-    fn unmount(&self, which: impl Fn(&Hosted) -> bool) {
+    /// Unmounts the mounts `which` selects, keeping their changes when `keep` is set. Waits
+    /// for file system calls in progress (a solid block being decoded).
+    fn unmount(&self, which: impl Fn(&Hosted) -> bool, keep: bool) -> Vec<SavedLayer> {
         let gone: Vec<Hosted> = {
             let mut mounts = lock(&self.mounts);
-            let (gone, keep) = std::mem::take(&mut *mounts).into_iter().partition(&which);
-            *mounts = keep;
+            let (gone, stay) = std::mem::take(&mut *mounts).into_iter().partition(&which);
+            *mounts = stay;
             gone
         };
-        if !gone.is_empty() {
-            drop(gone);
-            self.changed();
+        if gone.is_empty() {
+            return Vec::new();
         }
+        let saved = gone.into_iter().filter_map(|h| h.finish(keep)).collect();
+        self.changed();
+        saved
     }
 
     fn list(&self) -> Vec<MountStatus> {
@@ -284,6 +378,7 @@ impl Host {
                 archive: h.archive.to_string_lossy().into_owned(),
                 mount_point: h.mount.mount_point().to_string_lossy().into_owned(),
                 label: h.label.clone(),
+                writable: h.overlay.is_some(),
             })
             .collect();
         if let Some(d) = f.parent() {
@@ -302,7 +397,8 @@ impl Host {
     fn tick(&self) -> bool {
         let dead = lock(&self.mounts).iter().any(|h| !h.mount.is_alive());
         if dead {
-            self.unmount(|h| !h.mount.is_alive());
+            // Nobody is there to save what such a volume had changed.
+            self.unmount(|h| !h.mount.is_alive(), false);
         }
         lock(&self.idle_since).is_some_and(|t| t.elapsed() >= idle_limit())
     }

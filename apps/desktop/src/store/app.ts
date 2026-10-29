@@ -37,7 +37,17 @@ export type DialogSpec =
   /** `mkdir`: create a folder named `name` in the folder `node` of a new archive instead. */
   | { kind: 'rename'; node: number; name: string; mkdir?: boolean }
   | { kind: 'mount' }
-  | { kind: 'ask'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void; onCancel?: () => void };
+  | {
+      kind: 'ask';
+      title: string;
+      message: string;
+      confirm: string;
+      danger?: boolean;
+      onConfirm: () => void;
+      onCancel?: () => void;
+      /** A third choice, between cancel and confirm. */
+      alternative?: { label: string; danger?: boolean; onClick: () => void };
+    };
 
 export type Dialog = DialogSpec & { id: number };
 
@@ -433,14 +443,39 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
   unmount: async (id) => {
-    const m = get().mounts.find((x) => x.id === id);
-    try {
-      await api.unmount(id);
-      if (m) get().toast({ tone: 'success', text: i18n.t('mount.ejected', { name: m.label }) });
-    } catch (e) {
-      get().reportError(e);
-    }
+    // Whether a writable mount has changes is not pushed: ask now.
     await get().refreshMounts();
+    const m = get().mounts.find((x) => x.id === id);
+    const eject = async (save: boolean) => {
+      try {
+        await api.unmount(id, save);
+        if (m) get().toast({ tone: 'success', text: i18n.t('mount.ejected', { name: m.label }) });
+      } catch (e) {
+        get().reportError(e);
+      }
+      await get().refreshMounts();
+    };
+    if (!m?.dirty) return eject(false);
+    const discard = { label: i18n.t('mount.discardChanges'), danger: true, onClick: () => void eject(false) };
+    get().openDialog(
+      m.saveable
+        ? {
+            kind: 'ask',
+            title: i18n.t('mount.changesTitle', { name: m.label }),
+            message: i18n.t('mount.changesSave', { name: m.name }),
+            confirm: i18n.t('mount.saveChanges'),
+            onConfirm: () => void eject(true),
+            alternative: discard,
+          }
+        : {
+            kind: 'ask',
+            title: i18n.t('mount.changesTitle', { name: m.label }),
+            message: i18n.t('mount.changesNoSave', { format: m.format }),
+            confirm: discard.label,
+            danger: true,
+            onConfirm: discard.onClick,
+          },
+    );
   },
 }));
 

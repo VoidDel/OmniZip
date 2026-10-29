@@ -4,6 +4,10 @@
 //! `Open`, by file context afterwards. Paths are resolved component by component through
 //! [`VirtualFs::lookup`]; the file context is a boxed [`FileCtx`] holding the node, the open
 //! handle and, for directories, the listing that `ReadDirectory` pages through by name.
+//!
+//! A volume is read-only unless its file system is [`VirtualFs::writable`] (a writable layer
+//! over the archive): then `Create`, `Write`, `Rename`, deletion at `Cleanup` and the like go
+//! to it, and the volume reports the free space of the disk holding the layer.
 
 use std::{
     collections::HashSet,
@@ -17,7 +21,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use omnizip_vfs::{
@@ -29,13 +33,13 @@ use windows_sys::Win32::{
     Security::{
         Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, PSECURITY_DESCRIPTOR,
     },
-    Storage::FileSystem::GetLogicalDrives,
+    Storage::FileSystem::{GetDiskFreeSpaceExW, GetLogicalDrives},
 };
 
 use crate::ffi::{self, *};
 
-/// Everyone may open anything; the volume itself is read-only, so writes fail with "write
-/// protected" as on a CD.
+/// Everyone may open anything; on a read-only volume, writes fail with "write protected" as on
+/// a CD.
 const SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)";
 
 /// Longest name handed to WinFsp, in UTF-16 units.
@@ -89,7 +93,10 @@ impl MountBackend for WinFsp {
             .encode_utf16()
             .take(32)
             .collect();
+        let writable = fs.writable();
         let volume = Box::new(Volume {
+            layer: fs.layer_dir().map(|d| wide(d.as_os_str())),
+            writable,
             fs,
             sd: security_descriptor()?,
             label,
@@ -107,15 +114,17 @@ impl MountBackend for WinFsp {
         params.MaxComponentLength = MAX_NAME as u16;
         params.VolumeCreationTime = filetime(SystemTime::now());
         params.VolumeSerialNumber = stats.serial;
-        // Nothing changes under a read-only volume, but sizes that a format does not record
-        // become known once decoded: let the kernel ask again after a second.
+        // Sizes that a format does not record become known once decoded: let the kernel ask
+        // again after a second. Changes through the volume report their own sizes.
         params.FileInfoTimeout = 1000;
         params.Flags = volume_flags::CASE_PRESERVED_NAMES
             | volume_flags::UNICODE_ON_DISK
             | volume_flags::PERSISTENT_ACLS
-            | volume_flags::READ_ONLY_VOLUME
             | volume_flags::POST_CLEANUP_WHEN_MODIFIED_ONLY
             | volume_flags::UM_FILE_CONTEXT_IS_USER_CONTEXT2;
+        if !writable {
+            params.Flags |= volume_flags::READ_ONLY_VOLUME;
+        }
         for (d, s) in params
             .FileSystemName
             .iter_mut()
@@ -261,12 +270,39 @@ fn ntstatus_text(st: NTSTATUS) -> String {
     format!("NTSTATUS 0x{:08X}", st as u32)
 }
 
+/// The volume path `name` (`\dir\file`).
+///
+/// # Safety
+/// `name` is a NUL-terminated UTF-16 string.
+unsafe fn path_of(name: *const u16) -> Result<String, NTSTATUS> {
+    // SAFETY: per the contract.
+    String::from_utf16(unsafe { wstr(name) }).map_err(|_| STATUS_OBJECT_NAME_NOT_FOUND)
+}
+
+/// `\dir\file` → (`\dir`, `file`); the parent of a root entry is empty.
+fn split_path(path: &str) -> Result<(&str, &str), NTSTATUS> {
+    match path.trim_end_matches('\\').rsplit_once('\\') {
+        Some((parent, leaf)) if !leaf.is_empty() => Ok((parent, leaf)),
+        _ => Err(STATUS_OBJECT_NAME_INVALID),
+    }
+}
+
 /// 100 ns intervals since 1601.
 fn filetime(t: SystemTime) -> u64 {
     const UNIX: u64 = 116_444_736_000_000_000;
     match t.duration_since(UNIX_EPOCH) {
         Ok(d) => UNIX.saturating_add((d.as_nanos() / 100).min(u128::from(u64::MAX)) as u64),
         Err(e) => UNIX.saturating_sub((e.duration().as_nanos() / 100).min(u128::from(UNIX)) as u64),
+    }
+}
+
+/// [`filetime`] back.
+fn systime(ft: u64) -> SystemTime {
+    const UNIX: u64 = 116_444_736_000_000_000;
+    if ft >= UNIX {
+        UNIX_EPOCH + Duration::from_nanos((ft - UNIX).saturating_mul(100))
+    } else {
+        UNIX_EPOCH - Duration::from_nanos((UNIX - ft).saturating_mul(100))
     }
 }
 
@@ -287,6 +323,9 @@ fn guard(f: impl FnOnce() -> Result<(), NTSTATUS>) -> NTSTATUS {
 /// What a volume's callbacks share (`FSP_FILE_SYSTEM::UserContext`).
 struct Volume {
     fs: Arc<dyn VirtualFs>,
+    writable: bool,
+    /// Directory of the writable layer, NUL-terminated, for the free space.
+    layer: Option<Vec<u16>>,
     /// Self-relative security descriptor of every file.
     sd: Vec<u8>,
     label: Vec<u16>,
@@ -301,7 +340,7 @@ struct Volume {
 struct FileCtx {
     node: NodeId,
     fh: Option<FileHandle>,
-    /// Directory listing, built on the first `ReadDirectory` of this handle.
+    /// Directory listing, built when `ReadDirectory` starts from the beginning.
     listing: Mutex<Option<Arc<Vec<DirItem>>>>,
 }
 
@@ -360,7 +399,8 @@ impl Volume {
     /// `name` is a NUL-terminated UTF-16 string.
     unsafe fn lookup(&self, name: *const u16) -> Result<Attr, NTSTATUS> {
         // SAFETY: per the contract.
-        unsafe { self.walk(name, false) }.map(|(attr, _)| attr)
+        self.walk(&unsafe { path_of(name) }?, false)
+            .map(|(attr, _)| attr)
     }
 
     /// [`lookup`](Self::lookup), with the path as the volume spells it (`\Dir\File.txt` for
@@ -370,15 +410,27 @@ impl Volume {
     /// `name` is a NUL-terminated UTF-16 string.
     unsafe fn lookup_normalized(&self, name: *const u16) -> Result<(Attr, String), NTSTATUS> {
         // SAFETY: per the contract.
-        unsafe { self.walk(name, true) }
+        self.walk(&unsafe { path_of(name) }?, true)
     }
 
-    /// # Safety
-    /// `name` is a NUL-terminated UTF-16 string.
-    unsafe fn walk(&self, name: *const u16, spell: bool) -> Result<(Attr, String), NTSTATUS> {
-        // SAFETY: per the contract.
-        let path =
-            String::from_utf16(unsafe { wstr(name) }).map_err(|_| STATUS_OBJECT_NAME_NOT_FOUND)?;
+    /// The directory holding the last component of `path`, as the volume spells it, and that
+    /// component.
+    fn parent<'p>(&self, path: &'p str) -> Result<(Attr, String, &'p str), NTSTATUS> {
+        let (parent, leaf) = split_path(path)?;
+        let (attr, spelled) = self.walk(parent, true).map_err(|st| {
+            if st == STATUS_OBJECT_NAME_NOT_FOUND {
+                STATUS_OBJECT_PATH_NOT_FOUND
+            } else {
+                st
+            }
+        })?;
+        if !attr.is_dir() {
+            return Err(STATUS_OBJECT_PATH_NOT_FOUND);
+        }
+        Ok((attr, spelled, leaf))
+    }
+
+    fn walk(&self, path: &str, spell: bool) -> Result<(Attr, String), NTSTATUS> {
         let mut attr = self.fs.getattr(ROOT).map_err(status)?;
         let mut spelled = String::new();
         let mut parts = path.split('\\').filter(|c| !c.is_empty()).peekable();
@@ -434,9 +486,13 @@ impl Volume {
         Ok(())
     }
 
-    fn listing(&self, ctx: &FileCtx) -> Result<Arc<Vec<DirItem>>, NTSTATUS> {
+    /// The listing of a directory handle; `fresh` lists a writable volume again (a scan from
+    /// the start).
+    fn listing(&self, ctx: &FileCtx, fresh: bool) -> Result<Arc<Vec<DirItem>>, NTSTATUS> {
         let mut slot = ctx.listing.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(l) = &*slot {
+        if let Some(l) = &*slot
+            && !(fresh && self.writable)
+        {
             return Ok(l.clone());
         }
         let mut items = Vec::new();
@@ -462,6 +518,67 @@ impl Volume {
         *slot = Some(l.clone());
         Ok(l)
     }
+
+    /// Stores the context of a node just opened or created, and describes the node.
+    ///
+    /// # Safety
+    /// `ctx` and `info` are the out-arguments of `Open` or `Create`.
+    unsafe fn opened(
+        &self,
+        attr: &Attr,
+        spelled: &str,
+        write: bool,
+        ctx: *mut *mut c_void,
+        info: *mut FileInfo,
+    ) -> Result<(), NTSTATUS> {
+        let fh = if attr.is_dir() {
+            None
+        } else {
+            Some(
+                self.fs
+                    .open(attr.node, OpenFlags { write })
+                    .map_err(status)?,
+            )
+        };
+        let file = Box::into_raw(Box::new(FileCtx {
+            node: attr.node,
+            fh,
+            listing: Mutex::new(None),
+        }));
+        self.files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(file as usize);
+        // SAFETY: per the contract; `info` is an `FSP_FSCTL_OPEN_FILE_INFO`.
+        unsafe {
+            let open_info = &mut *info.cast::<OpenFileInfo>();
+            open_info.FileInfo = self.file_info(attr);
+            set_normalized_name(open_info, spelled);
+            *ctx = file.cast();
+        }
+        Ok(())
+    }
+
+    /// Describes a node after a change.
+    ///
+    /// # Safety
+    /// `info` is null or writable.
+    unsafe fn describe(&self, node: NodeId, info: *mut FileInfo) -> Result<(), NTSTATUS> {
+        let attr = self.fs.getattr(node).map_err(status)?;
+        if !info.is_null() {
+            // SAFETY: per the contract.
+            unsafe { *info = self.file_info(&attr) };
+        }
+        Ok(())
+    }
+
+    fn check_writable(&self) -> Result<(), NTSTATUS> {
+        if self.writable {
+            Ok(())
+        } else {
+            Err(STATUS_MEDIA_WRITE_PROTECTED)
+        }
+    }
 }
 
 /// # Safety
@@ -478,11 +595,11 @@ static INTERFACE: Interface = Interface {
     Create: Some(create),
     Open: Some(open),
     Overwrite: Some(overwrite),
-    Cleanup: 0,
+    Cleanup: Some(cleanup),
     Close: Some(close),
     Read: Some(read),
     Write: Some(write),
-    Flush: 0,
+    Flush: Some(flush),
     GetFileInfo: Some(get_file_info),
     SetBasicInfo: Some(set_basic_info),
     SetFileSize: Some(set_file_size),
@@ -515,8 +632,16 @@ unsafe extern "C" fn get_volume_info(fs: *mut FileSystem, info: *mut VolumeInfo)
     guard(|| {
         // SAFETY: see above.
         let (v, info) = unsafe { (Volume::of(fs), &mut *info) };
-        info.TotalSize = v.total;
-        info.FreeSize = 0;
+        let free = v.layer.as_ref().map_or(0, |dir| {
+            let mut free = 0u64;
+            // SAFETY: a NUL-terminated path; the outputs not wanted may be null.
+            unsafe {
+                GetDiskFreeSpaceExW(dir.as_ptr(), &mut free, ptr::null_mut(), ptr::null_mut())
+            };
+            free
+        });
+        info.TotalSize = v.total + free;
+        info.FreeSize = free;
         info.VolumeLabelLength = (v.label.len() * 2) as u16;
         info.VolumeLabel[..v.label.len()].copy_from_slice(&v.label);
         Ok(())
@@ -544,28 +669,50 @@ unsafe extern "C" fn get_security_by_name(
 }
 
 unsafe extern "C" fn create(
-    _fs: *mut FileSystem,
-    _name: *const u16,
-    _options: u32,
+    fs: *mut FileSystem,
+    name: *const u16,
+    options: u32,
     _access: u32,
     _attributes: u32,
     _sd: *mut c_void,
     _allocation: u64,
-    _ctx: *mut *mut c_void,
-    _info: *mut FileInfo,
+    ctx: *mut *mut c_void,
+    info: *mut FileInfo,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let v = unsafe { Volume::of(fs) };
+        v.check_writable()?;
+        // SAFETY: see above.
+        let path = unsafe { path_of(name) }?;
+        let (parent, spelled, leaf) = v.parent(&path)?;
+        let dir = options & FILE_DIRECTORY_FILE != 0;
+        let attr =
+            v.fs.create(parent.node, OsStr::new(leaf), dir)
+                .map_err(status)?;
+        let spelled = format!("{}\\{leaf}", spelled.trim_end_matches('\\'));
+        // SAFETY: see above.
+        unsafe { v.opened(&attr, &spelled, true, ctx, info) }
+    })
 }
 
+/// Opening an existing file to replace it empties it.
 unsafe extern "C" fn overwrite(
-    _fs: *mut FileSystem,
-    _ctx: *mut c_void,
+    fs: *mut FileSystem,
+    ctx: *mut c_void,
     _attributes: u32,
     _replace: u8,
     _allocation: u64,
-    _info: *mut FileInfo,
+    info: *mut FileInfo,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
+        v.check_writable()?;
+        v.fs.set_size(file.node, 0).map_err(status)?;
+        // SAFETY: see above.
+        unsafe { v.describe(file.node, info) }
+    })
 }
 
 unsafe extern "C" fn open(
@@ -577,15 +724,16 @@ unsafe extern "C" fn open(
     info: *mut FileInfo,
 ) -> NTSTATUS {
     guard(|| {
-        // As on write-protected media: asking to change, delete or re-secure anything fails
-        // here, so programs learn it when they open, not when they save.
-        if requested_access(options, access) & WRITE_ACCESS != 0
-            || options & FILE_DELETE_ON_CLOSE != 0
-        {
-            return Err(STATUS_MEDIA_WRITE_PROTECTED);
-        }
         // SAFETY: see above.
         let v = unsafe { Volume::of(fs) };
+        // As on write-protected media: asking to change, delete or re-secure anything fails
+        // here, so programs learn it when they open, not when they save.
+        let write = requested_access(options, access) & WRITE_ACCESS != 0
+            || options & FILE_DELETE_ON_CLOSE != 0;
+        if write {
+            v.check_writable()?;
+        }
+        // SAFETY: see above.
         let (attr, spelled) = unsafe { v.lookup_normalized(name) }?;
         if options & FILE_DIRECTORY_FILE != 0 && !attr.is_dir() {
             return Err(STATUS_NOT_A_DIRECTORY);
@@ -593,28 +741,8 @@ unsafe extern "C" fn open(
         if options & FILE_NON_DIRECTORY_FILE != 0 && attr.is_dir() {
             return Err(STATUS_FILE_IS_A_DIRECTORY);
         }
-        let fh = if attr.is_dir() {
-            None
-        } else {
-            Some(v.fs.open(attr.node, OpenFlags::default()).map_err(status)?)
-        };
-        let file = Box::into_raw(Box::new(FileCtx {
-            node: attr.node,
-            fh,
-            listing: Mutex::new(None),
-        }));
-        v.files
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(file as usize);
-        // SAFETY: see above; `info` is an `FSP_FSCTL_OPEN_FILE_INFO`.
-        unsafe {
-            let open_info = &mut *info.cast::<OpenFileInfo>();
-            open_info.FileInfo = v.file_info(&attr);
-            set_normalized_name(open_info, &spelled);
-            *ctx = file.cast();
-        }
-        Ok(())
+        // SAFETY: see above.
+        unsafe { v.opened(&attr, &spelled, write, ctx, info) }
     })
 }
 
@@ -663,70 +791,180 @@ unsafe fn set_normalized_name(info: &mut OpenFileInfo, path: &str) {
     info.NormalizedNameSize = bytes as u16;
 }
 
-// Changes through a handle opened without asking for write access (`MAXIMUM_ALLOWED`).
+// Changes. On a read-only volume they only arrive through a handle opened without asking for
+// write access (`MAXIMUM_ALLOWED`), and fail.
 
 unsafe extern "C" fn write(
-    _fs: *mut FileSystem,
-    _ctx: *mut c_void,
-    _buf: *mut c_void,
-    _offset: u64,
-    _len: u32,
-    _to_end: u8,
-    _constrained: u8,
-    _done: *mut u32,
-    _info: *mut FileInfo,
+    fs: *mut FileSystem,
+    ctx: *mut c_void,
+    buf: *mut c_void,
+    offset: u64,
+    len: u32,
+    to_end: u8,
+    constrained: u8,
+    done: *mut u32,
+    info: *mut FileInfo,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
+        v.check_writable()?;
+        let fh = file.fh.ok_or(STATUS_INVALID_DEVICE_REQUEST)?;
+        let size = v.fs.getattr(file.node).map_err(status)?.size;
+        let offset = if to_end != 0 { size } else { offset };
+        // Paging I/O (constrained) never extends the file.
+        let len = if constrained != 0 {
+            u64::from(len).min(size.saturating_sub(offset)) as usize
+        } else {
+            len as usize
+        };
+        let written = if len == 0 {
+            0
+        } else {
+            // SAFETY: WinFsp's buffer holds at least `len` bytes.
+            let data = unsafe { slice::from_raw_parts(buf.cast::<u8>(), len) };
+            v.fs.write(fh, offset, data).map_err(status)?
+        };
+        // SAFETY: see above.
+        unsafe {
+            *done = written;
+            v.describe(file.node, info)
+        }
+    })
 }
 
+/// Only the last-write time is kept; attributes and the other times are accepted and dropped.
 unsafe extern "C" fn set_basic_info(
-    _fs: *mut FileSystem,
-    _ctx: *mut c_void,
+    fs: *mut FileSystem,
+    ctx: *mut c_void,
     _attributes: u32,
     _creation: u64,
     _access: u64,
-    _write: u64,
+    write: u64,
     _change: u64,
-    _info: *mut FileInfo,
+    info: *mut FileInfo,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
+        v.check_writable()?;
+        if write != 0 {
+            v.fs.set_mtime(file.node, systime(write)).map_err(status)?;
+        }
+        // SAFETY: see above.
+        unsafe { v.describe(file.node, info) }
+    })
 }
 
 unsafe extern "C" fn set_file_size(
-    _fs: *mut FileSystem,
-    _ctx: *mut c_void,
-    _size: u64,
-    _allocation: u8,
-    _info: *mut FileInfo,
+    fs: *mut FileSystem,
+    ctx: *mut c_void,
+    size: u64,
+    allocation: u8,
+    info: *mut FileInfo,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
+        v.check_writable()?;
+        let current = v.fs.getattr(file.node).map_err(status)?.size;
+        // Space is not reserved: a smaller allocation only cuts what lies beyond it.
+        if allocation == 0 || size < current {
+            v.fs.set_size(file.node, size).map_err(status)?;
+        }
+        // SAFETY: see above.
+        unsafe { v.describe(file.node, info) }
+    })
 }
 
+/// Deleting only marks the file; [`cleanup`] deletes it when the last handle closes.
 unsafe extern "C" fn can_delete(
-    _fs: *mut FileSystem,
-    _ctx: *mut c_void,
+    fs: *mut FileSystem,
+    ctx: *mut c_void,
     _name: *const u16,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
+        v.check_writable()?;
+        let attr = v.fs.getattr(file.node).map_err(status)?;
+        if attr.is_dir() && !v.fs.readdir(file.node, 0, 1).map_err(status)?.is_empty() {
+            return Err(STATUS_DIRECTORY_NOT_EMPTY);
+        }
+        Ok(())
+    })
 }
 
 unsafe extern "C" fn rename(
-    _fs: *mut FileSystem,
+    fs: *mut FileSystem,
     _ctx: *mut c_void,
-    _name: *const u16,
-    _new_name: *const u16,
-    _replace: u8,
+    name: *const u16,
+    new_name: *const u16,
+    replace: u8,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    guard(|| {
+        // SAFETY: see above.
+        let v = unsafe { Volume::of(fs) };
+        v.check_writable()?;
+        // SAFETY: see above.
+        let (from, to) = unsafe { (path_of(name)?, path_of(new_name)?) };
+        let (parent, _, leaf) = v.parent(&from)?;
+        let (new_parent, _, new_leaf) = v.parent(&to)?;
+        v.fs.rename(
+            parent.node,
+            OsStr::new(leaf),
+            new_parent.node,
+            OsStr::new(new_leaf),
+            replace != 0,
+        )
+        .map_err(status)
+    })
 }
 
+/// Every file has the same descriptor; on a writable volume a new one is accepted and dropped.
 unsafe extern "C" fn set_security(
-    _fs: *mut FileSystem,
+    fs: *mut FileSystem,
     _ctx: *mut c_void,
     _what: u32,
     _sd: *mut c_void,
 ) -> NTSTATUS {
-    STATUS_MEDIA_WRITE_PROTECTED
+    // SAFETY: see above.
+    guard(|| unsafe { Volume::of(fs) }.check_writable())
+}
+
+/// Called (only for changed files) as each handle closes; deletes the file when it is marked
+/// for deletion and this was its last handle.
+unsafe extern "C" fn cleanup(fs: *mut FileSystem, _ctx: *mut c_void, name: *const u16, flags: u32) {
+    guard(|| {
+        // SAFETY: see above.
+        let v = unsafe { Volume::of(fs) };
+        if flags & CLEANUP_DELETE == 0 || !v.writable || name.is_null() {
+            return Ok(());
+        }
+        // SAFETY: see above.
+        let path = unsafe { path_of(name) }?;
+        let (parent, _, leaf) = v.parent(&path)?;
+        if let Err(e) = v.fs.remove(parent.node, OsStr::new(leaf)) {
+            tracing::warn!(path, error = %e, "delete failed");
+        }
+        Ok(())
+    });
+}
+
+unsafe extern "C" fn flush(fs: *mut FileSystem, ctx: *mut c_void, info: *mut FileInfo) -> NTSTATUS {
+    guard(|| {
+        // A null context flushes the volume: everything is written through already.
+        if ctx.is_null() {
+            return Ok(());
+        }
+        // SAFETY: see above.
+        let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
+        if let Some(fh) = file.fh {
+            v.fs.flush(fh).map_err(status)?;
+        }
+        // SAFETY: see above.
+        unsafe { v.describe(file.node, info) }
+    })
 }
 
 unsafe extern "C" fn close(fs: *mut FileSystem, ctx: *mut c_void) {
@@ -812,7 +1050,7 @@ unsafe extern "C" fn read_directory(
         let api = ffi::api().map_err(|_| STATUS_INVALID_DEVICE_REQUEST)?;
         // SAFETY: see above.
         let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
-        let items = v.listing(file)?;
+        let items = v.listing(file, marker.is_null())?;
         // The marker is the last name returned by the previous call on this handle.
         let start = if marker.is_null() {
             0

@@ -16,10 +16,12 @@ pub const STATUS_END_OF_FILE: NTSTATUS = 0xC000_0011_u32 as i32;
 pub const STATUS_OBJECT_NAME_NOT_FOUND: NTSTATUS = 0xC000_0034_u32 as i32;
 pub const STATUS_OBJECT_NAME_COLLISION: NTSTATUS = 0xC000_0035_u32 as i32;
 pub const STATUS_OBJECT_PATH_NOT_FOUND: NTSTATUS = 0xC000_003A_u32 as i32;
+pub const STATUS_OBJECT_NAME_INVALID: NTSTATUS = 0xC000_0033_u32 as i32;
 pub const STATUS_MEDIA_WRITE_PROTECTED: NTSTATUS = 0xC000_00A2_u32 as i32;
 pub const STATUS_FILE_IS_A_DIRECTORY: NTSTATUS = 0xC000_00BA_u32 as i32;
 pub const STATUS_UNEXPECTED_IO_ERROR: NTSTATUS = 0xC000_00E9_u32 as i32;
 pub const STATUS_NOT_A_DIRECTORY: NTSTATUS = 0xC000_0103_u32 as i32;
+pub const STATUS_DIRECTORY_NOT_EMPTY: NTSTATUS = 0xC000_0101_u32 as i32;
 
 pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 pub const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
@@ -28,6 +30,9 @@ pub const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
 pub const FILE_DIRECTORY_FILE: u32 = 0x1;
 pub const FILE_NON_DIRECTORY_FILE: u32 = 0x40;
 pub const FILE_DELETE_ON_CLOSE: u32 = 0x1000;
+
+/// `Flags` of `Cleanup` (`FSP_FILE_SYSTEM_CLEANUP_FLAGS`).
+pub const CLEANUP_DELETE: u32 = 0x01;
 
 /// Access rights that change a file or a directory (`winnt.h`): write data or append (add a
 /// file or a subdirectory), extended attributes, delete a child, write attributes, delete,
@@ -162,9 +167,9 @@ const _: () = {
 
 type Fs = *mut FileSystem;
 
-/// `FSP_FILE_SYSTEM_INTERFACE`. Operations a read-only volume does not need stay null (`0`),
-/// which WinFsp answers with `STATUS_INVALID_DEVICE_REQUEST`. `Create`, `Open` and `Overwrite`
-/// must all be set, or WinFsp refuses every open.
+/// `FSP_FILE_SYSTEM_INTERFACE`. Operations the volume does not need stay null (`0`), which
+/// WinFsp answers with `STATUS_INVALID_DEVICE_REQUEST`. `Create`, `Open` and `Overwrite` must
+/// all be set, or WinFsp refuses every open.
 #[repr(C)]
 pub struct Interface {
     pub GetVolumeInfo: Option<unsafe extern "C" fn(Fs, *mut VolumeInfo) -> NTSTATUS>,
@@ -189,7 +194,7 @@ pub struct Interface {
     >,
     pub Overwrite:
         Option<unsafe extern "C" fn(Fs, *mut c_void, u32, u8, u64, *mut FileInfo) -> NTSTATUS>,
-    pub Cleanup: usize,
+    pub Cleanup: Option<unsafe extern "C" fn(Fs, *mut c_void, *const u16, u32)>,
     pub Close: Option<unsafe extern "C" fn(Fs, *mut c_void)>,
     pub Read:
         Option<unsafe extern "C" fn(Fs, *mut c_void, *mut c_void, u64, u32, *mut u32) -> NTSTATUS>,
@@ -206,7 +211,7 @@ pub struct Interface {
             *mut FileInfo,
         ) -> NTSTATUS,
     >,
-    pub Flush: usize,
+    pub Flush: Option<unsafe extern "C" fn(Fs, *mut c_void, *mut FileInfo) -> NTSTATUS>,
     pub GetFileInfo: Option<unsafe extern "C" fn(Fs, *mut c_void, *mut FileInfo) -> NTSTATUS>,
     pub SetBasicInfo: Option<
         unsafe extern "C" fn(Fs, *mut c_void, u32, u64, u64, u64, u64, *mut FileInfo) -> NTSTATUS,
