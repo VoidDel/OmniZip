@@ -99,7 +99,6 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     if let Some(w) = app.get_webview_window("main") {
         return Ok(w);
     }
-    let transparent = system::material_supported();
     let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("OmniZip")
         .inner_size(1180.0, 760.0)
@@ -109,19 +108,24 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .background_color(window_background(app));
     #[cfg(target_os = "macos")]
     {
+        // The traffic lights sit in the middle of the sidebar's top row (`--titlebar-h`). The y
+        // here is not the buttons' top: it sets the title bar's height to the button height plus
+        // y, and the buttons keep their distance from its bottom edge.
         b = b
             .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true);
+            .hidden_title(true)
+            .traffic_light_position(tauri::LogicalPosition::new(13.0, 22.5));
     }
     #[cfg(windows)]
     {
-        b = b.decorations(false).transparent(transparent);
+        b = b
+            .decorations(false)
+            .transparent(system::material_supported());
     }
     // Linux draws its own title bar and window buttons too (the window manager still resizes it
     // from its edges).
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
-        let _ = transparent;
         b = b.decorations(false);
     }
     if let Some(fx) = current_effects(app) {

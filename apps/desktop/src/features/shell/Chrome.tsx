@@ -361,18 +361,25 @@ export function Sidebar() {
   const label = running.length ? t('task.running', { count: running.length }) : t('task.summary', { count: list.length });
   const inSettings = view === 'settings';
   const toggleLabel = t(collapsed ? 'nav.expand' : 'nav.collapse');
+  // On macOS the top row belongs to the traffic lights, so the name goes on the row below.
+  const mac = document.documentElement.dataset.platform === 'mac';
+  const brand = (
+    <>
+      <Logo />
+      <span className="brandname grow" data-tauri-drag-region>
+        OmniZip
+        {appVersion && (
+          <span className="ver" data-tauri-drag-region>
+            {appVersion}
+          </span>
+        )}
+      </span>
+    </>
+  );
   return (
     <aside className="sidebar">
       <div className="sb-top" data-tauri-drag-region>
-        <Logo />
-        <span className="brandname grow" data-tauri-drag-region>
-          OmniZip
-          {appVersion && (
-            <span className="ver" data-tauri-drag-region>
-              {appVersion}
-            </span>
-          )}
-        </span>
+        {!mac && brand}
         <button
           type="button"
           className="iconbtn sm"
@@ -383,6 +390,11 @@ export function Sidebar() {
           <Icon name="sidebar" />
         </button>
       </div>
+      {mac && (
+        <div className="sb-brand" data-tauri-drag-region>
+          {brand}
+        </div>
+      )}
       <nav className="sb-nav">
         <button type="button" className="nav-item" aria-current={view === 'home'} title={t('nav.home')} onClick={() => setView('home')}>
           <Icon name="home" />

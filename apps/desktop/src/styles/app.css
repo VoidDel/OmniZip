@@ -50,7 +50,7 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .window.collapsed { --sidebar-w: 52px; }
 /* Linux windows get neither a title bar nor a shadow from the system: a hairline marks the edge. */
 :root[data-platform="linux"] body::after { content: ""; position: fixed; inset: 0; border: 1px solid var(--border-default); pointer-events: none; z-index: 1000; }
-:root[data-platform="mac"] .window.collapsed { --sidebar-w: 84px; }
+:root[data-platform="mac"] .window.collapsed { --sidebar-w: 112px; }
 
 .sidebar {
   background: var(--sidebar-material);
@@ -61,9 +61,11 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
   overflow: hidden;
 }
 .sb-top { height: var(--titlebar-h); display: flex; align-items: center; padding: 0 10px 0 14px; gap: 8px; flex: none; }
-:root[data-platform="mac"] .sb-top { padding-left: 84px; }
-.sb-top .brandname { font-weight: 600; font-size: .93rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sb-top .ver { margin-left: 6px; font-weight: 400; font-size: .75rem; color: var(--fg-muted); }
+/* macOS: the traffic lights and the collapse button share the top row; the name has its own below. */
+:root[data-platform="mac"] .sb-top { padding-left: 84px; justify-content: flex-end; }
+.sb-brand { height: 36px; display: flex; align-items: center; padding: 0 10px 0 14px; gap: 8px; flex: none; }
+.brandname { font-weight: 600; font-size: .93rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brandname .ver { margin-left: 6px; font-weight: 400; font-size: .75rem; color: var(--fg-muted); }
 .logo { width: 22px; height: 22px; flex: none; }
 .sb-nav { padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; flex: none; }
 .nav-item {
@@ -121,12 +123,12 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .progress > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width 200ms linear; }
 .progress.indeterminate > i { width: 30% !important; animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
-.window.collapsed .lbl, .window.collapsed .sb-sep, .window.collapsed .tree, .window.collapsed .brandname,
+.window.collapsed .lbl, .window.collapsed .sb-sep, .window.collapsed .tree, .window.collapsed .brandname, .window.collapsed .sb-brand,
 .window.collapsed .task-sum .progress { display: none; }
 .window.collapsed .nav-item, .window.collapsed .sb-sub .nav-item { justify-content: center; padding: 0; }
 .window.collapsed .nav-item .chev { display: none; }
 .window.collapsed .sb-top { justify-content: center; padding: 0; gap: 4px; }
-:root[data-platform="mac"] .window.collapsed .sb-top { padding-left: 72px; }
+:root[data-platform="mac"] .window.collapsed .sb-top { padding: 0 6px 0 78px; justify-content: flex-end; }
 .window.collapsed .sb-top .logo, .window.collapsed .sb-top .brandname { display: none; }
 
 .maincol { display: flex; flex-direction: column; min-width: 0; background: var(--bg-canvas); position: relative; }
@@ -140,7 +142,6 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .titlebar .searchbox { grid-column: 2; }
 .titlebar .ttl { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: .86rem; color: var(--fg-secondary); overflow: hidden; white-space: nowrap; height: 100%; }
 .titlebar .ttl b { color: var(--fg-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-:root[data-platform="mac"] .titlebar .ttl { justify-content: center; }
 /* Linux: the window's edges and corners (ResizeEdges), above everything else. */
 .resize-edges > div { position: fixed; z-index: 1001; }
 .resize-edges .n, .resize-edges .s { left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
@@ -481,6 +482,8 @@ pre.code { margin: 0; font-family: var(--font-mono); font-size: .82rem; line-hei
   .sidebar { position: absolute; top: 0; bottom: 0; left: 0; width: 260px; z-index: 20; transform: translateX(-100%); transition: transform 220ms; background: var(--bg-sidebar); }
   .window.sb-open .sidebar { transform: none; box-shadow: var(--shadow-2); }
   .menu-toggle { display: inline-flex; }
+  /* The sidebar is a drawer now: the menu button moves clear of the traffic lights. */
+  :root[data-platform="mac"] .tb-side:not(.end) { padding-left: 84px; }
   .settings { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .set-nav { display: flex; }
   .set-nav .nav-item { width: auto; flex: none; }
