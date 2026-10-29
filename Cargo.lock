@@ -2988,8 +2988,10 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
  "chardetng",
+ "crc32fast",
  "encoding_rs",
  "filetime",
+ "flate2",
  "globset",
  "serde",
  "serde_json",

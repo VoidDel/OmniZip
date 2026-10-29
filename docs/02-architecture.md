@@ -160,7 +160,7 @@ pub struct JobCtx {
 - 取消：`CancellationToken` 在每个条目边界与每 1 MB 数据块检查。
 - 暂停：协作式检查点（v1.1）。
 - 进度事件通过 Tauri `Channel` 推送，节流 ≤ 30 Hz，多条合并。
-- 引擎内并行：7z LZMA2 / xz / zstd 的多线程由引擎参数控制；ZIP 多文件采用流水线（读取 → 压缩 → 写入）。
+- 引擎内并行：7z LZMA2 / xz / zstd 的多线程由引擎参数控制；ZIP 小文件在工作线程上各自压缩进内存、由写入线程按顺序追加（`add_prepared_file`），大文件与 gzip 用 `omnizip_core::deflate::ParDeflate` 分块并行压缩，大文件先写成临时文件中的单条目压缩包再并入（`merge_archive`）。
 
 ### 4.5 条目索引与前端分页
 

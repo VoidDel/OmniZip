@@ -15,6 +15,7 @@
 
 pub mod appdirs;
 pub mod archive;
+pub mod deflate;
 pub mod detect;
 pub mod encoding;
 pub mod entry;

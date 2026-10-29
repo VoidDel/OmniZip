@@ -18,6 +18,8 @@ encoding_rs.workspace = true
 chardetng.workspace = true
 unicode-normalization.workspace = true
 filetime.workspace = true
+flate2.workspace = true
+crc32fast.workspace = true
 tempfile.workspace = true
 globset.workspace = true
 time = { version = "0.3", features = ["local-offset"] }

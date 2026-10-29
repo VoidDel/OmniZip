@@ -401,3 +401,119 @@ fn only_unix_entries_carry_a_mode() {
     assert!(dos.win_attrs.is_some());
     assert_eq!(unix.unix_mode.map(|m| m & 0o777), Some(0o755));
 }
+
+fn noisy(len: usize) -> Vec<u8> {
+    let mut x = 0x9E37_79B9_u32;
+    (0..len)
+        .map(|i| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            if i % 5 == 0 {
+                x as u8
+            } else {
+                b"OmniZip!"[i % 8]
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn threads_do_not_change_small_entries() {
+    // Files compressed on worker threads come out byte for byte as the archive writer writes
+    // them on one thread.
+    let d = tempfile::tempdir().unwrap();
+    let src = sample_tree(d.path());
+    for i in 0..40 {
+        fs::write(src.join(format!("src/m{i:02}.bin")), noisy(1000 + i * 997)).unwrap();
+    }
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    let make = |threads, name: &str| {
+        let dest = d.path().join(name);
+        let o = WriteOptions {
+            format: FormatId::Zip,
+            threads,
+            ..Default::default()
+        };
+        ZipEngine.create(&dest, &sources, &o, &ctx()).unwrap();
+        fs::read(dest).unwrap()
+    };
+    assert_eq!(make(1, "one.zip"), make(4, "four.zip"));
+}
+
+#[test]
+fn large_files_deflated_on_several_threads() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("大文件");
+    fs::create_dir_all(&src).unwrap();
+    let big = noisy(20 << 20);
+    fs::write(src.join("巨大.bin"), &big).unwrap();
+    fs::write(src.join("small.txt"), b"small").unwrap();
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    let make = |threads, name: &str| {
+        let dest = d.path().join(name);
+        let o = WriteOptions {
+            format: FormatId::Zip,
+            threads,
+            ..Default::default()
+        };
+        ZipEngine.create(&dest, &sources, &o, &ctx()).unwrap();
+        dest
+    };
+    let (one, four) = (make(1, "one.zip"), make(4, "four.zip"));
+    // Same entries, same metadata, same content.
+    let mut a = ZipArchive::new(File::open(&one).unwrap()).unwrap();
+    let mut b = ZipArchive::new(File::open(&four).unwrap()).unwrap();
+    assert_eq!(a.len(), b.len());
+    for i in 0..a.len() {
+        let (x, mut y) = (a.by_index(i).unwrap(), b.by_index(i).unwrap());
+        assert_eq!(x.name().unwrap(), y.name().unwrap());
+        assert_eq!(x.compression(), y.compression());
+        assert_eq!(x.crc32(), y.crc32());
+        assert_eq!(x.size(), y.size());
+        assert_eq!(x.unix_mode(), y.unix_mode());
+        assert_eq!(x.last_modified(), y.last_modified());
+        assert_eq!(x.system(), y.system());
+        assert_eq!(x.external_attributes(), y.external_attributes());
+        let mut back = Vec::new();
+        y.read_to_end(&mut back).unwrap();
+        if x.name().unwrap().ends_with("巨大.bin") {
+            assert_eq!(back, big);
+            assert!(y.compressed_size() < big.len() as u64);
+        }
+    }
+    // And extraction through the engine checks every CRC.
+    let mut r = open(&four);
+    let eo = ExtractOptions {
+        destination: d.path().join("x"),
+        ..Default::default()
+    };
+    let rep = extract(r.as_mut(), &eo, Selection::all(), &ctx()).unwrap();
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+    assert_eq!(fs::read(d.path().join("x/大文件/巨大.bin")).unwrap(), big);
+}
+
+#[test]
+fn update_adds_large_files_on_several_threads() {
+    let d = tempfile::tempdir().unwrap();
+    let a = build(d.path(), &WriteOptions::default());
+    let big = d.path().join("add.bin");
+    let data = noisy(17 << 20);
+    fs::write(&big, &data).unwrap();
+    let sources = source::collect(&[big], &CollectOptions::default(), &ctx()).unwrap();
+    let o = WriteOptions {
+        threads: 4,
+        ..Default::default()
+    };
+    ZipEngine
+        .update(&a, FormatId::Zip, &[UpdateOp::Add { sources }], &o, &ctx())
+        .unwrap();
+    let mut z = ZipArchive::new(File::open(&a).unwrap()).unwrap();
+    let mut back = Vec::new();
+    z.by_name("add.bin")
+        .unwrap()
+        .read_to_end(&mut back)
+        .unwrap();
+    assert_eq!(back, data);
+    assert!(z.by_name("项目/说明.txt").is_ok(), "existing entries kept");
+}

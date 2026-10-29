@@ -2,7 +2,7 @@
 
 use std::io::{self, Read, Write};
 
-use omnizip_core::{Codec, Level};
+use omnizip_core::{Codec, Level, deflate::ParDeflate};
 
 /// A boxed decoder.
 pub type Decoder<'a> = Box<dyn Read + Send + 'a>;
@@ -34,6 +34,8 @@ pub fn decoder<'a, R: Read + Send + 'a>(codec: Codec, input: R) -> io::Result<De
 pub enum Encoder<W: Write> {
     Plain(W),
     Gzip(flate2::write::GzEncoder<W>),
+    /// Gzip deflated on several threads.
+    GzipMt(ParGzip<W>),
     Bzip2(bzip2::write::BzEncoder<W>),
     Xz(liblzma::write::XzEncoder<W>),
     Zstd(zstd::stream::write::Encoder<'static, W>),
@@ -68,6 +70,9 @@ impl<W: Write + Send> Encoder<W> {
         };
         let n = native_level(codec, level);
         Ok(match codec {
+            Codec::Gzip if threads > 1 && n > 0 => {
+                Encoder::GzipMt(ParGzip::new(out, n, threads, gzip_name, gzip_mtime)?)
+            }
             Codec::Gzip => {
                 let mut b = flate2::GzBuilder::new().mtime(gzip_mtime);
                 if let Some(name) = gzip_name {
@@ -131,6 +136,7 @@ impl<W: Write + Send> Encoder<W> {
         match self {
             Encoder::Plain(w) => Ok(w),
             Encoder::Gzip(e) => e.finish(),
+            Encoder::GzipMt(e) => e.finish(),
             Encoder::Bzip2(e) => e.finish(),
             Encoder::Xz(e) => e.finish(),
             Encoder::Zstd(e) => e.finish(),
@@ -148,6 +154,7 @@ impl<W: Write> Write for Encoder<W> {
         match self {
             Encoder::Plain(w) => w.write(buf),
             Encoder::Gzip(e) => e.write(buf),
+            Encoder::GzipMt(e) => e.deflate.write(buf),
             Encoder::Bzip2(e) => e.write(buf),
             Encoder::Xz(e) => e.write(buf),
             Encoder::Zstd(e) => e.write(buf),
@@ -160,6 +167,7 @@ impl<W: Write> Write for Encoder<W> {
         match self {
             Encoder::Plain(w) => w.flush(),
             Encoder::Gzip(e) => e.flush(),
+            Encoder::GzipMt(e) => e.deflate.flush(),
             Encoder::Bzip2(e) => e.flush(),
             Encoder::Xz(e) => e.flush(),
             Encoder::Zstd(e) => e.flush(),
@@ -170,6 +178,47 @@ impl<W: Write> Write for Encoder<W> {
 }
 
 /// Parsed fields of a gzip member header.
+/// A gzip member deflated on several threads: the header flate2 would write, a
+/// [`ParDeflate`] stream and the CRC / size trailer.
+pub struct ParGzip<W: Write> {
+    deflate: ParDeflate<W>,
+}
+
+impl<W: Write> ParGzip<W> {
+    fn new(
+        mut out: W,
+        level: u32,
+        threads: u32,
+        name: Option<&str>,
+        mtime: u32,
+    ) -> io::Result<Self> {
+        let mut header = vec![0x1F, 0x8B, 8, if name.is_some() { 0x08 } else { 0 }];
+        header.extend_from_slice(&mtime.to_le_bytes());
+        // Extra flags as flate2 sets them: 2 = best compression, 4 = fastest.
+        header.push(match level {
+            9.. => 2,
+            ..=1 => 4,
+            _ => 0,
+        });
+        header.push(255); // OS unknown, as flate2 writes it
+        if let Some(name) = name {
+            header.extend_from_slice(name.as_bytes());
+            header.push(0);
+        }
+        out.write_all(&header)?;
+        Ok(Self {
+            deflate: ParDeflate::new(out, level, threads as usize),
+        })
+    }
+
+    fn finish(self) -> io::Result<W> {
+        let (mut out, s) = self.deflate.finish()?;
+        out.write_all(&s.crc32.to_le_bytes())?;
+        out.write_all(&(s.input_size as u32).to_le_bytes())?;
+        Ok(out)
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct GzipHeader {
     pub name: Option<Vec<u8>>,
@@ -234,20 +283,25 @@ mod tests {
 
     #[test]
     fn gzip_header_name() {
-        let mut e = Encoder::new(
-            Some(Codec::Gzip),
-            Vec::new(),
-            Level::Normal,
-            1,
-            Some("report.csv"),
-            1_700_000_000,
-        )
-        .unwrap();
-        e.write_all(b"a,b\n").unwrap();
-        let out = e.finish().unwrap();
+        let gzip = |threads| {
+            let mut e = Encoder::new(
+                Some(Codec::Gzip),
+                Vec::new(),
+                Level::Normal,
+                threads,
+                Some("report.csv"),
+                1_700_000_000,
+            )
+            .unwrap();
+            e.write_all(b"a,b\n").unwrap();
+            e.finish().unwrap()
+        };
+        let out = gzip(1);
         let h = parse_gzip_header(&out).unwrap();
         assert_eq!(h.name.as_deref(), Some(&b"report.csv"[..]));
         assert_eq!(h.mtime, 1_700_000_000);
+        // Several threads write the same header.
+        assert_eq!(gzip(4)[..21], out[..21]);
         assert_eq!(parse_gzip_header(b"nope"), None);
     }
 }

@@ -22,6 +22,8 @@ use zip::{
     ZipWriter, result::ZipError, write::SimpleFileOptions,
 };
 
+mod parallel;
+
 const UTF8_FLAG: u16 = 1 << 11;
 
 /// The ZIP engine.
@@ -76,7 +78,7 @@ impl Engine for ZipEngine {
             source::file_count(sources),
         );
         let mut report = Report::default();
-        write_sources(&mut zw, sources, opts, ctx, &mut report)?;
+        write_sources(&mut zw, sources, opts, spill_dir(dest), ctx, &mut report)?;
         let out = zw.finish().map_err(|e| map_err(e, dest))?;
         report.outputs = out.commit()?;
         ctx.finish();
@@ -382,51 +384,85 @@ fn zip_time(t: Option<std::time::SystemTime>) -> DateTime {
         .unwrap_or_default()
 }
 
+/// Writes the sources. On several threads, entries are compressed in parallel (see
+/// [`parallel`]); `spill` holds temporary files for large ones. Encrypted entries can only be
+/// written by the archive writer, one after the other.
 fn write_sources<W: io::Write + io::Seek>(
     zw: &mut ZipWriter<W>,
     sources: &[Source],
     opts: &WriteOptions,
+    spill: &Path,
     ctx: &JobCtx,
     report: &mut Report,
 ) -> Result<()> {
     let (method, level) = method_and_level(opts)?;
-    for s in sources {
-        ctx.check()?;
-        ctx.begin_file(&s.archive_path);
-        let mut base = SimpleFileOptions::default()
-            .compression_method(method)
-            .compression_level(level)
-            .last_modified_time(zip_time(s.mtime))
-            .large_file(s.size >= 0xFFFF_FFFF);
-        if let Some(mode) = s.mode {
-            base = base.unix_permissions(mode);
+    let threads = opts.effective_threads() as usize;
+    if threads < 2 || opts.password.is_some() {
+        let pw = opts.password.as_deref();
+        return sources
+            .iter()
+            .try_for_each(|s| write_one(zw, s, method, level, pw, ctx, report));
+    }
+    parallel::write_sources(zw, sources, method, level, threads, spill, ctx, report)
+}
+
+/// Where temporary files for an archive at `dest` go: next to it.
+fn spill_dir(dest: &Path) -> &Path {
+    dest.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+}
+
+fn file_options(s: &Source, method: CompressionMethod, level: Option<i64>) -> SimpleFileOptions {
+    let base = SimpleFileOptions::default()
+        .compression_method(method)
+        .compression_level(level)
+        .last_modified_time(zip_time(s.mtime))
+        .large_file(s.size >= 0xFFFF_FFFF);
+    match s.mode {
+        Some(mode) => base.unix_permissions(mode),
+        None => base,
+    }
+}
+
+/// Writes one entry through the archive writer.
+fn write_one<W: io::Write + io::Seek>(
+    zw: &mut ZipWriter<W>,
+    s: &Source,
+    method: CompressionMethod,
+    level: Option<i64>,
+    password: Option<&str>,
+    ctx: &JobCtx,
+    report: &mut Report,
+) -> Result<()> {
+    ctx.check()?;
+    ctx.begin_file(&s.archive_path);
+    let base = file_options(s, method, level);
+    let name = s.archive_path.trim_end_matches('/');
+    match &s.kind {
+        SourceKind::Dir => {
+            zw.add_directory(format!("{name}/"), base)
+                .map_err(|e| map_err(e, &s.fs_path))?;
+            report.dirs += 1;
         }
-        let name = s.archive_path.trim_end_matches('/');
-        match &s.kind {
-            SourceKind::Dir => {
-                zw.add_directory(format!("{name}/"), base)
-                    .map_err(|e| map_err(e, &s.fs_path))?;
-                report.dirs += 1;
-            }
-            SourceKind::Symlink { target } => {
-                zw.add_symlink(name, target, base)
-                    .map_err(|e| map_err(e, &s.fs_path))?;
-                report.links += 1;
-            }
-            SourceKind::File => {
-                let fo = match &opts.password {
-                    Some(pw) => base.with_aes_encryption(AesMode::Aes256, pw),
-                    None => base,
-                };
-                zw.start_file(name, fo)
-                    .map_err(|e| map_err(e, &s.fs_path))?;
-                let f = File::open(&s.fs_path).map_err(|e| Error::io(e, &s.fs_path))?;
-                let mut r = ProgressReader::new(f, ctx);
-                let n = io::copy(&mut r, zw).map_err(|e| Error::io(e, &s.fs_path))?;
-                report.files += 1;
-                report.bytes += n;
-                ctx.file_done();
-            }
+        SourceKind::Symlink { target } => {
+            zw.add_symlink(name, target, base)
+                .map_err(|e| map_err(e, &s.fs_path))?;
+            report.links += 1;
+        }
+        SourceKind::File => {
+            let fo = match password {
+                Some(pw) => base.with_aes_encryption(AesMode::Aes256, pw),
+                None => base,
+            };
+            zw.start_file(name, fo)
+                .map_err(|e| map_err(e, &s.fs_path))?;
+            let f = File::open(&s.fs_path).map_err(|e| Error::io(e, &s.fs_path))?;
+            let mut r = ProgressReader::new(f, ctx);
+            let n = io::copy(&mut r, zw).map_err(|e| Error::io(e, &s.fs_path))?;
+            report.files += 1;
+            report.bytes += n;
+            ctx.file_done();
         }
     }
     Ok(())
@@ -502,7 +538,7 @@ fn update(path: &Path, ops: &[UpdateOp], opts: &WriteOptions, ctx: &JobCtx) -> R
         .map_err(|e| map_err(e, path))?;
     }
     let owned: Vec<Source> = adds.into_iter().cloned().collect();
-    write_sources(&mut zw, &owned, opts, ctx, &mut report)?;
+    write_sources(&mut zw, &owned, opts, spill_dir(path), ctx, &mut report)?;
     let out = zw.finish().map_err(|e| map_err(e, path))?;
     drop(src);
     report.outputs = out.commit()?;
