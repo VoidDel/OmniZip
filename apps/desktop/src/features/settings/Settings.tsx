@@ -313,6 +313,7 @@ export function SettingsView() {
         const darks = themes.filter((x) => x.appearance === 'dark');
         const a = settings.appearance;
         const accentIsCustom = a.accent.startsWith('#');
+        const accentIsPicked = accentIsCustom && !ACCENTS.includes(a.accent.toUpperCase());
         const accentColor = theme?.tokens.accent ?? '#2F6FED';
         return (
           <>
@@ -348,7 +349,10 @@ export function SettingsView() {
                   {ACCENTS.map((c) => (
                     <button key={c} type="button" className="sw" style={{ background: c }} aria-pressed={a.accent.toUpperCase() === c} aria-label={c} onClick={() => set((s) => (s.appearance.accent = c))} />
                   ))}
-                  <input type="color" aria-label={t('settings.appearance.accentCustom')} value={accentIsCustom ? a.accent : accentColor} onChange={(e) => set((s) => (s.appearance.accent = e.target.value.toUpperCase()))} />
+                  {/* Native colour input stays invisible on top of a rainbow swatch; once a non-preset colour is picked the swatch shows it in the middle. */}
+                  <label className={'sw sw-custom' + (accentIsPicked ? ' on' : '')} title={t('settings.appearance.accentCustom')} style={accentIsPicked ? ({ '--c': a.accent } as React.CSSProperties) : undefined}>
+                    <input type="color" aria-label={t('settings.appearance.accentCustom')} value={accentIsCustom ? a.accent : accentColor} onChange={(e) => set((s) => (s.appearance.accent = e.target.value.toUpperCase()))} />
+                  </label>
                 </div>
               </Row>
               <Row label={t('settings.appearance.material')} hint={sys.materialSupported ? t('settings.appearance.materialHint') : t('settings.appearance.materialUnavailable')}>
