@@ -403,26 +403,44 @@ pub fn copy_with_progress(
     ctx: &JobCtx,
     limit: Option<u64>,
 ) -> Result<u64> {
-    let mut buf = vec![0u8; 1 << 20];
+    copy_with_buffer(reader, writer, &mut vec![0u8; 1 << 20], ctx, limit)
+}
+
+/// [`copy_with_progress`] with the caller's buffer, which is filled before each write: a small
+/// file takes one write, and callers copying many files allocate the buffer once.
+pub fn copy_with_buffer(
+    reader: &mut dyn Read,
+    writer: &mut dyn Write,
+    buf: &mut [u8],
+    ctx: &JobCtx,
+    limit: Option<u64>,
+) -> Result<u64> {
     let mut total = 0u64;
     loop {
         ctx.check()?;
-        let n = match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted && !ctx.cancel.is_cancelled() => {
-                continue;
+        let mut filled = 0;
+        while filled < buf.len() {
+            match reader.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted && !ctx.cancel.is_cancelled() => {}
+                Err(e) => return Err(e.into()),
             }
-            Err(e) => return Err(e.into()),
-        };
-        total += n as u64;
+        }
+        if filled == 0 {
+            break;
+        }
+        total += filled as u64;
         if let Some(limit) = limit
             && total > limit
         {
             return Err(Error::new(ErrorCode::CompressionBomb).with("size", total));
         }
-        writer.write_all(&buf[..n])?;
-        ctx.add_bytes(n as u64);
+        writer.write_all(&buf[..filled])?;
+        ctx.add_bytes(filled as u64);
+        if filled < buf.len() {
+            break;
+        }
     }
     Ok(total)
 }

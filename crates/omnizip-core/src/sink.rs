@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Error, ErrorCode, JobCtx, Result,
     entry::{Entry, EntryId, EntryKind},
-    job::{Confirm, Conflict, ConflictChoice, ConflictDecision, copy_with_progress},
+    job::{
+        Confirm, Conflict, ConflictChoice, ConflictDecision, copy_with_buffer, copy_with_progress,
+    },
     options::{ExtractOptions, OverwriteMode, PathMode, SymlinkPolicy},
     origin::{self, Origin},
     path::{TargetOs, UnsafePathMode, numbered_name, sanitize},
@@ -141,6 +143,9 @@ pub struct FsSink {
     os: TargetOs,
     report: Report,
     dir_times: Vec<(PathBuf, SystemTime)>,
+    /// Directories known to be real directories (checked or created by this extraction), so the
+    /// entries below them do not check them again.
+    known_dirs: HashSet<PathBuf>,
     /// Directories this extraction created: only these take a mode from the archive, never a
     /// directory that was already there (the destination itself included).
     created_dirs: HashSet<PathBuf>,
@@ -156,6 +161,8 @@ pub struct FsSink {
     total_written: u64,
     archive_size: u64,
     bomb_confirmed: bool,
+    /// Copy buffer shared by all files (allocated on first use).
+    buf: Vec<u8>,
 }
 
 impl FsSink {
@@ -174,6 +181,7 @@ impl FsSink {
             None
         };
         Ok(Self {
+            known_dirs: HashSet::from([root.clone()]),
             root,
             opts,
             selection,
@@ -189,6 +197,7 @@ impl FsSink {
             total_written: 0,
             archive_size,
             bomb_confirmed: false,
+            buf: Vec::new(),
         })
     }
 
@@ -260,9 +269,19 @@ impl FsSink {
     /// Creates the directories leading to `comps` (excluding the last), refusing to follow
     /// links that could lead outside the root.
     fn ensure_parents(&mut self, comps: &[String]) -> Result<PathBuf> {
+        let parents = &comps[..comps.len().saturating_sub(1)];
+        let target = self.root.join(comps.iter().collect::<PathBuf>());
+        // Directories are only recorded once every directory above them is: a known parent
+        // means the whole chain is.
+        if target.parent().is_some_and(|p| self.known_dirs.contains(p)) || parents.is_empty() {
+            return Ok(target);
+        }
         let mut cur = self.root.clone();
-        for c in &comps[..comps.len().saturating_sub(1)] {
+        for c in parents {
             cur.push(c);
+            if self.known_dirs.contains(&cur) {
+                continue;
+            }
             match fs::symlink_metadata(&cur) {
                 Ok(m) if m.file_type().is_symlink() => {
                     return Err(Error::new(ErrorCode::UnsafeLink).with("path", cur.display()));
@@ -280,8 +299,9 @@ impl FsSink {
                     Err(e) => return Err(Error::io(e, &cur)),
                 },
             }
+            self.known_dirs.insert(cur.clone());
         }
-        Ok(self.root.join(comps.iter().collect::<PathBuf>()))
+        Ok(target)
     }
 
     fn decide_conflict(
@@ -373,86 +393,127 @@ impl FsSink {
         }
     }
 
-    fn write_file(
+    /// Writes a new file in place (`file` was just created at `target`). Whatever goes wrong,
+    /// the partial file is removed; a broken entry is skipped with a warning.
+    fn write_new(
         &mut self,
         entry: &Entry,
         data: EntryData<'_>,
         target: &Path,
+        file: File,
         ctx: &JobCtx,
-    ) -> Result<()> {
+    ) -> Result<Option<PathBuf>> {
+        match self.fill(entry, data, file, target, target, ctx) {
+            Ok(n) => {
+                self.placed(target, entry, n, ctx)?;
+                Ok(Some(target.to_owned()))
+            }
+            Err(e) => {
+                let _ = fs::remove_file(target);
+                self.skip_broken(entry, e).map(|()| None)
+            }
+        }
+    }
+
+    /// Replaces an existing file (or writes a renamed one): the content goes to a temporary file
+    /// renamed into place, so the old file stays whole until the new one is.
+    fn write_replacing(
+        &mut self,
+        entry: &Entry,
+        data: EntryData<'_>,
+        target: PathBuf,
+        ctx: &JobCtx,
+    ) -> Result<Option<PathBuf>> {
         let parent = target.parent().unwrap_or(&self.root);
         let tmp = tempfile::Builder::new()
             .prefix(".omnizip-")
             .suffix(".part")
             .tempfile_in(parent)
             .map_err(|e| Error::io(e, parent))?;
-        // Declared sizes are exact for ZIP / 7z / tar / RAR; anything beyond is a lie.
-        let limit = entry
-            .size_known
-            .then(|| entry.size.saturating_add(64 * 1024));
-        let result: Result<(tempfile::TempPath, u64)> = match data {
-            EntryData::Stream(reader) => {
-                let (file, path) = tmp.into_parts();
-                let mut w = io::BufWriter::with_capacity(1 << 20, file);
-                let n = copy_with_progress(reader, &mut w, ctx, limit);
-                let n = n.and_then(|n| {
-                    let f = w
-                        .into_inner()
-                        .map_err(|e| Error::io(e.into_error(), target))?;
-                    finish_file(&f, entry, &self.opts);
-                    Ok(n)
-                });
-                n.map(|n| (path, n))
-            }
-            EntryData::WriteTo(write) => {
-                let path = tmp.into_temp_path();
-                write(&path).and_then(|()| {
-                    let n = fs::metadata(&path).map_err(|e| Error::io(e, target))?.len();
-                    if let Some(limit) = limit
-                        && n > limit
-                    {
-                        return Err(Error::new(ErrorCode::CompressionBomb).with("size", n));
-                    }
-                    ctx.add_bytes(n);
-                    if let Ok(f) = File::options().write(true).open(&path) {
-                        finish_file(&f, entry, &self.opts);
-                    }
-                    Ok((path, n))
-                })
-            }
-            EntryData::None => {
-                let (file, path) = tmp.into_parts();
-                finish_file(&file, entry, &self.opts);
-                Ok((path, 0))
-            }
-        };
-        let (tmp_path, n) = match result {
-            Ok(v) => v,
-            Err(e)
-                if matches!(
-                    e.code(),
-                    ErrorCode::CrcMismatch | ErrorCode::Corrupt | ErrorCode::Truncated
-                ) =>
-            {
-                self.report
-                    .warn(e.code(), &entry.path, e.param("detail").map(str::to_owned));
-                self.report.skipped += 1;
-                return Ok(());
-            }
-            Err(e) => return Err(e),
+        let (file, tmp_path) = tmp.into_parts();
+        let n = match self.fill(entry, data, file, &tmp_path, &target, ctx) {
+            Ok(n) => n,
+            Err(e) => return self.skip_broken(entry, e).map(|()| None),
         };
         // Replace a read-only file we are allowed to overwrite.
-        if let Ok(m) = fs::metadata(target)
+        if let Ok(m) = fs::metadata(&target)
             && m.permissions().readonly()
         {
             let mut p = m.permissions();
             #[allow(clippy::permissions_set_readonly_false)]
             p.set_readonly(false);
-            let _ = fs::set_permissions(target, p);
+            let _ = fs::set_permissions(&target, p);
         }
         tmp_path
-            .persist(target)
-            .map_err(|e| Error::io(e.error, target))?;
+            .persist(&target)
+            .map_err(|e| Error::io(e.error, &target))?;
+        self.placed(&target, entry, n, ctx)?;
+        Ok(Some(target))
+    }
+
+    /// Writes an entry's content into `file` (open at `path`) and returns its size. Engines
+    /// that write files themselves (`WriteTo`) get `path`; errors name `target`.
+    fn fill(
+        &mut self,
+        entry: &Entry,
+        data: EntryData<'_>,
+        mut file: File,
+        path: &Path,
+        target: &Path,
+        ctx: &JobCtx,
+    ) -> Result<u64> {
+        // Declared sizes are exact for ZIP / 7z / tar / RAR; anything beyond is a lie.
+        let limit = entry
+            .size_known
+            .then(|| entry.size.saturating_add(64 * 1024));
+        match data {
+            EntryData::Stream(reader) => {
+                if self.buf.is_empty() {
+                    self.buf = vec![0; 1 << 20];
+                }
+                let n = copy_with_buffer(reader, &mut file, &mut self.buf, ctx, limit)?;
+                finish_file(&file, entry, &self.opts);
+                Ok(n)
+            }
+            EntryData::WriteTo(write) => {
+                drop(file);
+                write(path)?;
+                let n = fs::metadata(path).map_err(|e| Error::io(e, target))?.len();
+                if let Some(limit) = limit
+                    && n > limit
+                {
+                    return Err(Error::new(ErrorCode::CompressionBomb).with("size", n));
+                }
+                ctx.add_bytes(n);
+                if let Ok(f) = File::options().write(true).open(path) {
+                    finish_file(&f, entry, &self.opts);
+                }
+                Ok(n)
+            }
+            EntryData::None => {
+                finish_file(&file, entry, &self.opts);
+                Ok(0)
+            }
+        }
+    }
+
+    /// Checksum and data errors skip the entry with a warning; anything else stops the job.
+    fn skip_broken(&mut self, entry: &Entry, e: Error) -> Result<()> {
+        if matches!(
+            e.code(),
+            ErrorCode::CrcMismatch | ErrorCode::Corrupt | ErrorCode::Truncated
+        ) {
+            self.report
+                .warn(e.code(), &entry.path, e.param("detail").map(str::to_owned));
+            self.report.skipped += 1;
+            Ok(())
+        } else {
+            Err(e)
+        }
+    }
+
+    /// A file now in place: permissions, origin, totals and the streaming bomb check.
+    fn placed(&mut self, target: &Path, entry: &Entry, n: u64, ctx: &JobCtx) -> Result<()> {
         apply_permissions(target, entry, self.opts.restore_permissions);
         if let Some(origin) = &self.origin {
             let _ = origin::apply(target, origin);
@@ -550,17 +611,20 @@ impl ExtractSink for FsSink {
                 if self.opts.path_mode == PathMode::Flat {
                     return Ok(());
                 }
-                match fs::symlink_metadata(&target) {
-                    Ok(m) if m.is_dir() => {}
-                    Ok(_) => {
-                        self.report
-                            .warn(ErrorCode::AlreadyExists, &entry.path, None);
-                        return Ok(());
+                if !self.known_dirs.contains(&target) {
+                    match fs::symlink_metadata(&target) {
+                        Ok(m) if m.is_dir() => {}
+                        Ok(_) => {
+                            self.report
+                                .warn(ErrorCode::AlreadyExists, &entry.path, None);
+                            return Ok(());
+                        }
+                        Err(_) => {
+                            fs::create_dir(&target).map_err(|e| Error::io(e, &target))?;
+                            self.created_dirs.insert(target.clone());
+                        }
                     }
-                    Err(_) => {
-                        fs::create_dir(&target).map_err(|e| Error::io(e, &target))?;
-                        self.created_dirs.insert(target.clone());
-                    }
+                    self.known_dirs.insert(target.clone());
                 }
                 if self.opts.restore_permissions
                     && let Some(mode) = entry.unix_mode
@@ -598,17 +662,38 @@ impl ExtractSink for FsSink {
                 }
             }
             EntryKind::File => {
-                let Some(target) = self.decide_conflict(&target, entry, ctx)? else {
-                    return Ok(());
+                // A new file is written in place; only an existing one goes through the
+                // conflict decision (and is then replaced through a temporary file).
+                let placed = match create_new(&target) {
+                    Ok(file) => self.write_new(entry, data, &target, file, ctx)?,
+                    // Something is there (Windows may report a directory as access denied).
+                    Err(_) if fs::symlink_metadata(&target).is_ok() => {
+                        match self.decide_conflict(&target, entry, ctx)? {
+                            Some(t) => self.write_replacing(entry, data, t, ctx)?,
+                            None => return Ok(()),
+                        }
+                    }
+                    Err(e) => return Err(Error::io(e, &target)),
                 };
-                self.write_file(entry, data, &target, ctx)?;
-                self.written.insert(comps.join("/"), target);
+                if let Some(t) = placed {
+                    self.written.insert(comps.join("/"), t);
+                }
                 ctx.file_done();
             }
             EntryKind::Other => unreachable!(),
         }
         Ok(())
     }
+}
+
+/// Creates a file for writing, failing when anything is already at `path`. On Unix it stays
+/// private (`0o600`) until [`apply_permissions`].
+fn create_new(path: &Path) -> io::Result<File> {
+    let mut o = File::options();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path)
 }
 
 fn finish_file(file: &File, entry: &Entry, opts: &ExtractOptions) {
@@ -623,9 +708,9 @@ fn finish_file(file: &File, entry: &Entry, opts: &ExtractOptions) {
     }
 }
 
-/// Final permissions of an extracted file, which was written through a private temporary file
-/// (`0o600`): the entry's own less the umask with `restore` (as `tar` does for ordinary users),
-/// otherwise those of a new file.
+/// Final permissions of an extracted file, which was written private (`0o600`): the entry's own
+/// less the umask with `restore` (as `tar` does for ordinary users), otherwise those of a new
+/// file.
 #[cfg(unix)]
 fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
     use std::os::unix::fs::PermissionsExt;
@@ -877,6 +962,44 @@ mod tests {
         assert_eq!((r.files, r.dirs, r.bytes), (1, 1, 5));
         let leftovers: Vec<_> = fs::read_dir(d.path().join("a/b")).unwrap().collect();
         assert_eq!(leftovers.len(), 1, "no temp files left behind");
+    }
+
+    #[test]
+    fn a_new_file_that_fails_leaves_nothing() {
+        // Half the content, then the job is cancelled.
+        struct Half<'a>(bool, &'a JobCtx);
+        impl Read for Half<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if std::mem::replace(&mut self.0, true) {
+                    self.1.cancel.cancel();
+                    return Err(Error::cancelled().into());
+                }
+                buf[..4].copy_from_slice(b"half");
+                Ok(4)
+            }
+        }
+        let d = tempfile::tempdir().unwrap();
+        let ctx = JobCtx::default();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        let e = file_entry(0, "a/part.bin", &[0; 100]);
+        let err = s
+            .entry(&e, EntryData::Stream(&mut Half(false, &ctx)), &ctx)
+            .unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Cancelled);
+        assert_eq!(fs::read_dir(d.path().join("a")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_directory_in_the_way_of_a_file_is_reported() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir(d.path().join("taken")).unwrap();
+        let ctx = JobCtx::default();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        put(&mut s, &file_entry(0, "taken", b"x"), b"x", &ctx);
+        let r = s.finish(&ctx).unwrap();
+        assert!(d.path().join("taken").is_dir());
+        assert_eq!(r.skipped, 1);
+        assert_eq!(r.warnings[0].code, ErrorCode::AlreadyExists);
     }
 
     #[cfg(unix)]

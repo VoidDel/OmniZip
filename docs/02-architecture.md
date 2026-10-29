@@ -133,7 +133,7 @@ pub struct JobCtx {
 ```
 
 `ExtractSink` 的实现：
-- `FsSink`：处理长路径（Windows `\\?\` 前缀）、保留名、时间戳、权限、符号链接策略、Mark-of-the-Web、原子写入（临时文件 + rename）、磁盘空间预检。
+- `FsSink`：处理长路径（Windows `\\?\` 前缀）、保留名、时间戳、权限、符号链接策略、Mark-of-the-Web、新文件直接写入、替换已有文件时经临时文件 + rename、磁盘空间预检。
 - `MemorySink`：预览与测试。
 - `StreamSink`：CLI 的 stdout 管道。
 
