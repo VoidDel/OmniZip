@@ -233,42 +233,37 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::new())
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::Destroyed => {
-                if let Some(state) = window.try_state::<AppState>() {
-                    state
-                        .shell_requests
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .remove(window.label());
-                }
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event
+                && let Some(state) = window.try_state::<AppState>()
+            {
+                state
+                    .shell_requests
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(window.label());
             }
-            // Mounts live in this process: when they should outlive the window, closing the
-            // main window hides it, and starting OmniZip again shows it.
-            tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
-                if let Some(state) = window.try_state::<AppState>()
-                    && !state.settings().mount.unmount_on_exit
-                    && !state.mounts.is_empty()
-                {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-            _ => {}
         })
         .setup(move |app| {
             let handle = app.handle().clone();
             let sweeper = handle.clone();
-            // Mounts come back only with the main window: a file-manager verb shown in a mini
-            // or dialog window ends the process when it is done.
+            // Mounts are restored, watched and unmounted on exit only by a process with the
+            // main window: a file-manager verb shown in a mini or dialog window ends the process
+            // when it is done, and must leave the mounts alone.
             let main = !matches!(&invocation, Some(inv) if inv.verb.is_background() || inv.verb.is_dialog());
+            handle
+                .state::<AppState>()
+                .main_window
+                .store(main, std::sync::atomic::Ordering::SeqCst);
             std::thread::spawn(move || {
                 let state = sweeper.state::<AppState>();
                 dragout::sweep(&state);
                 clipboard::sweep_unused(&state);
-                mounts::MountManager::sweep(&state);
-                if main && state.settings().mount.restore_on_start {
-                    state.mounts.restore(&sweeper);
+                if main {
+                    state.mounts.watch_running(&sweeper);
+                    if state.settings().mount.restore_on_start {
+                        state.mounts.restore(&sweeper);
+                    }
                 }
             });
             match invocation {
@@ -352,7 +347,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building OmniZip")
         .run(|app, event| match event {
-            tauri::RunEvent::Exit => app.state::<AppState>().mounts.unmount_all(),
+            // The mounts live in omnizip-mountd and stay unless the settings say otherwise.
+            tauri::RunEvent::Exit => {
+                let state = app.state::<AppState>();
+                if state.main_window.load(std::sync::atomic::Ordering::SeqCst)
+                    && state.settings().mount.unmount_on_exit
+                {
+                    state.mounts.unmount_all();
+                }
+            }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Opened { urls } => open_urls(app, &urls),
             _ => {}

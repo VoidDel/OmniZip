@@ -286,7 +286,7 @@ function MountList() {
   return (
     <div className="set-group">
       {mounts.map((m) => (
-        <Row key={m.id} label={m.label} hint={`${m.archive} · ${m.warming ? t('mount.warming') : fmt.size(m.cacheBytes)}`}>
+        <Row key={m.id} label={m.label} hint={`${m.archive} · ${m.warming ? t('mount.warming') : fmt.size(m.cacheBytes)}${m.elevated ? ` · ${t('mount.elevatedBadge')}` : ''}`}>
           <span className="mono hint">{m.mountPoint}</span>
           <button type="button" className="iconbtn sm" title={t('mount.open')} aria-label={t('mount.open')} onClick={() => void api.reveal(mountRoot(m))}>
             <Icon name="folderOpen" />

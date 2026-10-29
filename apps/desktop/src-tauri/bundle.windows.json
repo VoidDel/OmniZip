@@ -4,7 +4,8 @@
   },
   "bundle": {
     "externalBin": [
-      "binaries/omnizip"
+      "binaries/omnizip",
+      "binaries/omnizip-mountd"
     ],
     "resources": {
       "binaries/omnizip_shell.dll": "omnizip_shell.dll",

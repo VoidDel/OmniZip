@@ -19,6 +19,12 @@ ${UnStrRep}
     Delete "$INSTDIR\omnizip_shell.dll.old"
     Rename "$INSTDIR\omnizip_shell.dll" "$INSTDIR\omnizip_shell.dll.old"
     Delete /REBOOTOK "$INSTDIR\omnizip_shell.dll.old"
+  ; The mount daemon may be running (it keeps mounts after OmniZip quits, possibly elevated):
+  ; it keeps running from the renamed file, and the next one starts from the new copy.
+  IfFileExists "$INSTDIR\omnizip-mountd.exe" 0 +4
+    Delete "$INSTDIR\omnizip-mountd.exe.old"
+    Rename "$INSTDIR\omnizip-mountd.exe" "$INSTDIR\omnizip-mountd.exe.old"
+    Delete /REBOOTOK "$INSTDIR\omnizip-mountd.exe.old"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -61,6 +67,13 @@ ${UnStrRep}
 
 !macro NSIS_HOOK_PREUNINSTALL
   ExecWait '"$INSTDIR\omnizip-desktop.exe" --unregister-shell'
+
+  ; Stop the user's mount daemon (its mounts go with it); an elevated one, which this cannot
+  ; stop, keeps running from the renamed file, removed once it has exited.
+  nsExec::Exec 'taskkill /IM omnizip-mountd.exe'
+  IfFileExists "$INSTDIR\omnizip-mountd.exe" 0 +3
+    Rename "$INSTDIR\omnizip-mountd.exe" "$INSTDIR\omnizip-mountd.exe.old"
+    Delete /REBOOTOK "$INSTDIR\omnizip-mountd.exe.old"
 
   ; Remove our entry from the user PATH.
   ReadRegStr $0 HKCU "Environment" "Path"

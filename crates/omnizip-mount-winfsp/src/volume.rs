@@ -878,6 +878,10 @@ impl Mount for WinFspMount {
         // SAFETY: the volume lives as long as `self`.
         unsafe { &*self.volume }.alive.load(Ordering::SeqCst)
     }
+
+    fn global(&self) -> bool {
+        self.global
+    }
 }
 
 impl WinFspMount {

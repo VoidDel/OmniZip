@@ -12,6 +12,7 @@ members = [
   "crates/omnizip-cli",
   "crates/omnizip-vfs",
   "crates/omnizip-mount-winfsp",
+  "crates/omnizip-mountd",
   "crates/omnizip-shell-win",
   "apps/desktop/src-tauri",
 ]
@@ -26,6 +27,7 @@ default-members = [
   "crates/omnizip-cli",
   "crates/omnizip-vfs",
   "crates/omnizip-mount-winfsp",
+  "crates/omnizip-mountd",
 ]
 
 [workspace.package]
@@ -47,6 +49,7 @@ omnizip-formats = { path = "crates/omnizip-formats" }
 omnizip-i18n = { path = "crates/omnizip-i18n" }
 omnizip-vfs = { path = "crates/omnizip-vfs" }
 omnizip-mount-winfsp = { path = "crates/omnizip-mount-winfsp" }
+omnizip-mountd = { path = "crates/omnizip-mountd" }
 
 bitflags = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

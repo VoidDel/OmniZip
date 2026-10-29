@@ -1023,8 +1023,9 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
   }, []);
   const ready = !!probe && probe.built && probe.health === 'ready';
   const solid = archive.mountClass === 'C';
+  const windows = useApp((s) => s.boot?.system.platform === 'win');
 
-  const start = async () => {
+  const start = async (elevated = false) => {
     if (password !== null && !password) return setError(t('pwd.empty'));
     setBusy(true);
     setError('');
@@ -1036,6 +1037,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
         label: label.trim() || null,
         warm: solid && warm,
         password,
+        elevated,
       });
       if (password) void api.setArchivePassword(archive.id, password);
       close();
@@ -1045,7 +1047,9 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
       s.toast({ tone: 'success', text: t('mount.mounted', { point: m.mountPoint }), action: { label: t('mount.open'), run: () => void api.reveal(mountRoot(m)) } });
     } catch (e) {
       const err = asError(e);
-      if (err.key === 'password-required' || err.key === 'wrong-password') {
+      if (err.key === 'cancelled') {
+        // The administrator prompt was declined.
+      } else if (err.key === 'password-required' || err.key === 'wrong-password') {
         setPassword((p) => p ?? '');
         if (err.key === 'wrong-password') setError(t('pwd.wrong'));
       } else if (err.key === 'already-exists') {
@@ -1111,6 +1115,18 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
       footer={
         <>
           <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          {windows && (
+            <button
+              type="button"
+              className="btn"
+              disabled={!ready || busy || as === 'folder'}
+              title={as === 'folder' ? t('mount.elevatedDriveOnly') : t('mount.elevatedHint')}
+              onClick={() => void start(true)}
+            >
+              <Icon name="shield" />
+              <span>{t('mount.startElevated')}</span>
+            </button>
+          )}
           <button type="button" className="btn primary" disabled={!ready || busy || (as === 'folder' && !folder.trim())} onClick={() => void start()}>
             <Icon name="drive" />
             <span>{t('mount.start')}</span>

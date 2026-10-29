@@ -69,6 +69,9 @@ pub struct AppState {
     /// Items copied or cut from an open archive (`crate::clipboard`).
     pub clip: Mutex<Option<crate::clipboard::Clip>>,
     pub mounts: MountManager,
+    /// This process shows the main window (not just a file-manager verb's mini or dialog
+    /// window): it watches, restores and on exit unmounts the mounts.
+    pub main_window: AtomicBool,
 }
 
 impl AppState {
@@ -104,6 +107,7 @@ impl AppState {
             cache_dir: appdirs::cache_dir(),
             clip: Mutex::new(None),
             mounts: MountManager::default(),
+            main_window: AtomicBool::new(false),
         }
     }
 

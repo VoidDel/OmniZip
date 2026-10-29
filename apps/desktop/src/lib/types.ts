@@ -351,6 +351,10 @@ export interface MountInfo {
   cacheBytes: number;
   /** A solid archive is being decoded into the cache. */
   warming: boolean;
+  /** Mounted as administrator (by the elevated mount daemon). */
+  elevated: boolean;
+  /** A drive visible to every session (registered with the Mount Manager). */
+  global: boolean;
 }
 
 export interface MountRequest {
@@ -362,6 +366,8 @@ export interface MountRequest {
   label?: string | null;
   warm?: boolean | null;
   password?: string | null;
+  /** Mount through the elevated daemon (asks for administrator rights). */
+  elevated?: boolean;
 }
 
 /** Items copied or cut from an open archive. */

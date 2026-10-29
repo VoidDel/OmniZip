@@ -301,6 +301,19 @@ impl Error {
             message: self.to_string(),
         }
     }
+
+    /// The error a report came from (received over IPC); an unknown code becomes an internal
+    /// error carrying the message.
+    pub fn from_report(r: &ErrorReport) -> Self {
+        match ErrorCode::ALL.iter().find(|c| c.id() == r.code) {
+            Some(&code) => Self {
+                code,
+                params: r.params.clone(),
+                source: None,
+            },
+            None => Self::internal(&r.message),
+        }
+    }
 }
 
 impl fmt::Debug for Error {

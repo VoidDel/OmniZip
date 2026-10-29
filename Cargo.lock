@@ -3015,6 +3015,7 @@ dependencies = [
  "omnizip-formats",
  "omnizip-i18n",
  "omnizip-mount-winfsp",
+ "omnizip-mountd",
  "omnizip-shell-win",
  "omnizip-vfs",
  "serde",
@@ -3110,6 +3111,22 @@ dependencies = [
  "omnizip-core",
  "omnizip-formats",
  "omnizip-vfs",
+ "tempfile",
+ "tracing",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "omnizip-mountd"
+version = "0.1.0"
+dependencies = [
+ "omnizip-core",
+ "omnizip-formats",
+ "omnizip-i18n",
+ "omnizip-mount-winfsp",
+ "omnizip-vfs",
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "windows-sys 0.61.2",

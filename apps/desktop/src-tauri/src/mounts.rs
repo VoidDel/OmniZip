@@ -1,25 +1,20 @@
-//! Mounted archives (`docs/12-mount.md`). The app hosts its mounts itself: each one is an
-//! [`ArchiveFs`] over its own reader, served by the platform backend from the backend's threads
-//! while the app runs. Closing OmniZip unmounts them, unless the settings keep them mounted, in
-//! which case closing the main window only hides it.
+//! Mounted archives (`docs/12-mount.md`). They live in `omnizip-mountd`, the user's mount
+//! daemon, which OmniZip starts on the first mount: they stay mounted after OmniZip exits,
+//! unless the settings unmount them on exit. "Mount as administrator" goes to the elevated
+//! daemon, started through the UAC prompt (§4).
 //!
-//! The list of mounts is saved whenever the user mounts or unmounts, so that "restore on start"
-//! can mount the same archives again.
+//! This module is their client: it lists both daemons, routes unmounts to the right one, and
+//! turns their change notifications into `mounts://changed` events. The user's daemon saves its
+//! list for "restore on start".
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::Mutex,
 };
 
-use omnizip_core::{
-    Error, ErrorCode, FixedPassword, JobCtx, MountClass, NullProgress, OpenOptions,
-    encoding::NameEncoding,
-};
-use omnizip_formats::shared;
-use omnizip_vfs::{ArchiveFs, CacheLimits, FsOptions, Mount, MountError, MountOptions};
+use omnizip_core::{Error, ErrorCode};
+use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response, SavedMount};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -29,6 +24,7 @@ use crate::{ops, state::AppState};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MountInfo {
+    /// Which daemon and which of its mounts (see [`app_id`]).
     pub id: u64,
     pub archive: String,
     /// File name of the archive.
@@ -41,6 +37,10 @@ pub struct MountInfo {
     pub cache_bytes: u64,
     /// A solid archive is being decoded into the cache.
     pub warming: bool,
+    /// Mounted as administrator.
+    pub elevated: bool,
+    /// A drive visible to every session (registered with the Mount Manager).
+    pub global: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,47 +55,37 @@ pub struct MountRequest {
     /// Decode a solid archive into the cache right away (the setting when absent).
     pub warm: Option<bool>,
     pub password: Option<String>,
+    /// Mount through the elevated daemon (asks for administrator rights).
+    #[serde(default)]
+    pub elevated: bool,
 }
 
-/// A mount to restore at start-up.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Saved {
-    archive: String,
-    mount_point: String,
-    label: String,
+/// Mount ids are per daemon; the app's id also says which daemon (odd: the elevated one).
+fn app_id(level: Level, id: u64) -> u64 {
+    id * 2 + u64::from(level == Level::Admin)
 }
 
-struct Live {
-    id: u64,
-    archive: PathBuf,
-    label: String,
-    fs: Arc<ArchiveFs>,
-    mount: Box<dyn Mount>,
-    warming: Arc<AtomicBool>,
+fn daemon_id(id: u64) -> (Level, u64) {
+    let level = if id % 2 == 1 {
+        Level::Admin
+    } else {
+        Level::User
+    };
+    (level, id / 2)
 }
 
-impl Live {
-    fn info(&self) -> MountInfo {
-        let (mem, disk) = self.fs.cache().usage();
-        MountInfo {
-            id: self.id,
-            archive: self.archive.to_string_lossy().into_owned(),
-            name: ops::file_name(&self.archive),
-            label: self.label.clone(),
-            mount_point: self.mount.mount_point().to_string_lossy().into_owned(),
-            format: self.fs.info().format.name().to_owned(),
-            cache_bytes: mem + disk,
-            warming: self.warming.load(Ordering::SeqCst),
-        }
-    }
-
-    fn saved(&self) -> Saved {
-        Saved {
-            archive: self.archive.to_string_lossy().into_owned(),
-            mount_point: self.mount.mount_point().to_string_lossy().into_owned(),
-            label: self.label.clone(),
-        }
+fn info(level: Level, s: MountStatus) -> MountInfo {
+    MountInfo {
+        id: app_id(level, s.id),
+        name: ops::file_name(&s.archive),
+        archive: s.archive.to_string_lossy().into_owned(),
+        label: s.label,
+        mount_point: s.mount_point.to_string_lossy().into_owned(),
+        format: s.format,
+        cache_bytes: s.cache_bytes,
+        warming: s.warming,
+        elevated: level == Level::Admin,
+        global: s.global,
     }
 }
 
@@ -126,211 +116,188 @@ pub fn free_letters() -> Vec<String> {
     }
 }
 
-fn backend() -> Result<Box<dyn omnizip_vfs::MountBackend>, Error> {
-    #[cfg(windows)]
-    {
-        Ok(Box::new(omnizip_mount_winfsp::WinFsp))
+#[cfg(windows)]
+use omnizip_mountd::client as daemons;
+
+/// No mount daemon on this platform yet: none runs, and none can be started.
+#[cfg(not(windows))]
+mod daemons {
+    use std::path::Path;
+
+    use omnizip_core::{Error, ErrorCode};
+    use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response};
+
+    fn unsupported() -> Error {
+        Error::new(ErrorCode::UnsupportedOperation).with("operation", "mount")
     }
-    #[cfg(not(windows))]
-    {
-        Err(Error::new(ErrorCode::UnsupportedOperation).with("operation", "mount"))
+
+    pub fn call(_: Level, _: &Request) -> Result<Response, Error> {
+        Err(unsupported())
+    }
+
+    pub fn running(_: Level) -> bool {
+        false
+    }
+
+    pub fn watch(_: Level, _: impl FnMut()) -> Result<(), Error> {
+        Err(unsupported())
+    }
+
+    pub fn ensure_user_daemon(_: &Path) -> Result<(), Error> {
+        Err(unsupported())
+    }
+
+    pub fn mount_elevated(_: &Path, _: &MountSpec) -> Result<MountStatus, Error> {
+        Err(unsupported())
     }
 }
 
-fn mount_error(e: MountError) -> Error {
-    match e {
-        MountError::NotInstalled(what) => {
-            Error::new(ErrorCode::MissingDependency).detail(format!("WinFsp: {what}"))
-        }
-        MountError::InUse(p) => Error::new(ErrorCode::AlreadyExists).with("path", p.display()),
-        MountError::NoDriveLetter => Error::new(ErrorCode::AlreadyExists).with("path", "D: – Z:"),
-        MountError::System(m) => Error::new(ErrorCode::Io).with("path", "").detail(m),
+/// `omnizip-mountd`, installed next to the app.
+fn daemon_exe() -> Result<PathBuf, Error> {
+    let exe = std::env::current_exe()?
+        .with_file_name(format!("omnizip-mountd{}", std::env::consts::EXE_SUFFIX));
+    if exe.is_file() {
+        Ok(exe)
+    } else {
+        Err(Error::new(ErrorCode::MissingDependency)
+            .with("path", exe.display())
+            .detail("omnizip-mountd"))
     }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[derive(Default)]
 pub struct MountManager {
-    live: Mutex<Vec<Live>>,
-    next: AtomicU64,
+    /// Daemons whose notifications a thread forwards.
+    watching: Mutex<HashSet<Level>>,
 }
 
 impl MountManager {
-    fn file(state: &AppState) -> Option<PathBuf> {
-        state.data_dir.as_ref().map(|d| d.join("mounts.json"))
-    }
-
-    fn save(&self, state: &AppState) {
-        let Some(f) = Self::file(state) else { return };
-        let saved: Vec<Saved> = self
-            .live
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .map(Live::saved)
-            .collect();
-        if let Some(d) = f.parent() {
-            let _ = std::fs::create_dir_all(d);
-        }
-        if let Ok(text) = serde_json::to_string_pretty(&saved) {
-            let _ = std::fs::write(&f, text);
-        }
-    }
-
     fn changed(app: &AppHandle) {
         let _ = app.emit("mounts://changed", ());
     }
 
-    /// Live mounts. Volumes the system took down on its own are dropped from the list.
+    /// The mounts of both daemons.
     pub fn list(&self) -> Vec<MountInfo> {
-        let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
-        live.retain(|l| l.mount.is_alive());
-        live.iter().map(Live::info).collect()
+        [Level::User, Level::Admin]
+            .into_iter()
+            .filter_map(|level| match daemons::call(level, &Request::List) {
+                Ok(Response::Mounts { mounts }) => {
+                    Some(mounts.into_iter().map(move |m| info(level, m)))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Forwards a daemon's notifications as `mounts://changed`, until it exits.
+    fn watch(&self, app: &AppHandle, level: Level) {
+        if !lock(&self.watching).insert(level) {
+            return;
+        }
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _ = daemons::watch(level, || Self::changed(&app));
+            lock(&app.state::<AppState>().mounts.watching).remove(&level);
+            // The daemon exited: its mounts are gone.
+            Self::changed(&app);
+        });
+    }
+
+    /// Watches the daemons that run already (mounts kept from an earlier OmniZip).
+    pub fn watch_running(&self, app: &AppHandle) {
+        for level in [Level::User, Level::Admin] {
+            if daemons::running(level) {
+                self.watch(app, level);
+            }
+        }
     }
 
     /// Mounts an archive, or returns its mount if it is mounted already.
     pub fn mount(&self, app: &AppHandle, req: MountRequest) -> Result<MountInfo, Error> {
-        let state = app.state::<AppState>();
         let path = PathBuf::from(&req.path);
-        if let Some(l) = self
-            .live
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .find(|l| same_path(&l.archive, &path))
+        if let Some(m) = self
+            .list()
+            .into_iter()
+            .find(|m| same_path(Path::new(&m.archive), &path))
         {
-            return Ok(l.info());
+            return Ok(m);
         }
-        let backend = backend()?;
+        let state = app.state::<AppState>();
         let settings = state.settings().mount;
         let opened = req.archive_id.and_then(|id| state.archive(id));
-        let password = req.password.clone().or_else(|| {
-            opened
-                .as_ref()
-                .and_then(|a| a.password.lock().unwrap_or_else(|e| e.into_inner()).clone())
-        });
-        let encoding: Option<NameEncoding> = opened.as_ref().and_then(|a| a.encoding);
-        let ctx = match &password {
-            Some(p) => JobCtx::new(Arc::new(NullProgress), Arc::new(FixedPassword(p.clone()))),
-            None => JobCtx::default(),
-        };
-        let oo = OpenOptions {
-            password: password.clone(),
-            encoding,
-            locale: Some(omnizip_i18n::detect_language(None).to_owned()),
-        };
-        let reader = shared().open(&path, &oo, &ctx)?;
-        // Without a password, encrypted entries could be listed but never read.
-        if reader.info().encrypted && password.is_none() {
-            return Err(Error::new(ErrorCode::PasswordRequired).with("path", path.display()));
-        }
-        let label = req
-            .label
+        let password = req
+            .password
             .clone()
-            .filter(|l| !l.trim().is_empty())
-            .unwrap_or_else(|| omnizip_vfs::archivefs::volume_label(reader.info()));
-        let fs = Arc::new(
-            ArchiveFs::new(
-                reader,
-                FsOptions {
-                    cache: CacheLimits {
-                        disk: u64::from(settings.cache_gb.max(1)) << 30,
-                        ..CacheLimits::default()
-                    },
-                    cache_dir: state.cache_dir.as_ref().map(|d| d.join("mount")),
-                    label: Some(label.clone()),
-                    password,
-                    ..FsOptions::default()
-                },
-            )
-            .map_err(|e| Error::io(e, state.cache_dir.clone().unwrap_or_default()))?,
-        );
-        match fs.check_password() {
-            Err(omnizip_vfs::FsError::Access) => {
-                return Err(Error::new(ErrorCode::WrongPassword).with("path", path.display()));
-            }
-            // A damaged entry does not keep the rest of the archive from being mounted.
-            Err(e) => tracing::warn!("mount: checking the password: {e}"),
-            Ok(()) => {}
-        }
-        let opts = MountOptions {
+            .or_else(|| opened.as_ref().and_then(|a| lock(&a.password).clone()));
+        let spec = MountSpec {
+            archive: path,
             mount_point: req
                 .mount_point
                 .as_deref()
                 .filter(|p| !p.is_empty())
                 .map(PathBuf::from),
-            label: Some(label.clone()),
-            read_only: true,
+            label: req.label.clone(),
+            password,
+            encoding: opened
+                .as_ref()
+                .and_then(|a| a.encoding)
+                .map(|e| e.label().to_owned()),
             offline_attribute: settings.offline_attribute,
+            cache_bytes: u64::from(settings.cache_gb.max(1)) << 30,
+            warm: req.warm.unwrap_or(settings.warm_solid),
         };
-        let mount = backend.mount(fs.clone(), &opts).map_err(mount_error)?;
-        let live = Live {
-            id: self.next.fetch_add(1, Ordering::Relaxed) + 1,
-            archive: path,
-            label,
-            fs: fs.clone(),
-            mount,
-            warming: Arc::new(AtomicBool::new(false)),
+        let exe = daemon_exe()?;
+        let (level, status) = if req.elevated {
+            // A missing or wrong password is reported before the UAC prompt, not after it.
+            omnizip_mountd::open_volume(&spec, None)?;
+            (Level::Admin, daemons::mount_elevated(&exe, &spec)?)
+        } else {
+            daemons::ensure_user_daemon(&exe)?;
+            match daemons::call(Level::User, &Request::Mount { spec })? {
+                Response::Mounted { mount } => (Level::User, mount),
+                r => return Err(Error::internal(format!("unexpected answer {r:?}"))),
+            }
         };
-        let info = live.info();
-        let warm = req.warm.unwrap_or(settings.warm_solid) && fs.mount_class() == MountClass::C;
-        let warming = live.warming.clone();
-        self.live
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(live);
-        self.save(&state);
-        if warm {
-            warming.store(true, Ordering::SeqCst);
-            let app = app.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = fs.warm() {
-                    tracing::warn!("mount warm-up: {e}");
-                }
-                warming.store(false, Ordering::SeqCst);
-                Self::changed(&app);
-            });
-        }
+        self.watch(app, level);
         Self::changed(app);
-        Ok(MountInfo {
-            warming: warm,
-            ..info
-        })
+        Ok(info(level, status))
     }
 
     /// Unmounts one archive. Waits for file system calls in progress (a solid block being
     /// decoded) to finish.
     pub fn unmount(&self, app: &AppHandle, id: u64) {
-        let live = {
-            let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
-            live.iter().position(|l| l.id == id).map(|i| live.remove(i))
-        };
-        if live.is_some() {
-            self.save(&app.state::<AppState>());
-            drop(live);
-            Self::changed(app);
+        let (level, id) = daemon_id(id);
+        if let Err(e) = daemons::call(level, &Request::Unmount { id }) {
+            tracing::warn!(code = e.code().id(), "unmounting");
         }
+        Self::changed(app);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.live
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_empty()
+        self.list().is_empty()
     }
 
-    /// Unmounts everything when the app quits; the saved list stays for the next start.
+    /// Unmounts everything (OmniZip quits and the settings say so).
     pub fn unmount_all(&self) {
-        let all = std::mem::take(&mut *self.live.lock().unwrap_or_else(|e| e.into_inner()));
-        drop(all);
+        for level in [Level::User, Level::Admin] {
+            if daemons::running(level) {
+                let _ = daemons::call(level, &Request::UnmountAll);
+            }
+        }
     }
 
-    /// Mounts the archives saved at the last change, where possible at the same mount point.
-    /// Archives that need a password or no longer exist are skipped.
+    /// Mounts the archives the user's daemon had at its last change, where possible at the same
+    /// mount point. Mounted ones are left alone; archives that need a password or no longer
+    /// exist are skipped.
     pub fn restore(&self, app: &AppHandle) {
-        let state = app.state::<AppState>();
-        let Some(saved) = Self::file(&state)
+        let Some(saved) = omnizip_mountd::saved_list_path()
             .and_then(|f| std::fs::read_to_string(f).ok())
-            .and_then(|t| serde_json::from_str::<Vec<Saved>>(&t).ok())
+            .and_then(|t| serde_json::from_str::<Vec<SavedMount>>(&t).ok())
         else {
             return;
         };
@@ -345,6 +312,7 @@ impl MountManager {
                 label: Some(s.label.clone()),
                 warm: None,
                 password: None,
+                elevated: false,
             };
             let r = self
                 .mount(app, req(Some(s.mount_point.clone())))
@@ -358,17 +326,6 @@ impl MountManager {
             }
         }
     }
-
-    /// Removes spool files left by a previous run that did not exit cleanly.
-    pub fn sweep(state: &AppState) {
-        if let Some(d) = state.cache_dir.as_ref().map(|d| d.join("mount"))
-            && let Ok(entries) = std::fs::read_dir(&d)
-        {
-            for e in entries.flatten() {
-                let _ = std::fs::remove_dir_all(e.path());
-            }
-        }
-    }
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -377,5 +334,18 @@ fn same_path(a: &Path, b: &Path) -> bool {
         norm(a) == norm(b)
     } else {
         a == b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_say_which_daemon() {
+        for (level, id) in [(Level::User, 1), (Level::Admin, 1), (Level::Admin, 7)] {
+            assert_eq!(daemon_id(app_id(level, id)), (level, id));
+        }
+        assert_ne!(app_id(Level::User, 3), app_id(Level::Admin, 3));
     }
 }

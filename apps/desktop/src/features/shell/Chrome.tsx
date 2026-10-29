@@ -415,8 +415,13 @@ export function Sidebar() {
         {/* Mounted archives (docs/04-ui-design.md §3): a row opens the volume in the file manager. */}
         {mounts.map((m) => (
           <div key={m.id} className="mount-row">
-            <button type="button" className="nav-item" title={`${m.label} (${m.mountPoint})\n${m.archive}`} onClick={() => void api.reveal(mountRoot(m))}>
-              <Icon name="drive" />
+            <button
+              type="button"
+              className="nav-item"
+              title={`${m.label} (${m.mountPoint})${m.elevated ? ` · ${t('mount.elevatedBadge')}` : ''}\n${m.archive}`}
+              onClick={() => void api.reveal(mountRoot(m))}
+            >
+              <Icon name={m.elevated ? 'shield' : 'drive'} />
               <span className="lbl grow">{m.label}</span>
               <span className="lbl pt">{m.warming ? t('mount.warming') : m.mountPoint}</span>
             </button>

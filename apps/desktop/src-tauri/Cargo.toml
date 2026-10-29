@@ -25,6 +25,7 @@ omnizip-core.workspace = true
 omnizip-formats.workspace = true
 omnizip-i18n.workspace = true
 omnizip-vfs.workspace = true
+omnizip-mountd.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

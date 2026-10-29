@@ -60,6 +60,7 @@ pnpm i18n-check                  # 四种语言的键是否齐全
 cargo test --workspace           # 核心、引擎、CLI、挂载核心、Shell 扩展、桌面应用
 pnpm test                        # 前端单元测试
 cargo run -p omnizip-cli -- --help
+cargo build -p omnizip-mountd    # 挂载守护进程：开发模式下挂载需要它在桌面应用旁边（target/debug）
 pnpm dev                         # 开发模式运行桌面应用
 pnpm bundle:windows              # NSIS 安装包（含 CLI、右键菜单 DLL 与 Win11 菜单包，需 Windows SDK）→ target/release/bundle/nsis/
 pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # 完整 MSIX（商店渠道，签名可选）

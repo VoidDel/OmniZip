@@ -240,6 +240,10 @@ pub trait Mount: Send + Sync {
     /// `false` once the system has taken the volume down on its own (for example because the
     /// driver was uninstalled).
     fn is_alive(&self) -> bool;
+    /// A drive visible to every session (on Windows, one registered with the Mount Manager).
+    fn global(&self) -> bool {
+        false
+    }
 }
 
 /// A platform backend.
