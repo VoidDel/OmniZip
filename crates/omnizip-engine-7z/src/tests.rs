@@ -242,3 +242,36 @@ fn cancellation_leaves_no_archive() {
     assert_eq!(err.code(), ErrorCode::Cancelled);
     assert!(!d.path().join("c.7z").exists());
 }
+
+#[test]
+fn empty_file_before_many_directories() {
+    // An empty file early and twenty directories after it: the kEmptyFile bit vector must cover
+    // every stream-less entry, or the header cannot be read back (also by 7-Zip).
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("tree");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("0-empty.txt"), b"").unwrap();
+    for i in 0..20 {
+        fs::create_dir(src.join(format!("d{i:02}"))).unwrap();
+        fs::write(src.join(format!("d{i:02}/x.txt")), content(i)).unwrap();
+    }
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    for solid in [true, false] {
+        let dest = d.path().join(format!("e-{solid}.7z"));
+        let o = WriteOptions { solid, ..opts7z() };
+        SevenZEngine.create(&dest, &sources, &o, &ctx()).unwrap();
+        let mut r = open(&dest);
+        assert_eq!(r.entries().len(), sources.len(), "solid={solid}");
+        let eo = ExtractOptions {
+            destination: d.path().join(format!("x-{solid}")),
+            ..Default::default()
+        };
+        extract(r.as_mut(), &eo, Selection::all(), &ctx()).unwrap();
+        let x = d.path().join(format!("x-{solid}/tree"));
+        assert_eq!(fs::read(x.join("0-empty.txt")).unwrap(), b"");
+        assert_eq!(
+            fs::read_to_string(x.join("d19/x.txt")).unwrap(),
+            content(19)
+        );
+    }
+}
