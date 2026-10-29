@@ -11,6 +11,23 @@ use std::{
 
 use crate::{Error, ErrorCode, Result};
 
+/// Permission bits `File::create` gives a new file here: `0o666` less the process umask. Files
+/// written through a private temporary file (`0o600`) get them once in place. The umask cannot
+/// be read without setting it, which would race other threads creating files, so it is measured
+/// once on a probe file.
+#[cfg(unix)]
+pub fn new_file_mode() -> u32 {
+    use std::{os::unix::fs::PermissionsExt, sync::OnceLock};
+    static MODE: OnceLock<u32> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        tempfile::Builder::new()
+            .permissions(fs::Permissions::from_mode(0o666))
+            .tempfile()
+            .and_then(|f| f.as_file().metadata())
+            .map_or(0o644, |m| m.permissions().mode() & 0o777)
+    })
+}
+
 /// `Read + Seek + Send`, boxed by engines that accept any input.
 pub trait ReadSeek: Read + Seek + Send {}
 impl<T: Read + Seek + Send> ReadSeek for T {}
@@ -281,6 +298,18 @@ impl Output {
     pub fn commit(mut self) -> Result<Vec<PathBuf>> {
         match self.kind.take().expect("commit called once") {
             OutputKind::Single(tmp) => {
+                // The temporary file is private: the archive gets the permissions of the one it
+                // replaces (an archive updated in place), or those of a new file.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = fs::metadata(&self.dest)
+                        .map(|m| m.permissions())
+                        .unwrap_or_else(|_| fs::Permissions::from_mode(new_file_mode()));
+                    tmp.as_file()
+                        .set_permissions(perms)
+                        .map_err(|e| Error::io(e, &self.dest))?;
+                }
                 tmp.as_file()
                     .sync_all()
                     .map_err(|e| Error::io(e, &self.dest))?;
@@ -385,5 +414,30 @@ mod tests {
         out.write_all(b"done").unwrap();
         out.commit().unwrap();
         assert_eq!(fs::read(&dest).unwrap(), b"done");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_gets_new_file_or_replaced_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("a.zip");
+        // Like `File::create`: not the temporary file's 0600.
+        let mut out = Output::create(&dest, None).unwrap();
+        out.write_all(b"new").unwrap();
+        out.commit().unwrap();
+        let created = mode(&dest);
+        let probe = dir.path().join("probe");
+        File::create(&probe).unwrap();
+        assert_eq!(created, mode(&probe));
+        assert_eq!(created, new_file_mode());
+        // An archive updated in place keeps its permissions.
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o640)).unwrap();
+        let mut out = Output::create(&dest, None).unwrap();
+        out.write_all(b"updated").unwrap();
+        out.commit().unwrap();
+        assert_eq!(mode(&dest), 0o640);
+        assert_eq!(fs::read(&dest).unwrap(), b"updated");
     }
 }

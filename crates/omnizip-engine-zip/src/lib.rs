@@ -235,9 +235,11 @@ impl ZipReader {
                     d.second(),
                 )
             });
-            e.unix_mode = z.unix_mode();
-            if z.system() == System::Dos {
-                e.win_attrs = Some(z.external_attributes() & 0xFFFF);
+            match z.system() {
+                // For DOS entries the zip crate makes a mode up (0664), which would bypass the
+                // umask when they are extracted on Unix.
+                System::Dos => e.win_attrs = Some(z.external_attributes() & 0xFFFF),
+                _ => e.unix_mode = z.unix_mode(),
             }
             e.crc32 = Some(z.crc32());
             e.encrypted = z.encrypted();

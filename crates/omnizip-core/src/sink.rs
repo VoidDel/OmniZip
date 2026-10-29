@@ -442,9 +442,7 @@ impl FsSink {
         tmp_path
             .persist(target)
             .map_err(|e| Error::io(e.error, target))?;
-        if self.opts.restore_permissions {
-            apply_permissions(target, entry);
-        }
+        apply_permissions(target, entry, self.opts.restore_permissions);
         if let Some(origin) = &self.origin {
             let _ = origin::apply(target, origin);
         }
@@ -605,18 +603,21 @@ fn finish_file(file: &File, entry: &Entry, opts: &ExtractOptions) {
     }
 }
 
+/// Final permissions of an extracted file, which was written through a private temporary file
+/// (`0o600`): the entry's own with `restore`, otherwise those of a new file.
 #[cfg(unix)]
-fn apply_permissions(path: &Path, entry: &Entry) {
+fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
     use std::os::unix::fs::PermissionsExt;
-    if let Some(mode) = entry.unix_mode {
+    let mode = match entry.unix_mode.filter(|_| restore) {
         // Never restore setuid / setgid / sticky; always keep the owner able to read and write.
-        let mode = (mode & 0o777) | 0o600;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
-    }
+        Some(mode) => (mode & 0o777) | 0o600,
+        None => crate::volume::new_file_mode(),
+    };
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
 }
 
 #[cfg(not(unix))]
-fn apply_permissions(path: &Path, entry: &Entry) {
+fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
     const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
     let readonly = entry
         .win_attrs
@@ -624,7 +625,10 @@ fn apply_permissions(path: &Path, entry: &Entry) {
         || entry
             .unix_mode
             .is_some_and(|m| m & 0o222 == 0 && m & 0o400 != 0);
-    if readonly && let Ok(m) = fs::metadata(path) {
+    if restore
+        && readonly
+        && let Ok(m) = fs::metadata(path)
+    {
         let mut p = m.permissions();
         p.set_readonly(true);
         let _ = fs::set_permissions(path, p);
@@ -840,6 +844,48 @@ mod tests {
         assert_eq!((r.files, r.dirs, r.bytes), (1, 1, 5));
         let leftovers: Vec<_> = fs::read_dir(d.path().join("a/b")).unwrap().collect();
         assert_eq!(leftovers.len(), 1, "no temp files left behind");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn files_get_the_entry_mode_or_that_of_a_new_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let d = tempfile::tempdir().unwrap();
+        let ctx = JobCtx::default();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        // No mode in the archive (made on Windows): not left at the temporary file's 0600.
+        put(&mut s, &file_entry(0, "plain.txt", b"a"), b"a", &ctx);
+        let mut script = file_entry(1, "run.sh", b"b");
+        script.unix_mode = Some(0o4755);
+        put(&mut s, &script, b"b", &ctx);
+        let mut key = file_entry(2, "key", b"c");
+        key.unix_mode = Some(0o400);
+        put(&mut s, &key, b"c", &ctx);
+        s.finish(&ctx).unwrap();
+        assert_eq!(
+            mode(d.path().join("plain.txt")),
+            crate::volume::new_file_mode()
+        );
+        assert_eq!(mode(d.path().join("run.sh")), 0o755, "no setuid");
+        assert_eq!(
+            mode(d.path().join("key")),
+            0o600,
+            "owner keeps read and write"
+        );
+
+        let d = tempfile::tempdir().unwrap();
+        let opts = ExtractOptions {
+            restore_permissions: false,
+            ..ExtractOptions::default()
+        };
+        let mut s = sink(d.path(), opts);
+        put(&mut s, &script, b"b", &ctx);
+        s.finish(&ctx).unwrap();
+        assert_eq!(
+            mode(d.path().join("run.sh")),
+            crate::volume::new_file_mode()
+        );
     }
 
     #[test]

@@ -376,3 +376,28 @@ fn corrupt_data_is_reported_not_written() {
     assert_eq!(rep.warnings[0].code, ErrorCode::CrcMismatch);
     assert!(!d.path().join("out/a.txt").exists());
 }
+
+#[test]
+fn only_unix_entries_carry_a_mode() {
+    use std::io::Write as _;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("mixed.zip");
+    let mut w = ZipWriter::new(fs::File::create(&p).unwrap());
+    let opts = SimpleFileOptions::default();
+    w.start_file("dos.txt", opts.system(System::Dos)).unwrap();
+    w.write_all(b"a").unwrap();
+    w.start_file("unix.sh", opts.system(System::Unix).unix_permissions(0o755))
+        .unwrap();
+    w.write_all(b"b").unwrap();
+    w.finish().unwrap();
+
+    // The zip crate makes a mode up for the DOS entry ...
+    let mut z = ZipArchive::new(fs::File::open(&p).unwrap()).unwrap();
+    assert!(z.by_index(0).unwrap().unix_mode().is_some());
+    // ... which the entry does not take: extraction gives it a new file's permissions.
+    let r = open(&p);
+    let (dos, unix) = (&r.entries()[0], &r.entries()[1]);
+    assert_eq!(dos.unix_mode, None);
+    assert!(dos.win_attrs.is_some());
+    assert_eq!(unix.unix_mode.map(|m| m & 0o777), Some(0o755));
+}
