@@ -15,7 +15,8 @@ use omnizip_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    draft::Draft, jobs::JobManager, launch::LaunchRequest, settings::Settings, theme::ThemeFile,
+    draft::Draft, jobs::JobManager, launch::LaunchRequest, mounts::MountManager,
+    settings::Settings, theme::ThemeFile,
 };
 
 /// An archive open in the browser.
@@ -64,6 +65,7 @@ pub struct AppState {
     pub cache_dir: Option<PathBuf>,
     /// Items copied or cut from an open archive (`crate::clipboard`).
     pub clip: Mutex<Option<crate::clipboard::Clip>>,
+    pub mounts: MountManager,
 }
 
 impl AppState {
@@ -97,6 +99,7 @@ impl AppState {
             data_dir,
             cache_dir: appdirs::cache_dir(),
             clip: Mutex::new(None),
+            mounts: MountManager::default(),
         }
     }
 

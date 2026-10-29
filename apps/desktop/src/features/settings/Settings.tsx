@@ -11,7 +11,7 @@ import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
 import type { MountProbe, Settings as S, ShellStatus, ThemeSummary } from '../../lib/types';
-import { type SettingsTab, useApp } from '../../store/app';
+import { type SettingsTab, mountRoot, useApp } from '../../store/app';
 
 /** Sections of the settings page: listed in the sidebar, and above the page in narrow windows. */
 export const SETTINGS_TABS: [SettingsTab, IconName][] = [
@@ -266,7 +266,37 @@ function MountBackendRow() {
         <Icon name={ready ? 'checkCircle' : 'alert'} />
         {label}
       </span>
+      {probe.built && probe.kind === 'win-fsp' && probe.health === 'not-installed' && (
+        <button type="button" className="btn outline" onClick={() => void api.openMountDriverPage()}>
+          <Icon name="external" />
+          <span>{t('settings.mount.download')}</span>
+        </button>
+      )}
     </Row>
+  );
+}
+
+/** The mounted archives, as in the sidebar. */
+function MountList() {
+  const { t } = useTranslation();
+  const fmt = useFmt();
+  const mounts = useApp((s) => s.mounts);
+  const unmount = useApp((s) => s.unmount);
+  if (!mounts.length) return null;
+  return (
+    <div className="set-group">
+      {mounts.map((m) => (
+        <Row key={m.id} label={m.label} hint={`${m.archive} · ${m.warming ? t('mount.warming') : fmt.size(m.cacheBytes)}`}>
+          <span className="mono hint">{m.mountPoint}</span>
+          <button type="button" className="iconbtn sm" title={t('mount.open')} aria-label={t('mount.open')} onClick={() => void api.reveal(mountRoot(m))}>
+            <Icon name="folderOpen" />
+          </button>
+          <button type="button" className="iconbtn sm" title={t('mount.eject')} aria-label={t('mount.eject')} onClick={() => void unmount(m.id)}>
+            <Icon name="eject" />
+          </button>
+        </Row>
+      ))}
+    </div>
   );
 }
 
@@ -565,13 +595,14 @@ export function SettingsView() {
         );
       case 'mount':
         return (
+          <>
           <div className="set-group">
             <MountBackendRow />
             <Row label={t('settings.mount.cache')}>
               <span className="mono hint">{settings.mount.cache_gb} GB</span>
               <input type="range" min={1} max={32} value={settings.mount.cache_gb} aria-label={t('settings.mount.cache')} onChange={(e) => set((s) => (s.mount.cache_gb = Number(e.target.value)))} />
             </Row>
-            <Row label={t('settings.mount.unmountOnExit')}>
+            <Row label={t('settings.mount.unmountOnExit')} hint={settings.mount.unmount_on_exit ? undefined : t('settings.mount.unmountOnExitHint')}>
               <Switch label={t('settings.mount.unmountOnExit')} checked={settings.mount.unmount_on_exit} onChange={(v) => set((s) => (s.mount.unmount_on_exit = v))} />
             </Row>
             <Row label={t('settings.mount.restore')}>
@@ -586,6 +617,8 @@ export function SettingsView() {
               </Row>
             )}
           </div>
+          <MountList />
+          </>
         );
       case 'advanced':
         return (

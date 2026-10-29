@@ -25,6 +25,7 @@ use crate::{
     integration::{self, ShellStatus},
     jobs::{Finish, JobInfo, JobSpec, JobState, PromptAnswer},
     launch::LaunchRequest,
+    mounts::{self, MountInfo, MountRequest},
     ops::{self, CompressRequest, ConvertRequest, ExtractRequest},
     preview::{self, Preview},
     settings::{self, Settings},
@@ -1385,6 +1386,13 @@ pub fn open_homepage() -> CmdResult<()> {
         .map_err(|e| err(Error::internal(e)))
 }
 
+/// Opens the download page of the mount driver (WinFsp), for the settings page.
+#[tauri::command]
+pub fn open_mount_driver_page() -> CmdResult<()> {
+    tauri_plugin_opener::open_url("https://winfsp.dev/rel/", None::<&str>)
+        .map_err(|e| err(Error::internal(e)))
+}
+
 /// Opens the system "default apps" settings (`docs/07-shell-integration.md` §3.4).
 #[tauri::command]
 pub fn open_default_apps() -> CmdResult<()> {
@@ -1402,5 +1410,35 @@ pub fn open_default_apps() -> CmdResult<()> {
 /// this build can mount at all.
 #[tauri::command]
 pub fn mount_probe() -> omnizip_vfs::Probe {
-    omnizip_vfs::probe()
+    mounts::probe()
+}
+
+#[tauri::command]
+pub fn mount_list(state: State<'_, AppState>) -> Vec<MountInfo> {
+    state.mounts.list()
+}
+
+/// Drive letters free for a mount, from Z: downwards.
+#[tauri::command]
+pub fn mount_free_letters() -> Vec<String> {
+    mounts::free_letters()
+}
+
+/// Mounts an archive (docs/12-mount.md §2). `PasswordRequired` lets the UI ask and retry.
+#[tauri::command]
+pub async fn mount_start(app: AppHandle, request: MountRequest) -> CmdResult<MountInfo> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AppState>().mounts.mount(&app, request)
+    })
+    .await
+    .map_err(|e| err(Error::internal(e)))?
+    .map_err(err)
+}
+
+/// Unmounts; waits for a file system call in progress (a solid block being decoded).
+#[tauri::command]
+pub async fn mount_stop(app: AppHandle, id: u64) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().mounts.unmount(&app, id))
+        .await
+        .map_err(|e| err(Error::internal(e)))
 }

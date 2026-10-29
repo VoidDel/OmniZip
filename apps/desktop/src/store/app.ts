@@ -11,6 +11,7 @@ import type {
   Clip,
   ErrorReport,
   JobInfo,
+  MountInfo,
   ResolvedTheme,
   Settings,
   ThemeSummary,
@@ -103,6 +104,8 @@ interface State {
   draftSaves: { job: number; draft: number }[];
   /** Items copied or cut from an open archive (cut ones are dimmed until pasted). */
   clip: Clip | null;
+  /** Mounted archives (sidebar, settings). */
+  mounts: MountInfo[];
 }
 
 interface Actions {
@@ -146,6 +149,8 @@ interface Actions {
   toast(t: Omit<Toast, 'id'>): number;
   dismissToast(id: number): void;
   reportError(e: unknown, title?: string): void;
+  refreshMounts(): Promise<void>;
+  unmount(id: number): Promise<void>;
 }
 
 let seq = 1;
@@ -241,6 +246,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   toasts: [],
   draftSaves: [],
   clip: null,
+  mounts: [],
 
   setBoot: (b) => set({ boot: b, settings: b.settings, themes: b.themes }),
   setTheme: (t) => set({ theme: t }),
@@ -419,4 +425,24 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const msg = errorHandler.render(err);
     get().toast({ tone: err.key === 'cancelled' ? 'info' : 'error', text: title ? `${title}: ${msg}` : msg, sticky: err.key !== 'cancelled' });
   },
+  refreshMounts: async () => {
+    try {
+      set({ mounts: await api.mounts() });
+    } catch {
+      // Not available in this window.
+    }
+  },
+  unmount: async (id) => {
+    const m = get().mounts.find((x) => x.id === id);
+    try {
+      await api.unmount(id);
+      if (m) get().toast({ tone: 'success', text: i18n.t('mount.ejected', { name: m.label }) });
+    } catch (e) {
+      get().reportError(e);
+    }
+    await get().refreshMounts();
+  },
 }));
+
+/** Where a mount is opened: the root of a drive letter, or the folder. */
+export const mountRoot = (m: MountInfo) => (/^[A-Za-z]:$/.test(m.mountPoint) ? `${m.mountPoint}\\` : m.mountPoint);

@@ -66,3 +66,4 @@ windows = { version = "0.62", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 omnizip-shell-win = { path = "../../../crates/omnizip-shell-win" }
+omnizip-mount-winfsp.workspace = true

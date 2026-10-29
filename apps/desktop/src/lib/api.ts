@@ -22,7 +22,9 @@ import type {
   RecentItem,
   ResolvedTheme,
   Settings,
+  MountInfo,
   MountProbe,
+  MountRequest,
   ShellStatus,
   ThemeSummary,
   TreeItem,
@@ -115,6 +117,12 @@ export const api = {
   openHomepage: () => invoke<void>('open_homepage'),
   shellStatus: () => invoke<ShellStatus>('shell_status'),
   mountProbe: () => invoke<MountProbe>('mount_probe'),
+  mounts: () => invoke<MountInfo[]>('mount_list'),
+  /** Drive letters free for a mount (`Z:`, `Y:`, …). */
+  freeLetters: () => invoke<string[]>('mount_free_letters'),
+  mount: (request: MountRequest) => invoke<MountInfo>('mount_start', { request }),
+  unmount: (id: number) => invoke<void>('mount_stop', { id }),
+  openMountDriverPage: () => invoke<void>('open_mount_driver_page'),
   shellRegister: () => invoke<ShellStatus>('shell_register'),
   shellUnregister: () => invoke<ShellStatus>('shell_unregister'),
 };
@@ -125,4 +133,5 @@ export const events = {
   onArchiveChanged: (f: (id: number) => void): Promise<UnlistenFn> => listen<number>('archive://changed', (e) => f(e.payload)),
   onLaunch: (f: (r: LaunchRequest) => void): Promise<UnlistenFn> => listen<LaunchRequest>('app://launch', (e) => f(e.payload)),
   onClipboard: (f: (c: Clip | null) => void): Promise<UnlistenFn> => listen<Clip | null>('clipboard://changed', (e) => f(e.payload)),
+  onMounts: (f: () => void): Promise<UnlistenFn> => listen('mounts://changed', () => f()),
 };

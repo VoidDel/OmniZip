@@ -7,6 +7,7 @@
 //! is installed.
 
 use std::{
+    fmt,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -14,7 +15,7 @@ use std::{
 use bitflags::bitflags;
 use serde::Serialize;
 
-use crate::{FsResult, VirtualFs, cache::CacheLimits, names::NameRules, names::display_name};
+use crate::{VirtualFs, names::NameRules, names::display_name};
 
 bitflags! {
     /// What a backend can do.
@@ -85,25 +86,23 @@ impl Probe {
     }
 }
 
-/// Backends compiled into this build. The WinFsp, FUSE and FSKit backends are planned
-/// (`docs/11-roadmap.md`) and not part of this build yet.
-pub const BUILT_BACKENDS: &[BackendKind] = &[];
-
-/// Checks the system side of the platform's primary backend.
-pub fn probe() -> Probe {
+/// Checks the system side of the platform's primary backend. `built` says whether the caller
+/// links that backend (each backend lives in its own crate).
+pub fn probe(built: bool) -> Probe {
     let kind = BackendKind::current();
     let (health, detail) = probe_system();
     Probe {
         kind,
         health,
         detail,
-        built: BUILT_BACKENDS.contains(&kind),
+        built,
     }
 }
 
+/// The WinFsp library for this architecture, as registered by the WinFsp installer (in the
+/// 32-bit view of HKLM). `None` when WinFsp is not installed.
 #[cfg(windows)]
-fn probe_system() -> (BackendHealth, Option<String>) {
-    // WinFsp registers itself in the 32-bit view of HKLM.
+pub fn winfsp_dll() -> Option<PathBuf> {
     let dir = ["SOFTWARE\\WOW6432Node\\WinFsp", "SOFTWARE\\WinFsp"]
         .iter()
         .find_map(|k| {
@@ -111,16 +110,20 @@ fn probe_system() -> (BackendHealth, Option<String>) {
                 .open(k)
                 .and_then(|k| k.get_string("InstallDir"))
                 .ok()
-        });
-    let Some(dir) = dir else {
-        return (BackendHealth::NotInstalled, Some("WinFsp".into()));
-    };
+        })?;
     let dll = if cfg!(target_arch = "aarch64") {
         "winfsp-a64.dll"
     } else {
         "winfsp-x64.dll"
     };
-    let path = Path::new(&dir).join("bin").join(dll);
+    Some(Path::new(&dir).join("bin").join(dll))
+}
+
+#[cfg(windows)]
+fn probe_system() -> (BackendHealth, Option<String>) {
+    let Some(path) = winfsp_dll() else {
+        return (BackendHealth::NotInstalled, Some("WinFsp".into()));
+    };
     if path.is_file() {
         (BackendHealth::Ready, Some(path.display().to_string()))
     } else {
@@ -164,19 +167,19 @@ fn probe_system() -> (BackendHealth, Option<String>) {
     (BackendHealth::Unsupported, None)
 }
 
-/// Options of one mount.
+/// Options of one mount. Cache budgets and warm-up belong to the file system
+/// ([`crate::FsOptions`]), not to the backend.
 #[derive(Debug, Clone)]
 pub struct MountOptions {
-    /// Drive letter (`Z:`) or directory; chosen automatically when `None`.
+    /// Drive letter (`Z:`) or directory; chosen automatically when `None`. On Windows a
+    /// directory must not exist or be empty; an empty one is put back after unmounting.
     pub mount_point: Option<PathBuf>,
+    /// Volume label (the file system's own label when `None`).
     pub label: Option<String>,
     /// Always `true` until the ZIP overlay lands (v1.x).
     pub read_only: bool,
     /// Mark files offline so Explorer does not read them for thumbnails.
     pub offline_attribute: bool,
-    pub cache: CacheLimits,
-    /// Decode everything into the cache right after mounting.
-    pub warm: bool,
 }
 
 impl Default for MountOptions {
@@ -186,19 +189,43 @@ impl Default for MountOptions {
             label: None,
             read_only: true,
             offline_attribute: false,
-            cache: CacheLimits::default(),
-            warm: false,
         }
     }
 }
 
-/// A live mount.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MountHandle {
-    pub id: u64,
-    pub archive: PathBuf,
-    pub mount_point: PathBuf,
+/// Why a mount failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MountError {
+    /// The driver or its library is missing or unusable.
+    NotInstalled(String),
+    /// The drive letter is taken, or the directory is not empty.
+    InUse(PathBuf),
+    /// Every drive letter is taken.
+    NoDriveLetter,
+    /// The system refused for another reason.
+    System(String),
+}
+
+impl fmt::Display for MountError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MountError::NotInstalled(what) => write!(f, "mount backend not available: {what}"),
+            MountError::InUse(p) => write!(f, "mount point in use: {}", p.display()),
+            MountError::NoDriveLetter => f.write_str("no free drive letter"),
+            MountError::System(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for MountError {}
+
+/// A live mount. Dropping it takes the volume down; files still open in it fail afterwards.
+pub trait Mount: Send + Sync {
+    /// Drive letter (`Z:`) or directory.
+    fn mount_point(&self) -> &Path;
+    /// `false` once the system has taken the volume down on its own (for example because the
+    /// driver was uninstalled).
+    fn is_alive(&self) -> bool;
 }
 
 /// A platform backend.
@@ -206,8 +233,11 @@ pub trait MountBackend: Send + Sync {
     fn kind(&self) -> BackendKind;
     fn capabilities(&self) -> BackendCaps;
     fn health(&self) -> BackendHealth;
-    fn mount(&self, fs: Arc<dyn VirtualFs>, opts: &MountOptions) -> FsResult<MountHandle>;
-    fn unmount(&self, handle: &MountHandle, force: bool) -> FsResult<()>;
+    fn mount(
+        &self,
+        fs: Arc<dyn VirtualFs>,
+        opts: &MountOptions,
+    ) -> Result<Box<dyn Mount>, MountError>;
 }
 
 /// First free drive letter from `Z:` downwards, skipping `A:` to `C:`.
@@ -243,11 +273,13 @@ mod tests {
 
     #[test]
     fn probe_reports_the_platform_backend() {
-        let p = probe();
+        let p = probe(false);
         assert_eq!(p.kind, BackendKind::current());
-        // No backend is compiled in yet, so nothing can be mounted regardless of the driver.
+        // Without the backend linked in, nothing can be mounted regardless of the driver.
         assert!(!p.built);
         assert!(!p.can_mount());
+        let p = probe(true);
+        assert_eq!(p.can_mount(), p.health == BackendHealth::Ready);
     }
 
     #[test]

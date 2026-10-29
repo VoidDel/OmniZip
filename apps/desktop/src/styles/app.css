@@ -109,6 +109,10 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .sb-sub .nav-item { padding-left: 22px; flex: none; }
 .nav-item .chev { color: var(--fg-muted); transition: transform var(--dur); }
 .nav-item[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.mount-row { display: flex; align-items: center; gap: 2px; }
+.mount-row .nav-item { flex: 1; min-width: 0; }
+.mount-row .pt { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-secondary); flex: none; }
+.window.collapsed .mount-row .iconbtn { display: none; }
 .task-sum { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border-radius: var(--radius-md); width: 100%; font-size: .86rem; }
 .task-sum:hover { background: var(--bg-hover); }
 .task-sum .row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }

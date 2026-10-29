@@ -20,7 +20,8 @@ use std::{ffi::OsStr, fmt, path::PathBuf, time::SystemTime};
 
 pub use archivefs::{ArchiveFs, FsOptions, LinkMode};
 pub use backend::{
-    BackendCaps, BackendHealth, BackendKind, MountBackend, MountHandle, MountOptions, Probe, probe,
+    BackendCaps, BackendHealth, BackendKind, Mount, MountBackend, MountError, MountOptions, Probe,
+    probe,
 };
 pub use cache::{CacheLimits, Content, ContentCache};
 pub use names::NameRules;

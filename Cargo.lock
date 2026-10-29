@@ -3012,6 +3012,7 @@ dependencies = [
  "omnizip-core",
  "omnizip-formats",
  "omnizip-i18n",
+ "omnizip-mount-winfsp",
  "omnizip-shell-win",
  "omnizip-vfs",
  "serde",
@@ -3098,6 +3099,18 @@ dependencies = [
  "omnizip-core",
  "sys-locale",
  "unic-langid",
+]
+
+[[package]]
+name = "omnizip-mount-winfsp"
+version = "0.1.0"
+dependencies = [
+ "omnizip-core",
+ "omnizip-formats",
+ "omnizip-vfs",
+ "tempfile",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -11,7 +11,7 @@ import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
 import { effectiveDark } from '../../lib/theme';
 import type { ArchiveSummary, TreeItem } from '../../lib/types';
-import { useApp } from '../../store/app';
+import { mountRoot, useApp } from '../../store/app';
 import { SETTINGS_TABS } from '../settings/Settings';
 
 const EDGES = [
@@ -349,6 +349,8 @@ export function Sidebar() {
   const updateSettings = useApp((s) => s.updateSettings);
   const jobs = useApp((s) => s.jobs);
   const setDrawer = useApp((s) => s.setDrawer);
+  const mounts = useApp((s) => s.mounts);
+  const unmount = useApp((s) => s.unmount);
   const appVersion = useApp((s) => s.boot?.system.appVersion);
   const collapsed = settings?.appearance.sidebar_collapsed ?? false;
 
@@ -398,6 +400,19 @@ export function Sidebar() {
         </>
       )}
       <div className="sb-bottom">
+        {/* Mounted archives (docs/04-ui-design.md §3): a row opens the volume in the file manager. */}
+        {mounts.map((m) => (
+          <div key={m.id} className="mount-row">
+            <button type="button" className="nav-item" title={`${m.label} (${m.mountPoint})\n${m.archive}`} onClick={() => void api.reveal(mountRoot(m))}>
+              <Icon name="drive" />
+              <span className="lbl grow">{m.label}</span>
+              <span className="lbl pt">{m.warming ? t('mount.warming') : m.mountPoint}</span>
+            </button>
+            <button type="button" className="iconbtn sm" title={t('mount.eject')} aria-label={`${t('mount.eject')} ${m.label}`} onClick={() => void unmount(m.id)}>
+              <Icon name="eject" />
+            </button>
+          </div>
+        ))}
         {list.length > 0 && (
           <button type="button" className="task-sum" title={label} onClick={() => setDrawer(true)}>
             <div className="row">

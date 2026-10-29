@@ -337,6 +337,33 @@ export interface MountProbe {
   built: boolean;
 }
 
+/** A mounted archive. */
+export interface MountInfo {
+  id: number;
+  archive: string;
+  /** File name of the archive. */
+  name: string;
+  label: string;
+  /** `Z:` or a folder. */
+  mountPoint: string;
+  format: string;
+  /** Bytes decoded into the cache. */
+  cacheBytes: number;
+  /** A solid archive is being decoded into the cache. */
+  warming: boolean;
+}
+
+export interface MountRequest {
+  path: string;
+  /** The archive open in the browser, whose password and name encoding are reused. */
+  archiveId?: number | null;
+  /** `Z:` or a folder; the next free drive letter when absent. */
+  mountPoint?: string | null;
+  label?: string | null;
+  warm?: boolean | null;
+  password?: string | null;
+}
+
 /** Items copied or cut from an open archive. */
 export interface Clip {
   archive: number;

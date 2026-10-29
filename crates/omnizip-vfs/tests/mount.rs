@@ -217,8 +217,18 @@ fn encrypted_zip_needs_the_password() {
         },
     );
     let locked = mount(&zip, opts());
+    assert_eq!(locked.check_password(), Err(FsError::Access));
     let a = resolve(&locked, "photos/相册/a.txt").unwrap();
     assert_eq!(read_all(&locked, a.node, 64), Err(FsError::Access));
+
+    let wrong = mount(
+        &zip,
+        FsOptions {
+            password: Some("nope".into()),
+            ..opts()
+        },
+    );
+    assert_eq!(wrong.check_password(), Err(FsError::Access));
 
     let open = mount(
         &zip,
@@ -227,8 +237,15 @@ fn encrypted_zip_needs_the_password() {
             ..opts()
         },
     );
+    assert_eq!(open.check_password(), Ok(()));
+    // The smallest encrypted file was decoded to check: it is cached now.
+    assert_eq!(open.cache().len(), 1);
     let a = resolve(&open, "photos/相册/a.txt").unwrap();
     assert_eq!(read_all(&open, a.node, 64).unwrap(), b"alpha");
+
+    // Nothing to check in an archive without encryption.
+    let plain = create(d.path(), &root, "plain.zip", WriteOptions::default());
+    assert_eq!(mount(&plain, opts()).check_password(), Ok(()));
 }
 
 #[test]

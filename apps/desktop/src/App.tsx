@@ -91,6 +91,14 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Mounted archives: restored at start-up, changed from other windows, or taken down by the system.
+  useEffect(() => {
+    const refresh = () => void useApp.getState().refreshMounts();
+    refresh();
+    const un = events.onMounts(refresh);
+    return () => void un.then((f) => f());
+  }, []);
+
   // Drag and drop from the file manager.
   useEffect(() => {
     const un = getCurrentWebview().onDragDropEvent((e) => {

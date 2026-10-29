@@ -6,11 +6,12 @@ import { useTranslation } from 'react-i18next';
 
 import { FileIcon, Icon } from '../../components/Icon';
 import { Modal, PasswordInput, Segmented } from '../../components/ui';
-import { api } from '../../lib/api';
+import { errorText } from '../../i18n';
+import { api, asError } from '../../lib/api';
 import { archiveStem, basename, dirname, joinPath } from '../../lib/format';
 import { useFmt } from '../../lib/hooks';
-import type { FormatId, Level, NodeInfo, OverwriteMode, PathStats, Preview } from '../../lib/types';
-import { type Dialog, useApp } from '../../store/app';
+import type { FormatId, Level, MountProbe, NodeInfo, OverwriteMode, PathStats, Preview } from '../../lib/types';
+import { type Dialog, mountRoot, useApp } from '../../store/app';
 
 const LEVELS: Level[] = ['store', 'fastest', 'fast', 'normal', 'better', 'best', 'ultra'];
 /** Rough output size ratio and throughput (MB/s) per level, for the estimate line. */
@@ -995,24 +996,198 @@ function RenameDialog({ d }: { d: Extract<Dialog, { kind: 'rename' }> }) {
   );
 }
 
+// ------------------------------------------------------------------------------------- mount
+
+/** Mount options (docs/04-ui-design.md §4.10). Mounting opens the volume in the file manager. */
 function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
   const { t } = useTranslation();
   const close = useClose(d);
   const archive = useApp((s) => s.archive)!;
+  const settings = useApp((s) => s.settings)!;
+  const mounted = useApp((s) => s.mounts.find((m) => samePath(m.archive, archive.path)));
+  const [probe, setProbe] = useState<MountProbe | null>(null);
+  const [letters, setLetters] = useState<string[]>([]);
+  const [as, setAs] = useState<'letter' | 'folder'>('letter');
+  // '' picks the next free letter when mounting.
+  const [letter, setLetter] = useState('');
+  const [folder, setFolder] = useState('');
+  const [label, setLabel] = useState('');
+  const [warm, setWarm] = useState(settings.mount.warm_solid);
+  // Shown once mounting reports that a password is needed.
+  const [password, setPassword] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    void api.mountProbe().then(setProbe);
+    void api.freeLetters().then(setLetters);
+  }, []);
+  const ready = !!probe && probe.built && probe.health === 'ready';
+  const solid = archive.mountClass === 'C';
+
+  const start = async () => {
+    if (password !== null && !password) return setError(t('pwd.empty'));
+    setBusy(true);
+    setError('');
+    try {
+      const m = await api.mount({
+        path: archive.path,
+        archiveId: archive.id,
+        mountPoint: as === 'folder' ? folder : letter || null,
+        label: label.trim() || null,
+        warm: solid && warm,
+        password,
+      });
+      if (password) void api.setArchivePassword(archive.id, password);
+      close();
+      const s = useApp.getState();
+      await s.refreshMounts();
+      void api.reveal(mountRoot(m));
+      s.toast({ tone: 'success', text: t('mount.mounted', { point: m.mountPoint }), action: { label: t('mount.open'), run: () => void api.reveal(mountRoot(m)) } });
+    } catch (e) {
+      const err = asError(e);
+      if (err.key === 'password-required' || err.key === 'wrong-password') {
+        setPassword((p) => p ?? '');
+        if (err.key === 'wrong-password') setError(t('pwd.wrong'));
+      } else if (err.key === 'already-exists') {
+        setError(t('mount.errInUse', { point: err.params.path ?? '' }));
+        void api.freeLetters().then(setLetters);
+      } else if (err.key === 'missing-dependency') {
+        setError(t('mount.noBackend'));
+      } else {
+        const detail = err.params.detail;
+        setError(detail ? `${errorText(t, err)} (${detail})` : errorText(t, err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (mounted) {
+    return (
+      <Modal
+        title={t('mount.title', { name: archive.name })}
+        onClose={close}
+        width={520}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                close();
+                void useApp.getState().unmount(mounted.id);
+              }}
+            >
+              <Icon name="eject" />
+              <span>{t('mount.eject')}</span>
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                close();
+                void api.reveal(mountRoot(mounted));
+              }}
+            >
+              <Icon name="folderOpen" />
+              <span>{t('mount.open')}</span>
+            </button>
+          </>
+        }
+      >
+        <div className="note">
+          <Icon name="drive" />
+          <span>{t('mount.already', { point: mounted.mountPoint })}</span>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal title={t('mount.title', { name: archive.name })} onClose={close} width={520} footer={<button type="button" className="btn primary" onClick={close}>{t('common.ok')}</button>}>
-      <div className="note">
-        <Icon name="info" />
-        <span>{t(`mount.class.${archive.mountClass}`, { format: archive.info.format.toUpperCase() })}</span>
+    <Modal
+      title={t('mount.title', { name: archive.name })}
+      onClose={close}
+      width={540}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
+          <button type="button" className="btn primary" disabled={!ready || busy || (as === 'folder' && !folder.trim())} onClick={() => void start()}>
+            <Icon name="drive" />
+            <span>{t('mount.start')}</span>
+          </button>
+        </>
+      }
+    >
+      <div className="frow">
+        <label>{t('mount.as')}</label>
+        <div className="inline">
+          <Segmented
+            value={as}
+            label={t('mount.as')}
+            options={[
+              ['letter', t('mount.letter')],
+              ['folder', t('mount.folder')],
+            ]}
+            onChange={setAs}
+          />
+          {as === 'letter' && (
+            <select className="sel" style={{ flex: 'none', minWidth: 0, width: 150 }} value={letter} aria-label={t('mount.letter')} onChange={(e) => setLetter(e.target.value)}>
+              <option value="">{letters[0] ? t('mount.auto', { letter: letters[0] }) : t('mount.autoNone')}</option>
+              {letters.map((l) => (
+                <option key={l} value={l}>{l}</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
-      <div className="note warn">
-        <Icon name="alert" />
-        <span>
-          <b>{t('mount.unavailableTitle')}</b>
-          <br />
-          {t('mount.unavailable')}
-        </span>
+      {as === 'folder' && (
+        <div className="frow">
+          <span />
+          <div className="field">
+            <div className="inline">
+              <input className="inp mono grow" value={folder} aria-label={t('mount.folder')} onChange={(e) => setFolder(e.target.value)} />
+              <button
+                type="button"
+                className="btn outline"
+                onClick={async () => {
+                  const p = await pick({ directory: true, multiple: false, defaultPath: folder || dirname(archive.path) });
+                  if (typeof p === 'string') setFolder(p);
+                }}
+              >
+                {t('common.browse')}
+              </button>
+            </div>
+            <span className="hint">{t('mount.folderHint')}</span>
+          </div>
+        </div>
+      )}
+      <div className="frow">
+        <label htmlFor="mt-label">{t('mount.label')}</label>
+        <input id="mt-label" className="inp" value={label} placeholder={archiveStem(archive.name)} maxLength={32} onChange={(e) => setLabel(e.target.value)} />
       </div>
+      {password !== null && (
+        <div className="frow">
+          <label>{t('mount.password')}</label>
+          <PasswordInput value={password} onChange={setPassword} autoFocus onEnter={() => void start()} label={t('mount.password')} />
+        </div>
+      )}
+      {solid && (
+        <label className="chk">
+          <input type="checkbox" checked={warm} onChange={(e) => setWarm(e.target.checked)} /> {t('mount.warm')}
+        </label>
+      )}
+      {probe && !ready ? (
+        <div className="note warn">
+          <Icon name="alert" />
+          <span>{probe.built ? t('mount.noBackend') : t('mount.unsupported')}</span>
+        </div>
+      ) : (
+        <div className={`note${solid ? ' warn' : ''}`}>
+          <Icon name={solid ? 'alert' : 'info'} />
+          <span>{password !== null ? t('mount.passwordHint') : t(`mount.class.${archive.mountClass}`, { format: archive.info.format.toUpperCase() })}</span>
+        </div>
+      )}
+      {error && <div className="err"><Icon name="alert" /><span>{error}</span></div>}
     </Modal>
   );
 }

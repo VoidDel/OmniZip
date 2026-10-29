@@ -451,6 +451,28 @@ impl ArchiveFs {
         Ok(self.cache.len())
     }
 
+    /// Decodes one encrypted file, so that a missing or wrong password shows when mounting
+    /// rather than on every read ([`FsError::Access`]). In a solid archive that is the first
+    /// one, which needs the least of its block decoded; otherwise the smallest. `Ok` when
+    /// nothing is encrypted.
+    pub fn check_password(&self) -> FsResult<()> {
+        let mut encrypted = self
+            .entries
+            .iter()
+            .filter(|e| e.encrypted && e.kind == EntryKind::File);
+        let probe = if self.mount_class() == MountClass::C {
+            encrypted.next()
+        } else {
+            encrypted.min_by_key(|e| e.size)
+        };
+        let Some(e) = probe else { return Ok(()) };
+        if self.cache.contains(e.id) {
+            return Ok(());
+        }
+        let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
+        self.decode(reader.as_mut(), HashSet::from([e.id]))
+    }
+
     fn handle_node(&self, fh: FileHandle) -> FsResult<NodeId> {
         self.handles
             .lock()

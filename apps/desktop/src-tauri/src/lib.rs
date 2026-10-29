@@ -7,6 +7,7 @@ pub mod dragout;
 pub mod integration;
 pub mod jobs;
 pub mod launch;
+pub mod mounts;
 pub mod ops;
 pub mod preview;
 pub mod settings;
@@ -208,24 +209,43 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::new())
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event
-                && let Some(state) = window.try_state::<AppState>()
-            {
-                state
-                    .shell_requests
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .remove(window.label());
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Destroyed => {
+                if let Some(state) = window.try_state::<AppState>() {
+                    state
+                        .shell_requests
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(window.label());
+                }
             }
+            // Mounts live in this process: when they should outlive the window, closing the
+            // main window hides it, and starting OmniZip again shows it.
+            tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
+                if let Some(state) = window.try_state::<AppState>()
+                    && !state.settings().mount.unmount_on_exit
+                    && !state.mounts.is_empty()
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            _ => {}
         })
         .setup(move |app| {
             let handle = app.handle().clone();
             let sweeper = handle.clone();
+            // Mounts come back only with the main window: a file-manager verb shown in a mini
+            // or dialog window ends the process when it is done.
+            let main = !matches!(&invocation, Some(inv) if inv.verb.is_background() || inv.verb.is_dialog());
             std::thread::spawn(move || {
                 let state = sweeper.state::<AppState>();
                 dragout::sweep(&state);
                 clipboard::sweep_unused(&state);
+                mounts::MountManager::sweep(&state);
+                if main && state.settings().mount.restore_on_start {
+                    state.mounts.restore(&sweeper);
+                }
             });
             match invocation {
                 Some(inv) if inv.verb.is_background() || inv.verb.is_dialog() => {
@@ -297,9 +317,19 @@ pub fn run() {
             commands::shell_status,
             commands::shell_request,
             commands::mount_probe,
+            commands::mount_list,
+            commands::mount_free_letters,
+            commands::mount_start,
+            commands::mount_stop,
+            commands::open_mount_driver_page,
             commands::shell_register,
             commands::shell_unregister,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running OmniZip");
+        .build(tauri::generate_context!())
+        .expect("error while building OmniZip")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<AppState>().mounts.unmount_all();
+            }
+        });
 }
