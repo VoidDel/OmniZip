@@ -11,21 +11,27 @@ use std::{
 
 use crate::{Error, ErrorCode, Result};
 
-/// Permission bits `File::create` gives a new file here: `0o666` less the process umask. Files
-/// written through a private temporary file (`0o600`) get them once in place. The umask cannot
-/// be read without setting it, which would race other threads creating files, so it is measured
+/// The process umask: the permission bits new files and directories never get. It cannot be
+/// read without setting it, which would race other threads creating files, so it is measured
 /// once on a probe file.
 #[cfg(unix)]
-pub fn new_file_mode() -> u32 {
+pub fn umask() -> u32 {
     use std::{os::unix::fs::PermissionsExt, sync::OnceLock};
-    static MODE: OnceLock<u32> = OnceLock::new();
-    *MODE.get_or_init(|| {
+    static MASK: OnceLock<u32> = OnceLock::new();
+    *MASK.get_or_init(|| {
         tempfile::Builder::new()
-            .permissions(fs::Permissions::from_mode(0o666))
+            .permissions(fs::Permissions::from_mode(0o777))
             .tempfile()
             .and_then(|f| f.as_file().metadata())
-            .map_or(0o644, |m| m.permissions().mode() & 0o777)
+            .map_or(0o022, |m| !m.permissions().mode() & 0o777)
     })
+}
+
+/// Permission bits `File::create` gives a new file here: `0o666` less the process umask. Files
+/// written through a private temporary file (`0o600`) get them once in place.
+#[cfg(unix)]
+pub fn new_file_mode() -> u32 {
+    0o666 & !umask()
 }
 
 /// `Read + Seek + Send`, boxed by engines that accept any input.
@@ -432,6 +438,10 @@ mod tests {
         File::create(&probe).unwrap();
         assert_eq!(created, mode(&probe));
         assert_eq!(created, new_file_mode());
+        // The measured umask covers the execute bits too.
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        assert_eq!(mode(&sub), 0o777 & !umask());
         // An archive updated in place keeps its permissions.
         fs::set_permissions(&dest, fs::Permissions::from_mode(0o640)).unwrap();
         let mut out = Output::create(&dest, None).unwrap();

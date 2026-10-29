@@ -141,6 +141,12 @@ pub struct FsSink {
     os: TargetOs,
     report: Report,
     dir_times: Vec<(PathBuf, SystemTime)>,
+    /// Directories this extraction created: only these take a mode from the archive, never a
+    /// directory that was already there (the destination itself included).
+    created_dirs: HashSet<PathBuf>,
+    /// Modes of directory entries, applied at the end so a read-only directory can still be
+    /// filled.
+    dir_modes: Vec<(PathBuf, u32)>,
     links: Vec<DeferredLink>,
     apply_all: Option<ConflictChoice>,
     origin: Option<Origin>,
@@ -174,6 +180,8 @@ impl FsSink {
             os: TargetOs::current(),
             report: Report::default(),
             dir_times: Vec::new(),
+            created_dirs: HashSet::new(),
+            dir_modes: Vec::new(),
             links: Vec::new(),
             apply_all: None,
             origin,
@@ -195,12 +203,15 @@ impl FsSink {
         &self.root
     }
 
-    /// Creates deferred links, applies directory times and returns the report.
+    /// Creates deferred links, applies directory modes and times and returns the report.
     pub fn finish(mut self, ctx: &JobCtx) -> Result<Report> {
         let links = std::mem::take(&mut self.links);
         for l in links {
             ctx.check()?;
             self.create_link(l);
+        }
+        for (p, mode) in &self.dir_modes {
+            apply_dir_mode(p, *mode);
         }
         // Deepest directories first so parents are not touched afterwards.
         self.dir_times
@@ -248,7 +259,7 @@ impl FsSink {
 
     /// Creates the directories leading to `comps` (excluding the last), refusing to follow
     /// links that could lead outside the root.
-    fn ensure_parents(&self, comps: &[String]) -> Result<PathBuf> {
+    fn ensure_parents(&mut self, comps: &[String]) -> Result<PathBuf> {
         let mut cur = self.root.clone();
         for c in &comps[..comps.len().saturating_sub(1)] {
             cur.push(c);
@@ -261,13 +272,13 @@ impl FsSink {
                     // A file is in the way of a directory.
                     return Err(Error::new(ErrorCode::AlreadyExists).with("path", cur.display()));
                 }
-                Err(_) => fs::create_dir(&cur).or_else(|e| {
-                    if cur.is_dir() {
-                        Ok(())
-                    } else {
-                        Err(Error::io(e, &cur))
+                Err(_) => match fs::create_dir(&cur) {
+                    Ok(()) => {
+                        self.created_dirs.insert(cur.clone());
                     }
-                })?,
+                    Err(_) if cur.is_dir() => {}
+                    Err(e) => return Err(Error::io(e, &cur)),
+                },
             }
         }
         Ok(self.root.join(comps.iter().collect::<PathBuf>()))
@@ -546,7 +557,16 @@ impl ExtractSink for FsSink {
                             .warn(ErrorCode::AlreadyExists, &entry.path, None);
                         return Ok(());
                     }
-                    Err(_) => fs::create_dir(&target).map_err(|e| Error::io(e, &target))?,
+                    Err(_) => {
+                        fs::create_dir(&target).map_err(|e| Error::io(e, &target))?;
+                        self.created_dirs.insert(target.clone());
+                    }
+                }
+                if self.opts.restore_permissions
+                    && let Some(mode) = entry.unix_mode
+                    && self.created_dirs.contains(&target)
+                {
+                    self.dir_modes.push((target.clone(), mode));
                 }
                 if self.opts.restore_mtime
                     && let Some(t) = entry.mtime
@@ -604,17 +624,30 @@ fn finish_file(file: &File, entry: &Entry, opts: &ExtractOptions) {
 }
 
 /// Final permissions of an extracted file, which was written through a private temporary file
-/// (`0o600`): the entry's own with `restore`, otherwise those of a new file.
+/// (`0o600`): the entry's own less the umask with `restore` (as `tar` does for ordinary users),
+/// otherwise those of a new file.
 #[cfg(unix)]
 fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
     use std::os::unix::fs::PermissionsExt;
     let mode = match entry.unix_mode.filter(|_| restore) {
         // Never restore setuid / setgid / sticky; always keep the owner able to read and write.
-        Some(mode) => (mode & 0o777) | 0o600,
+        Some(mode) => (mode & 0o777 & !crate::volume::umask()) | 0o600,
         None => crate::volume::new_file_mode(),
     };
     let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
 }
+
+/// Mode of an extracted directory entry, less the umask; the owner always keeps `rwx`.
+#[cfg(unix)]
+fn apply_dir_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = (mode & 0o777 & !crate::volume::umask()) | 0o700;
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+}
+
+/// Directory modes are Unix-only.
+#[cfg(not(unix))]
+fn apply_dir_mode(_path: &Path, _mode: u32) {}
 
 #[cfg(not(unix))]
 fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
@@ -862,16 +895,29 @@ mod tests {
         let mut key = file_entry(2, "key", b"c");
         key.unix_mode = Some(0o400);
         put(&mut s, &key, b"c", &ctx);
+        let mut open = file_entry(3, "open", b"d");
+        open.unix_mode = Some(0o777);
+        put(&mut s, &open, b"d", &ctx);
         s.finish(&ctx).unwrap();
+        let umask = crate::volume::umask();
         assert_eq!(
             mode(d.path().join("plain.txt")),
             crate::volume::new_file_mode()
         );
-        assert_eq!(mode(d.path().join("run.sh")), 0o755, "no setuid");
+        assert_eq!(
+            mode(d.path().join("run.sh")),
+            (0o755 & !umask) | 0o600,
+            "no setuid"
+        );
         assert_eq!(
             mode(d.path().join("key")),
             0o600,
             "owner keeps read and write"
+        );
+        assert_eq!(
+            mode(d.path().join("open")),
+            0o777 & !umask,
+            "less the umask"
         );
 
         let d = tempfile::tempdir().unwrap();
@@ -886,6 +932,56 @@ mod tests {
             mode(d.path().join("run.sh")),
             crate::volume::new_file_mode()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn created_dirs_get_the_entry_mode_at_the_end() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let dir = |id, path: &str, m| {
+            let mut e = Entry::new(id, path.into(), EntryKind::Dir);
+            e.unix_mode = Some(m);
+            e
+        };
+        let umask = crate::volume::umask();
+        let d = tempfile::tempdir().unwrap();
+        let pre = d.path().join("pre");
+        fs::create_dir(&pre).unwrap();
+        fs::set_permissions(&pre, fs::Permissions::from_mode(0o700)).unwrap();
+        let ctx = JobCtx::default();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        // Read-only, and listed before its contents: still filled.
+        s.entry(&dir(0, "ro/", 0o555), EntryData::None, &ctx)
+            .unwrap();
+        put(&mut s, &file_entry(1, "ro/a.txt", b"a"), b"a", &ctx);
+        // Listed after its contents (as in 7z): created for the file, then given its mode.
+        put(&mut s, &file_entry(2, "late/b.txt", b"b"), b"b", &ctx);
+        s.entry(&dir(3, "late/", 0o2750), EntryData::None, &ctx)
+            .unwrap();
+        // Already there before extraction: left alone.
+        s.entry(&dir(4, "pre/", 0o777), EntryData::None, &ctx)
+            .unwrap();
+        s.finish(&ctx).unwrap();
+        assert_eq!(fs::read(d.path().join("ro/a.txt")).unwrap(), b"a");
+        assert_eq!(mode(d.path().join("ro")), (0o555 & !umask) | 0o700);
+        assert_eq!(
+            mode(d.path().join("late")),
+            (0o750 & !umask) | 0o700,
+            "no setgid"
+        );
+        assert_eq!(mode(pre), 0o700);
+
+        let d = tempfile::tempdir().unwrap();
+        let opts = ExtractOptions {
+            restore_permissions: false,
+            ..ExtractOptions::default()
+        };
+        let mut s = sink(d.path(), opts);
+        s.entry(&dir(0, "x/", 0o711), EntryData::None, &ctx)
+            .unwrap();
+        s.finish(&ctx).unwrap();
+        assert_eq!(mode(d.path().join("x")), 0o777 & !umask);
     }
 
     #[test]

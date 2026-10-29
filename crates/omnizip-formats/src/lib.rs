@@ -55,6 +55,9 @@ pub fn convert(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+    // The output directory may not exist yet (`omnizip convert --out-dir`).
+    std::fs::create_dir_all(staging_parent)
+        .map_err(|e| omnizip_core::Error::io(e, staging_parent))?;
     let staging = tempfile::Builder::new()
         .prefix(".omnizip-convert-")
         .tempdir_in(staging_parent)
@@ -159,7 +162,8 @@ mod tests {
         let ctx = JobCtx::default();
         let d = tempfile::tempdir().unwrap();
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/rar/version.rar");
-        let dest = d.path().join("version.7z");
+        // Into a directory that does not exist yet.
+        let dest = d.path().join("out/version.7z");
         let wo = WriteOptions {
             format: FormatId::SevenZ,
             ..Default::default()
@@ -167,7 +171,7 @@ mod tests {
         convert(&r, &src, &dest, &OpenOptions::default(), &wo, &ctx).unwrap();
         let rd = r.open(&dest, &OpenOptions::default(), &ctx).unwrap();
         assert_eq!(rd.entries()[0].path, "VERSION");
-        let leftovers = fs::read_dir(d.path()).unwrap().count();
+        let leftovers = fs::read_dir(d.path().join("out")).unwrap().count();
         assert_eq!(leftovers, 1, "staging directory removed");
     }
 
