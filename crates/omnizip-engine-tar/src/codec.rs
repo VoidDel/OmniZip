@@ -13,7 +13,7 @@ pub fn decoder<'a, R: Read + Send + 'a>(codec: Codec, input: R) -> io::Result<De
     Ok(match codec {
         Codec::Gzip => Box::new(flate2::bufread::MultiGzDecoder::new(input)),
         Codec::Bzip2 => Box::new(bzip2::bufread::MultiBzDecoder::new(input)),
-        Codec::Xz => Box::new(liblzma::bufread::XzDecoder::new_multi_decoder(input)),
+        Codec::Xz => Box::new(XzMt::new(input)?),
         Codec::Lzma => {
             let stream =
                 liblzma::stream::Stream::new_lzma_decoder(u64::MAX).map_err(io::Error::other)?;
@@ -28,6 +28,94 @@ pub fn decoder<'a, R: Read + Send + 'a>(codec: Codec, input: R) -> io::Result<De
         Codec::Lz4 => Box::new(lz4_flex::frame::FrameDecoder::new(input)),
         Codec::Brotli => Box::new(brotli::Decompressor::new(input, 64 * 1024)),
     })
+}
+
+/// .xz decoded on several threads: the blocks of a multithreaded encoder (ours, `xz -T`)
+/// decode in parallel, other files as on one thread. Concatenated streams are read on as `xz`
+/// reads them, since liblzma's binding cannot ask its multithreaded decoder to.
+struct XzMt<R> {
+    input: R,
+    stream: liblzma::stream::Stream,
+    /// A stream has ended; another may follow after zero padding.
+    between: bool,
+}
+
+impl<R> XzMt<R> {
+    fn new(input: R) -> io::Result<Self> {
+        Ok(Self {
+            input,
+            stream: Self::stream()?,
+            between: false,
+        })
+    }
+
+    fn stream() -> io::Result<liblzma::stream::Stream> {
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get() as u32);
+        liblzma::stream::MtStreamBuilder::new()
+            .threads(threads)
+            // Above this, fewer threads (down to one); never a failure.
+            .memlimit_threading(1 << 30)
+            .memlimit_stop(u64::MAX)
+            .decoder()
+            .map_err(io::Error::other)
+    }
+}
+
+impl<R: io::BufRead> Read for XzMt<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        use liblzma::stream::{Action, Status};
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.between {
+                let input = self.input.fill_buf()?;
+                if input.is_empty() {
+                    return Ok(0);
+                }
+                let zeros = input.iter().take_while(|&&b| b == 0).count();
+                if zeros > 0 {
+                    self.input.consume(zeros);
+                    continue;
+                }
+                self.stream = Self::stream()?;
+                self.between = false;
+            }
+            let (read, consumed, eof, ret);
+            {
+                let input = self.input.fill_buf()?;
+                eof = input.is_empty();
+                let (before_in, before_out) = (self.stream.total_in(), self.stream.total_out());
+                let action = if eof { Action::Finish } else { Action::Run };
+                ret = self.stream.process(input, buf, action);
+                read = (self.stream.total_out() - before_out) as usize;
+                consumed = (self.stream.total_in() - before_in) as usize;
+            }
+            self.input.consume(consumed);
+            let status = ret?;
+            if status == Status::StreamEnd {
+                self.between = true;
+            }
+            if read > 0 {
+                return Ok(read);
+            }
+            if status == Status::StreamEnd {
+                continue;
+            }
+            if eof {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "premature eof",
+                ));
+            }
+            if consumed == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "corrupt xz stream",
+                ));
+            }
+        }
+    }
 }
 
 /// An encoder that must be finished explicitly to write its trailer.
@@ -279,6 +367,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn xz(data: &[u8], level: Level) -> Vec<u8> {
+        let mut e = Encoder::new(Some(Codec::Xz), Vec::new(), level, 4, None, 0).unwrap();
+        e.write_all(data).unwrap();
+        e.finish().unwrap()
+    }
+
+    fn unxz(packed: &[u8]) -> io::Result<Vec<u8>> {
+        let mut back = Vec::new();
+        decoder(Codec::Xz, packed)?.read_to_end(&mut back)?;
+        Ok(back)
+    }
+
+    #[test]
+    fn xz_blocks_streams_and_damage() {
+        // Many blocks (1 MiB each at the fastest level), decoded on several threads.
+        let data: Vec<u8> = (0..8_000_000u32)
+            .map(|i| (i % 251) as u8 ^ (i >> 13) as u8)
+            .collect();
+        let packed = xz(&data, Level::Fastest);
+        assert_eq!(unxz(&packed).unwrap(), data);
+        // Concatenated streams with padding between them, as `xz` accepts.
+        let mut two = xz(b"first ", Level::Normal);
+        two.extend([0; 8]);
+        two.extend(xz(b"second", Level::Normal));
+        two.extend([0; 4]);
+        assert_eq!(unxz(&two).unwrap(), b"first second");
+        // Cut short, or damaged: an error, not silently less data.
+        assert!(unxz(&packed[..packed.len() / 2]).is_err());
+        let mut bad = packed.clone();
+        bad[packed.len() / 2] ^= 0x55;
+        assert!(unxz(&bad).is_err());
     }
 
     #[test]
