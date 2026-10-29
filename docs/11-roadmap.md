@@ -91,9 +91,9 @@
 | 翻译质量 | M3 | 提前 4 周接入平台，审校者到位 |
 | macOS 公证 / 扩展审核问题 | M2 | 提前用开发者账号跑通全链路 |
 
-## 8. 实施状态（2026-10-27，Windows 优先）
+## 8. 实施状态（2026-10-29，Windows 优先）
 
-本节记录按路线图实施 M0 / M1 的实际进度。"已验证"指有自动化测试或在 Windows 11 上实际运行并截图核对；macOS 只做过开发运行与文件关联的实机检查（见 07 §4.2）；未在 Linux 上构建或运行过。
+本节记录按路线图实施 M0 / M1 的实际进度。"已验证"指有自动化测试或在 Windows 11 上实际运行并截图核对；macOS 只做过开发运行与文件关联的实机检查（见 07 §4.2）；Linux 在 WSL（Debian 13）中构建、跑测试并实测过 CLI 与桌面应用；CI 在 Windows / macOS / Linux 上运行。
 
 ### 8.1 M0 技术验证
 
@@ -101,7 +101,7 @@
 |---|---|---|
 | 1 | Tauri 2 壳 | 已实现自绘标题栏、Mica、窗口初始隐藏防闪白、窗口状态记忆（Windows 已验证）。未做：标题栏最大化按钮的 Snap Layout 悬停菜单、冷启动计时、三平台截图对比 |
 | 2 | 百万条目虚拟列表 | 已实现 Rust `TreeIndex` 分页 + 前端 TanStack Virtual。未做：百万条目下的帧率与内存测量 |
-| 3 | ZIP / 7z / tar.zst round-trip | 已验证（引擎与注册表测试覆盖 ZIP、7z、TAR、tar.gz / xz / zst）。未做：与 7-Zip 的互操作差分与速度对比 |
+| 3 | ZIP / 7z / tar.zst round-trip | 已验证（引擎与注册表测试覆盖 ZIP、7z、TAR、tar.gz / xz / zst）。已与 Bandizip 7.47、Windows tar 对比速度，Bandizip 与 Python zipfile / tarfile 能读 OmniZip 写的压缩包（2026-10-29，见 §8.4）。未做：与 7-Zip 本身的对比 |
 | 4 | Win11 现代右键菜单 | 已验证（2026-10-27）：用自签测试证书签名并安装 MSIX 后，Win11 一级菜单出现 OmniZip 子菜单（压缩包上显示打开、解压到此处、解压到"名称\"、解压到…、挂载、测试），"解压到此处"端到端解压成功；COM 类可从未打包进程激活；`omnizip` 执行别名可用。未做：ARM64 构建、Sparse Package（NSIS 渠道的一级菜单） |
 | 5 | 挂载 | 已验证（2026-10-29）：挂载核心 `omnizip-vfs` 与 WinFsp 后端 `omnizip-mount-winfsp`，经真实驱动挂载 ZIP / 固实 7z 到盘符与文件夹（见 12 §13）。Linux `fuser` 与 macOS FSKit / NFS 对比未开始 |
 | 6 | 文件名编码探测 | 已实现（chardetng + 区域提示），有单元测试。未做：200 样本准确率评测 |
@@ -119,12 +119,39 @@
 | CLI | 已完成：`x e a l t i formats completions`，另有 `d rn convert gui` |
 | 挂载 | Windows 已完成：WinFsp 只读挂载、挂载对话框、侧栏与设置页的已挂载列表、退出时卸载 / 启动时恢复。挂载暂由桌面应用托管，守护进程 `omnizip-mountd` 与 CLI `mount` 未做 |
 | 打包 | NSIS 安装包已产出（含 CLI、Shell DLL、安装 / 卸载钩子）；MSIX 可用自签测试证书签名并安装（`platform/windows/msix/new-test-cert.ps1`），正式签名待证书；macOS 可产出未签名的 `.app` 与 `.dmg`（本机架构） |
-| CI | 已编写 `ci`、`release`、`nightly-fuzz` 工作流；仓库尚未推送，工作流未实际运行 |
-| 验收 | 未开始：内部一周试用、崩溃率统计、性能预算全面测量 |
+| CI | `ci`、`release`、`nightly-fuzz` 工作流；仓库已推送到 GitHub，`ci` 在 Windows / macOS / Linux 上通过 |
+| 验收 | 已做一轮性能基准与优化（§8.4）。未开始：内部一周试用、崩溃率统计、性能预算全面测量 |
 
 ### 8.3 后续优先级
 
 1. 挂载守护进程 `omnizip-mountd` 与 CLI `mount` / `unmount` / `mounts`；安装包中的 WinFsp 可选组件。
 2. 申请正式代码签名证书（自签证书已验证 Win11 一级菜单）；补 ARM64 DLL 与 Sparse Package。
-3. 推送仓库，让 CI 首次在 Windows / macOS / Linux 运行并修复平台差异。
-4. 完成 M0 未做的测量项：百万条目列表、与 7-Zip 的速度与互操作、编码探测准确率、AppVerifier。
+3. tar 根目录条目 `./`（`tar -C dir .` 打的包）被当作越界路径拒绝，退出码 8；应视为目标目录本身。
+4. 完成 M0 未做的测量项：百万条目列表、与 7-Zip 本身的速度与互操作、编码探测准确率、AppVerifier。
+5. 性能余量（§8.4）：解压时并行写文件（预计再快约 20%）；7z 压缩包比 Bandizip 的大 2–11%（可能与 LZMA2 多线程分块等于字典大小有关，未查证）。
+
+### 8.4 性能与正确性（2026-10-29）
+
+基准：Windows 11、32 线程、NTFS（Defender 开启），release 构建复制到项目目录外运行（在项目目录内运行时文件密集操作慢约 1.5 倍），单次运行、误差约 ±10%。小文件组：400 个 crate 源码目录，14,891 个文件、约 2,700 个目录、208 MB；大文件组：4 个文件、847 MB（含 256 MB 随机数据）。"之前"为 67b87ac。
+
+| 场景 | 之前 | 现在 | Bandizip 7.47 / Windows tar |
+|---|---|---|---|
+| 解压小文件：ZIP / 7z | 11.8 / 11.1 s | 5.1 / 4.8 s | 8.4 / 8.1 s |
+| 解压小文件：tar.gz / tar.xz | 11.2 / 12.8 s | 4.8 / 4.4 s | tar.gz 5.3 s |
+| 解压大文件：tar.xz | 5.5 s | 0.96 s | — |
+| 压缩小文件：ZIP / tar.gz | 3.9 / 3.7 s | 1.8 / 2.3 s | ZIP 3.8 s |
+| 压缩大文件：ZIP / tar.gz | 8.4 / 8.4 s | 1.0 / 0.84 s | ZIP 1.2 s |
+| 压缩：7z 小文件 / 大文件 | 6.8 / 10.2 s | 4.8 / 9.4 s | 8.8 / 10.5 s |
+
+压缩包大小不变。tar.xz 压缩、大文件的 ZIP / 7z / tar.gz 解压原本已接近 I/O 上限，未变。
+
+做了什么：
+- 解压：新文件直接写到目标位置，只有替换已有文件时才经临时文件 + rename（Windows 上逐文件 rename 最贵）；已确认的目录不再逐级 stat；拷贝缓冲区只分配一次（09 §3）。
+- 压缩：ZIP 小文件每个线程压缩一个、按原顺序写入；16 MiB 以上的 Deflate 文件与 gzip 用 pigz 式分块并行 Deflate（`omnizip_core::deflate`，03 说明）。
+- .xz 多线程解码（tar.xz 列出与解压各解码一遍，两遍都受益）。
+- 写压缩包经 1 MiB 缓冲（plain tar、ZIP 原地更新快 13–30%）。
+
+同期修复的正确性问题：
+- 7z：sevenz-rust2 0.24.1 写 `kEmptyFile` 位向量过短，空文件之后还有较多目录时压缩包无法打开（或静默丢失文件名）。写入时先写全部目录绕开，已报告上游 [hasenbanck/sevenz-rust2#155](https://github.com/hasenbanck/sevenz-rust2/issues/155)。此前版本写出的这类 7z 仍无法打开。
+- Unix 权限：新建的压缩包与解压出的文件不再固定为 0600；还原的权限去掉 umask；目录权限只还原本次新建的目录（09 §3）。
+- `convert --out-dir` 指向不存在的目录时自动创建。

@@ -572,9 +572,9 @@ fn create(dest: &Path, sources: &[Source], opts: &WriteOptions, ctx: &JobCtx) ->
     };
 
     // Directories go first. sevenz-rust2 writes the kEmptyFile bit vector only up to the last
-    // empty file, while readers (7-Zip too) take one bit per stream-less entry: a directory after
+    // empty file, while readers (Bandizip too) take one bit per stream-less entry: a directory after
     // the last empty file would leave the header unreadable. With the directories first, the
-    // last stream-less entry is always an empty file.
+    // last stream-less entry is always an empty file (hasenbanck/sevenz-rust2#155).
     for s in sources.iter().filter(|s| s.kind == SourceKind::Dir) {
         ctx.check()?;
         w.push_archive_entry(entry_for(s), None::<&[u8]>)

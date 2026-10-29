@@ -21,6 +21,7 @@
 
 说明：
 - ZIP 读 PPMd / Deflate64 仅解压；写入不提供，以保证最大兼容性。
+- 7z 写入先写全部目录条目再写文件：sevenz-rust2 0.24.1 写 `kEmptyFile` 位向量时只写到最后一个空文件，之后还有目录会让压缩包无法打开（[hasenbanck/sevenz-rust2#155](https://github.com/hasenbanck/sevenz-rust2/issues/155)）。上游修复后可去掉这一顺序要求。
 - ZIP 与 gzip 写入默认多线程（`--threads`，0 = 全部核心）：ZIP 的小文件每个线程压缩一个、按原顺序写入，16 MiB 以上的 Deflate 文件与 gzip 流按 1 MiB 分块并行压缩，每块以前 32 KiB 为字典、以 sync flush 结束后拼接（与 pigz 相同，任何解压器都能读，压缩率差别在千分之几内）。加密的 ZIP 条目仍单线程写入。
 - xz / zstd 写入默认多线程；zstd 提供 `--long` 与字典选项（高级）。
 - Office / EPUB 等基于 ZIP 的文档在"打开"时默认交给系统关联程序，仅在用户显式"用 OmniZip 打开"时作为压缩包浏览。
