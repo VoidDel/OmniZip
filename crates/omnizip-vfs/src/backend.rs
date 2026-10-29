@@ -119,6 +119,20 @@ pub fn winfsp_dll() -> Option<PathBuf> {
     Some(Path::new(&dir).join("bin").join(dll))
 }
 
+/// A DWORD setting of WinFsp (`HKLM\SOFTWARE\WinFsp`, 32-bit view first), such as
+/// `MountUseMountmgrFromFSD`.
+#[cfg(windows)]
+pub fn winfsp_setting(name: &str) -> Option<u32> {
+    ["SOFTWARE\\WOW6432Node\\WinFsp", "SOFTWARE\\WinFsp"]
+        .iter()
+        .find_map(|k| {
+            windows_registry::LOCAL_MACHINE
+                .open(k)
+                .and_then(|k| k.get_u32(name))
+                .ok()
+        })
+}
+
 #[cfg(windows)]
 fn probe_system() -> (BackendHealth, Option<String>) {
     let Some(path) = winfsp_dll() else {

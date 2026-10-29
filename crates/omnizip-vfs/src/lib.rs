@@ -185,6 +185,14 @@ pub type FsResult<T> = Result<T, FsError>;
 pub trait VirtualFs: Send + Sync {
     /// Child `name` of directory `parent`, case-folded when the volume is case-insensitive.
     fn lookup(&self, parent: NodeId, name: &OsStr) -> FsResult<Attr>;
+    /// [`lookup`](Self::lookup), with the child's name as listings show it: a case-insensitive
+    /// volume reports it to Windows as the normalized name of a path opened in another case.
+    fn lookup_named(&self, parent: NodeId, name: &OsStr) -> FsResult<(Attr, String)> {
+        Ok((
+            self.lookup(parent, name)?,
+            name.to_string_lossy().into_owned(),
+        ))
+    }
     fn getattr(&self, node: NodeId) -> FsResult<Attr>;
     /// Up to `max` items after `cursor` (`0` starts at the beginning), without `.` and `..`.
     fn readdir(&self, dir: NodeId, cursor: u64, max: usize) -> FsResult<Vec<DirEntry>>;

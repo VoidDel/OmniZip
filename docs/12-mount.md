@@ -91,10 +91,10 @@ pub trait VirtualFs: Send + Sync {
 | 方面 | 设计 |
 |---|---|
 | 名称 | 与解压相同的净化规则；Windows / macOS 默认大小写不敏感，同目录大小写冲突追加 ` (2)`；非法字符替换为 `_` 并在"属性"中显示原名；超长名截断但保留扩展名；文件名编码修复（见 02 §4.3）同样生效 |
-| 元数据 | mtime / atime / ctime；Unix mode（Linux / macOS，默认去掉 setuid / setgid）；Windows 只读属性，可选 OFFLINE 属性；大小 = 声明的未压缩大小 |
+| 元数据 | mtime / atime / ctime；Unix mode（Linux / macOS，默认去掉 setuid / setgid）；Windows 上文件不带只读属性（只读的是卷：从卷中复制出去的是普通文件；文件只读还会让写入先报"拒绝访问"），可选 OFFLINE 属性；大小 = 声明的未压缩大小。Windows 上以任意大小写打开的路径报告卷中原本的写法（规范化名称），如 `GetFinalPathNameByHandle`、进程映像路径中 |
 | 符号链接 | Linux / macOS：目标在卷内时呈现为符号链接，否则呈现为内容为目标路径的普通文件；Windows：一律普通文件 |
 | 硬链接 | 呈现为独立文件 |
-| 卷信息 | 卷标 = 压缩包名；文件系统名 `OmniZip`；序列号 = 压缩包哈希前 32 位；Windows 上以**磁盘卷**（`WinFsp.Disk`）呈现、属性为只读介质（写入、删除报"介质受写入保护"）。原计划的网络驱动器类型不采用：WinFsp 只允许磁盘卷挂载到文件夹，网络卷在资源管理器中的集成还依赖 WinFsp 网络提供程序（2026-10-29 实施时决定） |
+| 卷信息 | 卷标 = 压缩包名；文件系统名 `OmniZip`；序列号 = 压缩包哈希前 32 位；Windows 上以**磁盘卷**（`WinFsp.Disk`）呈现、属性为只读介质：与写保护介质相同，以写入、删除、改属性或改安全描述符的权限打开即报"介质受写入保护"，新建、覆盖、改名同样；只要求 `MAXIMUM_ALLOWED` 的打开成功、只能读。盘符优先经挂载管理器创建（`\\.\X:`，全局可见）：只有挂载管理器登记的卷，`GetFinalPathNameByHandle` 才能给出盘符路径，部分程序靠它找到自己的文件；这需要管理员权限或 WinFsp 的 `MountUseMountmgrFromFSD` 设置，否则退回本登录会话的盘符（与此前相同，这类调用报错 1005）。文件夹挂载点不经挂载管理器。原计划的网络驱动器类型不采用：WinFsp 只允许磁盘卷挂载到文件夹，网络卷在资源管理器中的集成还依赖 WinFsp 网络提供程序（2026-10-29 实施时决定） |
 | 可写（v1.x，仅 ZIP） | 写时复制 overlay 目录；新建 / 修改 / 删除记入日志；卸载时询问"保存到压缩包 / 另存为 / 放弃"，保存走 ZIP 原地更新（见 03 §6.3）；期间源包加锁 |
 
 ## 7. 安全
@@ -176,8 +176,8 @@ omnizip mount   <archive> --exec -- <命令…>        # 临时挂载，命令�
 
 | 部分 | 内容 |
 |---|---|
-| `crates/omnizip-mount-winfsp` | 运行时从 WinFsp 安装目录加载 `winfsp-x64.dll`（未装 WinFsp 时应用照常启动），只声明只读卷需要的 API，构建不需要 WinFsp SDK 或 libclang。磁盘卷，挂载到盘符（默认从 Z: 向前取空闲）或空文件夹（卸载后恢复为空文件夹）；大小写不敏感、文件只读属性、可选脱机属性；回调内的 panic 转为 I/O 错误 |
+| `crates/omnizip-mount-winfsp` | 运行时从 WinFsp 安装目录加载 `winfsp-x64.dll`（未装 WinFsp 时应用照常启动），只声明只读卷需要的 API，构建不需要 WinFsp SDK 或 libclang。磁盘卷，挂载到盘符（默认从 Z: 向前取空闲；能用挂载管理器时为全局盘符）或空文件夹（卸载后恢复为空文件夹）；大小写不敏感并报告规范化名称、写操作一律"介质受写入保护"、可选脱机属性；回调内的 panic 转为 I/O 错误 |
 | 桌面应用 | 挂载对话框（盘符 / 文件夹、卷标、固实包预热、加密包询问密码并在挂载前校验）；挂载后自动在资源管理器打开；侧栏底部与设置页列出已挂载（打开、卸载、缓存占用）；设置项全部生效：缓存上限、退出时卸载、启动时恢复、后台预热、脱机属性；WinFsp 未安装时设置页提供下载按钮 |
-| 测试 | `omnizip-mount-winfsp/tests/winfsp.rs` 经真实 WinFsp 驱动挂载 ZIP（盘符）与固实 7z（文件夹），用标准文件 API 校验目录、内容、随机回读、只读与占用检测；未安装 WinFsp 时跳过。桌面应用在 Windows 11 上实机走通挂载、读取、卸载、退出卸载、启动恢复、后台保持、错误 / 正确密码 |
+| 测试 | `omnizip-mount-winfsp/tests/winfsp.rs` 经真实 WinFsp 驱动挂载 ZIP（盘符）与固实 7z（文件夹），用标准文件 API 校验目录、内容、随机回读、各种写操作的错误码（`ERROR_WRITE_PROTECT`）、`MAXIMUM_ALLOWED` 只读打开、规范化名称与占用检测；挂载管理器盘符以管理员身份实测（2026-10-29）：`GetFinalPathNameByHandle` 给出盘符路径与卷 GUID 路径，`mountvol` 可见，卸载后 `MountedDevices` 无残留；未安装 WinFsp 时跳过。桌面应用在 Windows 11 上实机走通挂载、读取、卸载、退出卸载、启动恢复、后台保持、错误 / 正确密码 |
 
 **未开始**：`omnizip-mount-fuse`、macOS 后端（FSKit 实测待 M0 完成）、`omnizip-mountd` 守护进程（目前由桌面应用托管，见 §4）、CLI `mount` / `unmount` / `mounts`、tar.gz 检查点索引与 ZIP 条目内的流式回退（当前一律整条目解码进缓存）、卸载时提示占用进程（Restart Manager）、托盘菜单。

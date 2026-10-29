@@ -254,6 +254,17 @@ impl ArchiveFs {
         Ok(view)
     }
 
+    /// The listing of `parent` and the position of `name` in it.
+    fn find(&self, parent: NodeId, name: &OsStr) -> FsResult<(Arc<DirView>, usize)> {
+        let view = self.dir_view(parent)?;
+        let name = name.to_str().ok_or(FsError::NotFound)?;
+        let i = *view
+            .index
+            .get(self.opts.names.fold(name).as_ref())
+            .ok_or(FsError::NotFound)?;
+        Ok((view, i))
+    }
+
     /// Resolves a link target to a node: relative to the link's directory for symbolic links,
     /// relative to the archive root for hard links. `None` when it leaves the volume.
     fn link_node(&self, node: NodeId, target: &str, from_root: bool) -> Option<NodeId> {
@@ -564,13 +575,13 @@ impl ExtractSink for CacheSink<'_> {
 
 impl VirtualFs for ArchiveFs {
     fn lookup(&self, parent: NodeId, name: &OsStr) -> FsResult<Attr> {
-        let view = self.dir_view(parent)?;
-        let name = name.to_str().ok_or(FsError::NotFound)?;
-        let i = *view
-            .index
-            .get(self.opts.names.fold(name).as_ref())
-            .ok_or(FsError::NotFound)?;
+        let (view, i) = self.find(parent, name)?;
         Ok(self.shape(view.nodes[i])?.attr)
+    }
+
+    fn lookup_named(&self, parent: NodeId, name: &OsStr) -> FsResult<(Attr, String)> {
+        let (view, i) = self.find(parent, name)?;
+        Ok((self.shape(view.nodes[i])?.attr, view.names[i].clone()))
     }
 
     fn getattr(&self, node: NodeId) -> FsResult<Attr> {

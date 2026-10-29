@@ -104,7 +104,8 @@ fn check_contents(r: &Path, big: &[u8]) {
     let big_path = photos.join("media").join("big.bin");
     let meta = fs::metadata(&big_path).unwrap();
     assert_eq!(meta.len(), big.len() as u64);
-    assert!(meta.permissions().readonly());
+    // The volume is read-only, not its files: copies taken out are ordinary files.
+    assert!(!meta.permissions().readonly());
     assert_eq!(fs::read(&big_path).unwrap(), big);
     // Random access, backwards.
     let mut f = fs::File::open(&big_path).unwrap();
@@ -116,9 +117,64 @@ fn check_contents(r: &Path, big: &[u8]) {
     }
 
     assert!(fs::metadata(photos.join("missing.txt")).is_err());
-    assert!(fs::write(photos.join("new.txt"), "x").is_err());
-    assert!(fs::remove_file(photos.join("docs").join("readme.txt")).is_err());
-    assert!(fs::create_dir(photos.join("newdir")).is_err());
+    check_write_protected(&photos);
+    check_normalized_name(&photos);
+}
+
+/// `ERROR_WRITE_PROTECT`, as on read-only media.
+fn write_protected<T: std::fmt::Debug>(r: std::io::Result<T>, what: &str) {
+    let e = r.expect_err(what);
+    assert_eq!(e.raw_os_error(), Some(19), "{what}: {e}");
+}
+
+/// Every way of changing something is refused with "write protected", not "access denied";
+/// an open asking for whatever is allowed still reads.
+fn check_write_protected(photos: &Path) {
+    let readme = photos.join("docs").join("readme.txt");
+    write_protected(fs::write(photos.join("new.txt"), "x"), "new file");
+    write_protected(fs::write(&readme, "x"), "overwrite");
+    write_protected(
+        fs::OpenOptions::new().read(true).write(true).open(&readme),
+        "open for writing",
+    );
+    write_protected(fs::remove_file(&readme), "delete");
+    write_protected(fs::rename(&readme, photos.join("moved.txt")), "rename");
+    write_protected(fs::create_dir(photos.join("newdir")), "new directory");
+    let mut ro = fs::metadata(&readme).unwrap().permissions();
+    ro.set_readonly(true);
+    write_protected(fs::set_permissions(&readme, ro), "change attributes");
+
+    use std::{io::Write, os::windows::fs::OpenOptionsExt};
+    const MAXIMUM_ALLOWED: u32 = 0x0200_0000;
+    let mut f = fs::OpenOptions::new()
+        .access_mode(MAXIMUM_ALLOWED)
+        .open(&readme)
+        .expect("MAXIMUM_ALLOWED opens read-only");
+    let mut head = [0; 7];
+    f.read_exact(&mut head).unwrap();
+    assert_eq!(&head, b"read me");
+    write_protected(f.write_all(b"x"), "write through MAXIMUM_ALLOWED");
+}
+
+/// Opened in another case, a file reports its name as the volume spells it.
+fn check_normalized_name(photos: &Path) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+    const VOLUME_NAME_NT: u32 = 2;
+    let f = fs::File::open(photos.join("相册").join("A.TXT")).unwrap();
+    let mut buf = [0u16; 1024];
+    // SAFETY: an open handle and a buffer of the length given.
+    let n = unsafe {
+        GetFinalPathNameByHandleW(
+            f.as_raw_handle(),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            VOLUME_NAME_NT,
+        )
+    } as usize;
+    assert!(n > 0 && n < buf.len());
+    let name = String::from_utf16_lossy(&buf[..n]);
+    assert!(name.ends_with(r"\photos\相册\a.txt"), "{name}");
 }
 
 #[test]

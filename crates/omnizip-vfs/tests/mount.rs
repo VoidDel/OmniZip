@@ -132,6 +132,9 @@ fn zip_volume_reads_like_a_disk() {
     assert_eq!(read_all(&fs, a.node, 3).unwrap(), b"alpha");
     if NameRules::current().case_insensitive {
         assert_eq!(resolve(&fs, "PHOTOS\\Docs\\README.TXT").unwrap().size, 800);
+        // The name as listings spell it, whatever the case asked for.
+        let (found, name) = fs.lookup_named(ROOT, OsStr::new("PHOTOS")).unwrap();
+        assert_eq!((found.node, name.as_str()), (top.node, "photos"));
     } else {
         assert_eq!(
             resolve(&fs, "PHOTOS/docs/readme.txt"),

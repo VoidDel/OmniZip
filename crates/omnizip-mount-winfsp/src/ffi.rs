@@ -21,13 +21,22 @@ pub const STATUS_FILE_IS_A_DIRECTORY: NTSTATUS = 0xC000_00BA_u32 as i32;
 pub const STATUS_UNEXPECTED_IO_ERROR: NTSTATUS = 0xC000_00E9_u32 as i32;
 pub const STATUS_NOT_A_DIRECTORY: NTSTATUS = 0xC000_0103_u32 as i32;
 
-pub const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
 pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 pub const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
 
 /// `CreateOptions` bits.
 pub const FILE_DIRECTORY_FILE: u32 = 0x1;
 pub const FILE_NON_DIRECTORY_FILE: u32 = 0x40;
+pub const FILE_DELETE_ON_CLOSE: u32 = 0x1000;
+
+/// Access rights that change a file or a directory (`winnt.h`): write data or append (add a
+/// file or a subdirectory), extended attributes, delete a child, write attributes, delete,
+/// change the security, and the generic rights that include writing.
+pub const WRITE_ACCESS: u32 = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x1_0000 | 0x4_0000 | 0x8_0000
+    | 0x4000_0000 // GENERIC_WRITE
+    | 0x1000_0000; // GENERIC_ALL
+pub const FILE_ALL_ACCESS: u32 = 0x1F_01FF;
+pub const MAXIMUM_ALLOWED: u32 = 0x0200_0000;
 
 /// `FSP_FSCTL_DISK_DEVICE_NAME`.
 pub const DISK_DEVICE_NAME: &str = "WinFsp.Disk";
@@ -98,6 +107,33 @@ pub struct FileInfo {
     pub EaSize: u32,
 }
 
+/// `FSP_FSCTL_OPEN_FILE_INFO`: what the `FileInfo` argument of `Open` really points to. A
+/// case-insensitive file system may write the normalized name (the path from the root as the
+/// volume spells it) into `NormalizedName`, `NormalizedNameSize` bytes at most, and set the
+/// size it wrote; otherwise WinFsp reports the opened name in upper case.
+#[repr(C)]
+pub struct OpenFileInfo {
+    pub FileInfo: FileInfo,
+    pub NormalizedName: *mut u16,
+    pub NormalizedNameSize: u16,
+}
+
+/// `FSP_FILE_SYSTEM_OPERATION_CONTEXT`: the request a dispatcher thread is serving.
+#[repr(C)]
+pub struct OperationContext {
+    pub Request: *const u8,
+    pub Response: *mut c_void,
+}
+
+/// Fields of `FSP_FSCTL_TRANSACT_REQ` read from a create request: byte offsets of `Kind`,
+/// `Req.Create.CreateOptions` and `Req.Create.DesiredAccess`, and the create kind.
+pub mod request {
+    pub const KIND: usize = 4;
+    pub const CREATE_OPTIONS: usize = 16;
+    pub const DESIRED_ACCESS: usize = 48;
+    pub const CREATE_KIND: u32 = 1;
+}
+
 /// `FSP_FSCTL_DIR_INFO` without its trailing name; `Size` covers the header and the name.
 #[repr(C)]
 pub struct DirInfo {
@@ -120,6 +156,7 @@ const _: () = {
     assert!(size_of::<VolumeInfo>() == 88);
     assert!(size_of::<FileInfo>() == 72);
     assert!(size_of::<DirInfo>() == 104);
+    assert!(size_of::<OpenFileInfo>() == 88);
     assert!(size_of::<Interface>() == 64 * size_of::<usize>());
 };
 
@@ -156,16 +193,32 @@ pub struct Interface {
     pub Close: Option<unsafe extern "C" fn(Fs, *mut c_void)>,
     pub Read:
         Option<unsafe extern "C" fn(Fs, *mut c_void, *mut c_void, u64, u32, *mut u32) -> NTSTATUS>,
-    pub Write: usize,
+    pub Write: Option<
+        unsafe extern "C" fn(
+            Fs,
+            *mut c_void,
+            *mut c_void,
+            u64,
+            u32,
+            u8,
+            u8,
+            *mut u32,
+            *mut FileInfo,
+        ) -> NTSTATUS,
+    >,
     pub Flush: usize,
     pub GetFileInfo: Option<unsafe extern "C" fn(Fs, *mut c_void, *mut FileInfo) -> NTSTATUS>,
-    pub SetBasicInfo: usize,
-    pub SetFileSize: usize,
-    pub CanDelete: usize,
-    pub Rename: usize,
+    pub SetBasicInfo: Option<
+        unsafe extern "C" fn(Fs, *mut c_void, u32, u64, u64, u64, u64, *mut FileInfo) -> NTSTATUS,
+    >,
+    pub SetFileSize:
+        Option<unsafe extern "C" fn(Fs, *mut c_void, u64, u8, *mut FileInfo) -> NTSTATUS>,
+    pub CanDelete: Option<unsafe extern "C" fn(Fs, *mut c_void, *const u16) -> NTSTATUS>,
+    pub Rename:
+        Option<unsafe extern "C" fn(Fs, *mut c_void, *const u16, *const u16, u8) -> NTSTATUS>,
     pub GetSecurity:
         Option<unsafe extern "C" fn(Fs, *mut c_void, *mut c_void, *mut usize) -> NTSTATUS>,
-    pub SetSecurity: usize,
+    pub SetSecurity: Option<unsafe extern "C" fn(Fs, *mut c_void, u32, *mut c_void) -> NTSTATUS>,
     pub ReadDirectory: Option<
         unsafe extern "C" fn(
             Fs,
@@ -201,6 +254,7 @@ type SetMountPointFn = unsafe extern "C" fn(Fs, *const u16) -> NTSTATUS;
 type StartDispatcherFn = unsafe extern "C" fn(Fs, u32) -> NTSTATUS;
 type MountPointFn = unsafe extern "C" fn(Fs) -> *const u16;
 type AddDirInfoFn = unsafe extern "C" fn(*mut DirInfo, *mut c_void, u32, *mut u32) -> u8;
+type OperationContextFn = unsafe extern "C" fn() -> *mut OperationContext;
 
 /// Exported WinFsp functions.
 pub struct Api {
@@ -212,6 +266,8 @@ pub struct Api {
     pub stop_dispatcher: FsFn,
     pub mount_point: MountPointFn,
     pub add_dir_info: AddDirInfoFn,
+    /// The request of the calling dispatcher thread (only valid inside a callback).
+    pub operation_context: OperationContextFn,
 }
 
 /// The WinFsp library, loaded on first use and kept for the life of the process.
@@ -250,5 +306,6 @@ fn load() -> Result<Api, String> {
         stop_dispatcher: sym!("FspFileSystemStopDispatcher": FsFn),
         mount_point: sym!("FspFileSystemMountPointF": MountPointFn),
         add_dir_info: sym!("FspFileSystemAddDirInfo": AddDirInfoFn),
+        operation_context: sym!("FspFileSystemGetOperationContext": OperationContextFn),
     })
 }

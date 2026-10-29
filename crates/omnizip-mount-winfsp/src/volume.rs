@@ -124,39 +124,43 @@ impl MountBackend for WinFsp {
             *d = s;
         }
 
-        let device = wide(OsStr::new(DISK_DEVICE_NAME));
-        let mut raw: *mut FileSystem = ptr::null_mut();
-        // SAFETY: valid parameters; INTERFACE is static.
-        let st = unsafe { (api.create)(device.as_ptr(), &params, &INTERFACE, &mut raw) };
-        if st != STATUS_SUCCESS {
-            return Err(MountError::System(format!(
-                "FspFileSystemCreate: {}",
-                ntstatus_text(st)
-            )));
-        }
-        let volume = Box::into_raw(volume);
-        // SAFETY: `raw` is the file system WinFsp just created; no callback runs before the
-        // dispatcher starts.
-        unsafe { (*raw).UserContext = volume.cast() };
+        // From here on, dropping `mount` undoes whatever was done.
         let mut mount = WinFspMount {
-            raw,
-            volume,
+            raw: ptr::null_mut(),
+            volume: Box::into_raw(volume),
             point: PathBuf::new(),
+            global: false,
             restore_dir: None,
         };
-
         let requested = opts.mount_point.as_deref().map(normalize_point);
         if let Some(p) = &requested
             && !is_drive(p)
         {
             mount.restore_dir = prepare_dir(p)?;
         }
-        let point_w = requested.as_deref().map(|p| wide(p.as_os_str()));
-        // SAFETY: a NUL-terminated mount point, or null for the next free drive letter.
-        let st = unsafe {
-            (api.set_mount_point)(raw, point_w.as_ref().map_or(ptr::null(), |w| w.as_ptr()))
+        // A drive goes through the Mount Manager (`\\.\X:`) when WinFsp may register it there:
+        // as administrator, or with WinFsp's MountUseMountmgrFromFSD setting. Only then does
+        // Windows know the volume's DOS path, which `GetFinalPathNameByHandle` reports and
+        // which programs use to find their own files; such a drive is global. Otherwise the
+        // drive belongs to this logon session, WinFsp's default. A refused attempt leaves its
+        // volume half-registered, so the fallback starts from a new one.
+        let global_letter = match &requested {
+            _ if !mount_manager_allowed() => None,
+            Some(p) if is_drive(p) => Some(p.clone()),
+            None => free_drive_letters()
+                .first()
+                .map(|c| PathBuf::from(format!("{c}:"))),
+            Some(_) => None,
         };
-        if st != STATUS_SUCCESS {
+        if let Some(l) = global_letter {
+            let point = PathBuf::from(format!(r"\\.\{}", l.display()));
+            if let Err(st) = mount.attach(api, &params, Some(&point))? {
+                tracing::info!(status = %ntstatus_text(st), "no Mount Manager drive");
+            }
+        }
+        if mount.raw.is_null()
+            && let Err(st) = mount.attach(api, &params, requested.as_deref())?
+        {
             return Err(match requested {
                 None => MountError::NoDriveLetter,
                 Some(p) if st == STATUS_OBJECT_NAME_COLLISION || is_drive(&p) => {
@@ -167,19 +171,18 @@ impl MountBackend for WinFsp {
         }
         // SAFETY: the mount point was just set; WinFsp owns the string until the file system
         // is deleted.
-        mount.point = unsafe {
-            let p = (api.mount_point)(raw);
-            PathBuf::from(String::from_utf16_lossy(wstr(p)))
-        };
+        let point = unsafe { String::from_utf16_lossy(wstr((api.mount_point)(mount.raw))) };
+        mount.global = point.starts_with(r"\\.\");
+        mount.point = PathBuf::from(point.trim_start_matches(r"\\.\"));
         // SAFETY: the file system is fully set up.
-        let st = unsafe { (api.start_dispatcher)(raw, 0) };
+        let st = unsafe { (api.start_dispatcher)(mount.raw, 0) };
         if st != STATUS_SUCCESS {
             return Err(MountError::System(format!(
                 "FspFileSystemStartDispatcher: {}",
                 ntstatus_text(st)
             )));
         }
-        tracing::info!(point = %mount.point.display(), "mounted");
+        tracing::info!(point = %mount.point.display(), global = mount.global, "mounted");
         Ok(Box::new(mount))
     }
 }
@@ -322,13 +325,16 @@ impl Volume {
         unsafe { &*(*fs).UserContext.cast::<Volume>() }
     }
 
+    /// Files are not marked read-only: the volume is, and copies taken out of it should be
+    /// ordinary files. A read-only attribute would also make WinFsp answer a write with
+    /// "access denied" before [`open`] can answer "write protected".
     fn attributes(&self, a: &Attr) -> u32 {
         if a.is_dir() {
             FILE_ATTRIBUTE_DIRECTORY
         } else if self.offline {
-            FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_OFFLINE
+            FILE_ATTRIBUTE_OFFLINE
         } else {
-            FILE_ATTRIBUTE_READONLY
+            0
         }
     }
 
@@ -354,23 +360,56 @@ impl Volume {
     /// `name` is a NUL-terminated UTF-16 string.
     unsafe fn lookup(&self, name: *const u16) -> Result<Attr, NTSTATUS> {
         // SAFETY: per the contract.
+        unsafe { self.walk(name, false) }.map(|(attr, _)| attr)
+    }
+
+    /// [`lookup`](Self::lookup), with the path as the volume spells it (`\Dir\File.txt` for
+    /// `\dir\FILE.TXT`): the normalized name of a case-insensitive volume.
+    ///
+    /// # Safety
+    /// `name` is a NUL-terminated UTF-16 string.
+    unsafe fn lookup_normalized(&self, name: *const u16) -> Result<(Attr, String), NTSTATUS> {
+        // SAFETY: per the contract.
+        unsafe { self.walk(name, true) }
+    }
+
+    /// # Safety
+    /// `name` is a NUL-terminated UTF-16 string.
+    unsafe fn walk(&self, name: *const u16, spell: bool) -> Result<(Attr, String), NTSTATUS> {
+        // SAFETY: per the contract.
         let path =
             String::from_utf16(unsafe { wstr(name) }).map_err(|_| STATUS_OBJECT_NAME_NOT_FOUND)?;
         let mut attr = self.fs.getattr(ROOT).map_err(status)?;
+        let mut spelled = String::new();
         let mut parts = path.split('\\').filter(|c| !c.is_empty()).peekable();
         while let Some(part) = parts.next() {
             let last = parts.peek().is_none();
             if !attr.is_dir() {
                 return Err(STATUS_OBJECT_PATH_NOT_FOUND);
             }
-            attr = match self.fs.lookup(attr.node, OsStr::new(part)) {
-                Ok(a) => a,
+            let found = if spell {
+                self.fs.lookup_named(attr.node, OsStr::new(part))
+            } else {
+                self.fs
+                    .lookup(attr.node, OsStr::new(part))
+                    .map(|a| (a, String::new()))
+            };
+            let name;
+            (attr, name) = match found {
+                Ok(found) => found,
                 Err(FsError::NotFound) if last => return Err(STATUS_OBJECT_NAME_NOT_FOUND),
                 Err(FsError::NotFound) => return Err(STATUS_OBJECT_PATH_NOT_FOUND),
                 Err(e) => return Err(status(e)),
             };
+            if spell {
+                spelled.push('\\');
+                spelled.push_str(&name);
+            }
         }
-        Ok(attr)
+        if spell && spelled.is_empty() {
+            spelled.push('\\');
+        }
+        Ok((attr, spelled))
     }
 
     /// Copies the security descriptor, or reports the size it needs.
@@ -442,15 +481,15 @@ static INTERFACE: Interface = Interface {
     Cleanup: 0,
     Close: Some(close),
     Read: Some(read),
-    Write: 0,
+    Write: Some(write),
     Flush: 0,
     GetFileInfo: Some(get_file_info),
-    SetBasicInfo: 0,
-    SetFileSize: 0,
-    CanDelete: 0,
-    Rename: 0,
+    SetBasicInfo: Some(set_basic_info),
+    SetFileSize: Some(set_file_size),
+    CanDelete: Some(can_delete),
+    Rename: Some(rename),
     GetSecurity: Some(get_security),
-    SetSecurity: 0,
+    SetSecurity: Some(set_security),
     ReadDirectory: Some(read_directory),
     ResolveReparsePoints: 0,
     GetReparsePoint: 0,
@@ -533,14 +572,21 @@ unsafe extern "C" fn open(
     fs: *mut FileSystem,
     name: *const u16,
     options: u32,
-    _access: u32,
+    access: u32,
     ctx: *mut *mut c_void,
     info: *mut FileInfo,
 ) -> NTSTATUS {
     guard(|| {
+        // As on write-protected media: asking to change, delete or re-secure anything fails
+        // here, so programs learn it when they open, not when they save.
+        if requested_access(options, access) & WRITE_ACCESS != 0
+            || options & FILE_DELETE_ON_CLOSE != 0
+        {
+            return Err(STATUS_MEDIA_WRITE_PROTECTED);
+        }
         // SAFETY: see above.
         let v = unsafe { Volume::of(fs) };
-        let attr = unsafe { v.lookup(name) }?;
+        let (attr, spelled) = unsafe { v.lookup_normalized(name) }?;
         if options & FILE_DIRECTORY_FILE != 0 && !attr.is_dir() {
             return Err(STATUS_NOT_A_DIRECTORY);
         }
@@ -561,13 +607,126 @@ unsafe extern "C" fn open(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(file as usize);
-        // SAFETY: see above.
+        // SAFETY: see above; `info` is an `FSP_FSCTL_OPEN_FILE_INFO`.
         unsafe {
-            *info = v.file_info(&attr);
+            let open_info = &mut *info.cast::<OpenFileInfo>();
+            open_info.FileInfo = v.file_info(&attr);
+            set_normalized_name(open_info, &spelled);
             *ctx = file.cast();
         }
         Ok(())
     })
+}
+
+/// The access the caller asked for. `granted` is what the security descriptor allows, which
+/// is everything when the caller asked for `MAXIMUM_ALLOWED`: such an open must succeed, read
+/// only. The request being served says what was asked, once its layout checks out (it carries
+/// the `options` WinFsp passed to `open`). Failing that, a full grant counts as
+/// `MAXIMUM_ALLOWED`.
+fn requested_access(options: u32, granted: u32) -> u32 {
+    if let Ok(api) = ffi::api() {
+        // SAFETY: called inside a callback, on the dispatcher thread serving the request;
+        // a create request is longer than the fields read.
+        unsafe {
+            let op = (api.operation_context)();
+            if !op.is_null() && !(*op).Request.is_null() {
+                let req = (*op).Request;
+                let field = |at: usize| req.add(at).cast::<u32>().read_unaligned();
+                if field(request::KIND) == request::CREATE_KIND
+                    && field(request::CREATE_OPTIONS) == options
+                {
+                    return field(request::DESIRED_ACCESS);
+                }
+            }
+        }
+    }
+    if granted == FILE_ALL_ACCESS {
+        MAXIMUM_ALLOWED
+    } else {
+        granted
+    }
+}
+
+/// Reports how the volume spells an opened path, when WinFsp left room for it (see
+/// [`OpenFileInfo`]).
+///
+/// # Safety
+/// `NormalizedName` is null or has `NormalizedNameSize` writable bytes.
+unsafe fn set_normalized_name(info: &mut OpenFileInfo, path: &str) {
+    let w: Vec<u16> = path.encode_utf16().collect();
+    let bytes = w.len() * 2;
+    if info.NormalizedName.is_null() || bytes > usize::from(info.NormalizedNameSize) {
+        return;
+    }
+    // SAFETY: per the contract.
+    unsafe { ptr::copy_nonoverlapping(w.as_ptr(), info.NormalizedName, w.len()) };
+    info.NormalizedNameSize = bytes as u16;
+}
+
+// Changes through a handle opened without asking for write access (`MAXIMUM_ALLOWED`).
+
+unsafe extern "C" fn write(
+    _fs: *mut FileSystem,
+    _ctx: *mut c_void,
+    _buf: *mut c_void,
+    _offset: u64,
+    _len: u32,
+    _to_end: u8,
+    _constrained: u8,
+    _done: *mut u32,
+    _info: *mut FileInfo,
+) -> NTSTATUS {
+    STATUS_MEDIA_WRITE_PROTECTED
+}
+
+unsafe extern "C" fn set_basic_info(
+    _fs: *mut FileSystem,
+    _ctx: *mut c_void,
+    _attributes: u32,
+    _creation: u64,
+    _access: u64,
+    _write: u64,
+    _change: u64,
+    _info: *mut FileInfo,
+) -> NTSTATUS {
+    STATUS_MEDIA_WRITE_PROTECTED
+}
+
+unsafe extern "C" fn set_file_size(
+    _fs: *mut FileSystem,
+    _ctx: *mut c_void,
+    _size: u64,
+    _allocation: u8,
+    _info: *mut FileInfo,
+) -> NTSTATUS {
+    STATUS_MEDIA_WRITE_PROTECTED
+}
+
+unsafe extern "C" fn can_delete(
+    _fs: *mut FileSystem,
+    _ctx: *mut c_void,
+    _name: *const u16,
+) -> NTSTATUS {
+    STATUS_MEDIA_WRITE_PROTECTED
+}
+
+unsafe extern "C" fn rename(
+    _fs: *mut FileSystem,
+    _ctx: *mut c_void,
+    _name: *const u16,
+    _new_name: *const u16,
+    _replace: u8,
+) -> NTSTATUS {
+    STATUS_MEDIA_WRITE_PROTECTED
+}
+
+unsafe extern "C" fn set_security(
+    _fs: *mut FileSystem,
+    _ctx: *mut c_void,
+    _what: u32,
+    _sd: *mut c_void,
+) -> NTSTATUS {
+    STATUS_MEDIA_WRITE_PROTECTED
 }
 
 unsafe extern "C" fn close(fs: *mut FileSystem, ctx: *mut c_void) {
@@ -699,6 +858,8 @@ struct WinFspMount {
     raw: *mut FileSystem,
     volume: *mut Volume,
     point: PathBuf,
+    /// A drive registered with the Mount Manager (visible to every session).
+    global: bool,
     /// An empty directory removed for the mount point, recreated afterwards.
     restore_dir: Option<PathBuf>,
 }
@@ -719,9 +880,84 @@ impl Mount for WinFspMount {
     }
 }
 
+impl WinFspMount {
+    /// Creates the WinFsp file system of the volume and sets its mount point (`None`: the
+    /// next free drive letter). A refused mount point is the inner error, after which the file
+    /// system is deleted again.
+    fn attach(
+        &mut self,
+        api: &ffi::Api,
+        params: &VolumeParams,
+        point: Option<&Path>,
+    ) -> Result<Result<(), NTSTATUS>, MountError> {
+        let device = wide(OsStr::new(DISK_DEVICE_NAME));
+        let mut raw: *mut FileSystem = ptr::null_mut();
+        // SAFETY: valid parameters; INTERFACE is static.
+        let st = unsafe { (api.create)(device.as_ptr(), params, &INTERFACE, &mut raw) };
+        if st != STATUS_SUCCESS {
+            return Err(MountError::System(format!(
+                "FspFileSystemCreate: {}",
+                ntstatus_text(st)
+            )));
+        }
+        // SAFETY: `raw` is the file system WinFsp just created; no callback runs before the
+        // dispatcher starts.
+        unsafe { (*raw).UserContext = self.volume.cast() };
+        let point_w = point.map(|p| wide(p.as_os_str()));
+        // SAFETY: a NUL-terminated mount point, or null for the next free drive letter.
+        let st = unsafe {
+            (api.set_mount_point)(raw, point_w.as_ref().map_or(ptr::null(), |w| w.as_ptr()))
+        };
+        if st != STATUS_SUCCESS {
+            // SAFETY: created above, never started.
+            unsafe { (api.delete)(raw) };
+            return Ok(Err(st));
+        }
+        self.raw = raw;
+        Ok(Ok(()))
+    }
+}
+
+/// Whether WinFsp may register drives with the Mount Manager: from this process when it is
+/// elevated (the Mount Manager lets only administrators in), or from WinFsp's driver when
+/// WinFsp is set to (`MountUseMountmgrFromFSD`, machine-wide).
+fn mount_manager_allowed() -> bool {
+    omnizip_vfs::backend::winfsp_setting("MountUseMountmgrFromFSD") == Some(1) || elevated()
+}
+
+fn elevated() -> bool {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    let mut token = ptr::null_mut();
+    // SAFETY: the pseudo-handle of this process; the token is closed below.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return false;
+    }
+    let mut e = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut len = 0;
+    // SAFETY: a buffer the size of TOKEN_ELEVATION.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            (&raw mut e).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut len,
+        )
+    };
+    // SAFETY: opened above.
+    unsafe { CloseHandle(token) };
+    ok != 0 && e.TokenIsElevated != 0
+}
+
 impl Drop for WinFspMount {
     fn drop(&mut self) {
-        if let Ok(api) = ffi::api() {
+        if !self.raw.is_null()
+            && let Ok(api) = ffi::api()
+        {
             // SAFETY: `raw` was created by FspFileSystemCreate and is deleted once, here.
             // Removing the mount point and stopping the dispatcher are no-ops when they never
             // happened (a failed mount).
