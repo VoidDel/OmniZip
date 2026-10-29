@@ -468,13 +468,16 @@ fn write_one<W: io::Write + io::Seek>(
     Ok(())
 }
 
-fn trim(p: &str) -> &str {
-    p.trim_matches('/')
+/// An entry name as the browser and mounts show it, which is how updates name entries:
+/// `/`-separated, without empty or `.` components. Some Windows tools store `\` (.NET
+/// Framework's `ZipFile`).
+fn logical(p: &str) -> String {
+    omnizip_core::path::logical_components(p).join("/")
 }
 
 fn under(name: &str, prefix: &str) -> bool {
-    let (n, p) = (trim(name), trim(prefix));
-    !p.is_empty() && (n == p || n.starts_with(p) && n.as_bytes().get(p.len()) == Some(&b'/'))
+    let (n, p) = (logical(name), logical(prefix));
+    !p.is_empty() && (n == p || n.starts_with(&p) && n.as_bytes().get(p.len()) == Some(&b'/'))
 }
 
 /// In-place update: untouched entries are copied raw (no recompression), then additions are
@@ -498,7 +501,7 @@ fn update(path: &Path, ops: &[UpdateOp], opts: &WriteOptions, ctx: &JobCtx) -> R
             UpdateOp::Add { sources } => adds.extend(sources.iter()),
         }
     }
-    let added: HashSet<&str> = adds.iter().map(|s| trim(&s.archive_path)).collect();
+    let added: HashSet<String> = adds.iter().map(|s| logical(&s.archive_path)).collect();
 
     let out = Output::create(path, None)?;
     let mut zw = ZipWriter::new(out);
@@ -519,16 +522,17 @@ fn update(path: &Path, ops: &[UpdateOp], opts: &WriteOptions, ctx: &JobCtx) -> R
             report.skipped += 1;
             continue;
         }
-        if added.contains(trim(name)) {
+        let shown = logical(name);
+        if added.contains(&shown) {
             continue; // replaced by a new file
         }
         let renamed = renames
             .iter()
             .find(|(from, _)| under(name, from))
             .map(|(from, to)| {
-                let rest = &trim(name)[trim(from).len()..];
-                let dir_suffix = if name.ends_with('/') { "/" } else { "" };
-                format!("{}{}{}", trim(to), rest, dir_suffix)
+                let rest = &shown[logical(from).len()..];
+                let dir_suffix = if name.ends_with(['/', '\\']) { "/" } else { "" };
+                format!("{}{}{}", logical(to), rest, dir_suffix)
             });
         let f = src.by_index_raw(i).map_err(|e| map_err(e, path))?;
         match renamed {

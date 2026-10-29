@@ -177,6 +177,48 @@ fn update_delete_rename_add() {
     assert_eq!(leftovers.count(), 0);
 }
 
+/// Names stored with `\` (.NET Framework's `ZipFile`) are updated by the `/` names the browser
+/// and mounts use.
+#[test]
+fn updates_find_names_stored_with_backslashes() {
+    use std::io::Write;
+    let d = tempfile::tempdir().unwrap();
+    let zip = d.path().join("dotnet.zip");
+    let mut w = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
+    for (name, data) in [
+        ("Config\\app.json", "v1"),
+        ("Config\\other.json", "o"),
+        ("Docs\\a.txt", "a"),
+        ("top.txt", "t"),
+    ] {
+        w.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        w.write_all(data.as_bytes()).unwrap();
+    }
+    w.finish().unwrap();
+    let newer = d.path().join("app.json");
+    fs::write(&newer, "v2").unwrap();
+    let ops = vec![
+        UpdateOp::Delete {
+            paths: vec!["Docs".into()],
+        },
+        UpdateOp::Rename {
+            from: "Config/other.json".into(),
+            to: "Config/renamed.json".into(),
+        },
+        UpdateOp::Add {
+            sources: vec![Source::file(&newer, "Config/app.json").unwrap()],
+        },
+    ];
+    ZipEngine
+        .update(&zip, FormatId::Zip, &ops, &WriteOptions::default(), &ctx())
+        .unwrap();
+    let r = open(&zip);
+    let mut names: Vec<_> = r.entries().iter().map(|e| e.path.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["Config/app.json", "Config/renamed.json", "top.txt"]);
+}
+
 #[test]
 fn split_volumes_round_trip() {
     let d = tempfile::tempdir().unwrap();
