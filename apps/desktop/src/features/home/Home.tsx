@@ -39,6 +39,7 @@ export function Home({ dragOver }: { dragOver: boolean }) {
   useEffect(() => {
     void api.recent().then(setRecent);
   }, [version]);
+  const removeRecent = (path: string) => void api.removeRecent(path).then(() => setRecent((x) => x.filter((i) => i.path !== path)));
 
   const onOpen = async () => {
     const p = await pickArchive(t);
@@ -101,35 +102,46 @@ export function Home({ dragOver }: { dragOver: boolean }) {
           ) : (
             <div className="cards">
               {recent.map((r) => (
-                <button
-                  key={r.path}
-                  type="button"
-                  className="card"
-                  title={r.path}
-                  style={formatBadgeStyle(r.format, dark)}
-                  onClick={() => void openArchive(r.path)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setMenu({
-                      x: e.clientX,
-                      y: e.clientY,
-                      items: [
-                        { label: t('cmd.open'), icon: 'folderOpen', run: () => void openArchive(r.path) },
-                        { label: t('home.reveal'), icon: 'external', run: () => void api.reveal(r.path) },
-                        { separator: true },
-                        { label: t('home.remove'), icon: 'x', run: () => void api.removeRecent(r.path).then(() => setRecent((x) => x.filter((i) => i.path !== r.path))) },
-                      ],
-                    });
-                  }}
-                >
-                  <span className="ico">{r.format.toUpperCase().replace('TAR.', 'T.')}</span>
-                  <span className="meta">
-                    <b>{r.name}</b>
-                    <span>
-                      {fmt.size(r.size)} · {fmt.relative(r.opened)}
+                // The remove button sits beside the card rather than in it: a button cannot hold another.
+                <div key={r.path} className="card-wrap">
+                  <button
+                    type="button"
+                    className="card"
+                    title={r.path}
+                    style={formatBadgeStyle(r.format, dark)}
+                    onClick={() => void openArchive(r.path)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        items: [
+                          { label: t('cmd.open'), icon: 'folderOpen', run: () => void openArchive(r.path) },
+                          { label: t('home.reveal'), icon: 'external', run: () => void api.reveal(r.path) },
+                          { separator: true },
+                          { label: t('home.remove'), icon: 'x', run: () => removeRecent(r.path) },
+                        ],
+                      });
+                    }}
+                  >
+                    <span className="ico">{r.format.toUpperCase().replace('TAR.', 'T.')}</span>
+                    <span className="meta">
+                      <b>{r.name}</b>
+                      <span>
+                        {fmt.size(r.size)} · {fmt.relative(r.opened)}
+                      </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
+                  <button
+                    type="button"
+                    className="card-x"
+                    title={t('home.remove')}
+                    aria-label={t('home.remove')}
+                    onClick={() => removeRecent(r.path)}
+                  >
+                    <Icon name="x" />
+                  </button>
+                </div>
               ))}
             </div>
           )}
