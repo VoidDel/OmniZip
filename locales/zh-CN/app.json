@@ -79,6 +79,10 @@
   },
   "status": {
     "items": "{count} 项",
+    "contents": "{files} 个文件，{dirs} 个文件夹",
+    "unpacked": "解压后 {size}",
+    "archiveSize": "压缩包 {size}",
+    "volumes": "{count} 个分卷",
     "selected": "已选 {count} 项（{size}）",
     "ratio": "压缩率 {value}",
     "solid": "固实",

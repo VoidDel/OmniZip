@@ -201,6 +201,8 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .statusbar { height: 28px; display: flex; align-items: center; gap: 12px; padding: 0 12px; font-size: .8rem; color: var(--fg-secondary); border-top: 1px solid var(--border-subtle); flex: none; white-space: nowrap; overflow: hidden; }
 .statusbar .mid { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .statusbar .lft, .statusbar .rgt { display: flex; align-items: center; gap: 8px; flex: none; }
+.sb-mounted { color: var(--accent); font-size: inherit; }
+.sb-mounted:hover { text-decoration: underline; }
 .badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font-size: .72rem; font-weight: 700; letter-spacing: .04em; color: var(--badge-fg, var(--accent)); background: var(--badge-bg, var(--accent-subtle)); white-space: nowrap; }
 .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-muted); display: inline-block; }
 

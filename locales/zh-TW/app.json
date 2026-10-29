@@ -79,6 +79,10 @@
   },
   "status": {
     "items": "{count} 項",
+    "contents": "{files} 個檔案，{dirs} 個資料夾",
+    "unpacked": "解壓縮後 {size}",
+    "archiveSize": "壓縮檔 {size}",
+    "volumes": "{count} 個分割檔",
     "selected": "已選 {count} 項（{size}）",
     "ratio": "壓縮率 {value}",
     "solid": "固實",

@@ -462,10 +462,12 @@ export function StatusBar() {
   const selection = useApp((s) => s.selection);
   const selSize = useApp((s) => s.selectionBytes);
   const settings = useApp((s) => s.settings);
+  const mounts = useApp((s) => s.mounts);
   const dark = settings ? effectiveDark(settings) : false;
   // Only an open archive has something to report; the app version is shown next to the logo.
   if (view !== 'browser' || !archive) return null;
   const i = archive.info;
+  const mounted = archive.draft ? undefined : mounts.find((m) => (fmt.platform === 'win' ? m.archive.toLowerCase() === archive.path.toLowerCase() : m.archive === archive.path));
   if (archive.draft) {
     return (
       <footer className="statusbar">
@@ -506,12 +508,30 @@ export function StatusBar() {
             <span>{t('status.encoding', { encoding: i.encoding })}</span>
           </>
         )}
+        {mounted && (
+          <>
+            <span className="dot" />
+            <button type="button" className="sb-mounted" title={t('mount.open')} onClick={() => void api.reveal(mountRoot(mounted))}>
+              {t('status.mounted')} {mounted.mountPoint}
+            </button>
+          </>
+        )}
       </span>
       <span className="mid">
-        {t('status.items', { count: archive.files })}
+        {t('status.contents', { files: archive.files, dirs: archive.dirs })} · {t('status.unpacked', { size: fmt.size(archive.totalSize) })}
         {selection.size > 0 && ` · ${t('status.selected', { count: selection.size, size: fmt.size(selSize) })}`}
       </span>
-      <span className="rgt">{t('status.ratio', { value: fmt.percent(archive.packedSize, archive.totalSize) })}</span>
+      <span className="rgt">
+        <span>{t('status.archiveSize', { size: fmt.size(i.archiveSize) })}</span>
+        {i.volumes > 1 && (
+          <>
+            <span className="dot" />
+            <span>{t('status.volumes', { count: i.volumes })}</span>
+          </>
+        )}
+        <span className="dot" />
+        <span>{t('status.ratio', { value: fmt.percent(archive.packedSize, archive.totalSize) })}</span>
+      </span>
     </footer>
   );
 }

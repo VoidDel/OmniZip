@@ -79,6 +79,10 @@
   },
   "status": {
     "items": "{count} 項目",
+    "contents": "ファイル {files} 個、フォルダー {dirs} 個",
+    "unpacked": "展開後 {size}",
+    "archiveSize": "アーカイブ {size}",
+    "volumes": "{count} 個の分割ファイル",
     "selected": "{count} 項目を選択（{size}）",
     "ratio": "圧縮率 {value}",
     "solid": "ソリッド",

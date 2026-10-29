@@ -79,6 +79,10 @@
   },
   "status": {
     "items": "{count, plural, one {# item} other {# items}}",
+    "contents": "{files, plural, one {# file} other {# files}}, {dirs, plural, one {# folder} other {# folders}}",
+    "unpacked": "Unpacked {size}",
+    "archiveSize": "Archive {size}",
+    "volumes": "{count, plural, one {# volume} other {# volumes}}",
     "selected": "{count, plural, one {# selected} other {# selected}} ({size})",
     "ratio": "Ratio {value}",
     "solid": "Solid",
