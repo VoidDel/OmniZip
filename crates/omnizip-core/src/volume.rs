@@ -266,7 +266,9 @@ impl Seek for SplitWriter {
 }
 
 enum OutputKind {
-    Single(tempfile::NamedTempFile),
+    /// Buffered: tar headers and the many small writes of the zip crate would otherwise each
+    /// be a system call.
+    Single(io::BufWriter<File>, tempfile::TempPath),
     Split(SplitWriter),
 }
 
@@ -286,13 +288,15 @@ impl Output {
         fs::create_dir_all(dir).map_err(|e| Error::io(e, dir))?;
         let kind = match volume_size {
             Some(size) => OutputKind::Split(SplitWriter::new(dest.to_owned(), size)?),
-            None => OutputKind::Single(
-                tempfile::Builder::new()
+            None => {
+                let (file, path) = tempfile::Builder::new()
                     .prefix(".omnizip-")
                     .suffix(".tmp")
                     .tempfile_in(dir)
-                    .map_err(|e| Error::io(e, dir))?,
-            ),
+                    .map_err(|e| Error::io(e, dir))?
+                    .into_parts();
+                OutputKind::Single(io::BufWriter::with_capacity(1 << 20, file), path)
+            }
         };
         Ok(Self {
             kind: Some(kind),
@@ -303,7 +307,10 @@ impl Output {
     /// Moves the finished archive into place and returns the written paths.
     pub fn commit(mut self) -> Result<Vec<PathBuf>> {
         match self.kind.take().expect("commit called once") {
-            OutputKind::Single(tmp) => {
+            OutputKind::Single(w, path) => {
+                let file = w
+                    .into_inner()
+                    .map_err(|e| Error::io(e.into_error(), &self.dest))?;
                 // The temporary file is private: the archive gets the permissions of the one it
                 // replaces (an archive updated in place), or those of a new file.
                 #[cfg(unix)]
@@ -312,14 +319,12 @@ impl Output {
                     let perms = fs::metadata(&self.dest)
                         .map(|m| m.permissions())
                         .unwrap_or_else(|_| fs::Permissions::from_mode(new_file_mode()));
-                    tmp.as_file()
-                        .set_permissions(perms)
+                    file.set_permissions(perms)
                         .map_err(|e| Error::io(e, &self.dest))?;
                 }
-                tmp.as_file()
-                    .sync_all()
-                    .map_err(|e| Error::io(e, &self.dest))?;
-                tmp.persist(&self.dest)
+                file.sync_all().map_err(|e| Error::io(e, &self.dest))?;
+                drop(file);
+                path.persist(&self.dest)
                     .map_err(|e| Error::io(e.error, &self.dest))?;
                 Ok(vec![self.dest.clone()])
             }
@@ -332,7 +337,7 @@ impl Output {
 
     fn inner(&mut self) -> &mut dyn WriteSeek {
         match self.kind.as_mut().expect("output used after commit") {
-            OutputKind::Single(t) => t.as_file_mut(),
+            OutputKind::Single(w, _) => w,
             OutputKind::Split(w) => w,
         }
     }
@@ -345,7 +350,7 @@ impl Drop for Output {
                 let _ = fs::remove_file(p);
             }
         }
-        // A NamedTempFile deletes itself.
+        // A TempPath deletes itself.
     }
 }
 
