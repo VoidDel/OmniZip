@@ -87,6 +87,9 @@ export function App() {
     if (boot.launch) handleLaunch(boot.launch);
     else if (settings.general.startup === 'last') void api.recent().then((r) => r[0] && useApp.getState().openArchive(r[0].path));
     const un = events.onLaunch(handleLaunch);
+    // A request that came after start-up but before the listener (macOS hands files opened from
+    // Finder over as an event) waits until asked for.
+    void un.then(() => api.takeLaunch()).then((r) => r && handleLaunch(r));
     return () => void un.then((f) => f());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -450,7 +450,8 @@
     "shell": {
       "status": "狀態",
       "notRegistered": "尚未註冊",
-      "pending": "右鍵選單將隨本版本的安裝程式一起提供。",
+      "pending": "此系統的右鍵選單將在後續版本中提供。",
+      "unsupported": "此系統暫不支援",
       "style": "選單樣式",
       "cascade": "子選單",
       "flat": "平鋪",

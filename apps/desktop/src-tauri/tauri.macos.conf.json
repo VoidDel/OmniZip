@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "fileAssociations": [],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "infoPlist": "../../../platform/macos/Info.plist",
+      "files": {
+        "Resources/zip.icns": "../../../icons/filetypes/zip.icns",
+        "Resources/zipx.icns": "../../../icons/filetypes/zipx.icns",
+        "Resources/7z.icns": "../../../icons/filetypes/7z.icns",
+        "Resources/rar.icns": "../../../icons/filetypes/rar.icns",
+        "Resources/tar.icns": "../../../icons/filetypes/tar.icns",
+        "Resources/tgz.icns": "../../../icons/filetypes/tgz.icns",
+        "Resources/tbz2.icns": "../../../icons/filetypes/tbz2.icns",
+        "Resources/txz.icns": "../../../icons/filetypes/txz.icns",
+        "Resources/tzst.icns": "../../../icons/filetypes/tzst.icns",
+        "Resources/gz.icns": "../../../icons/filetypes/gz.icns",
+        "Resources/bz2.icns": "../../../icons/filetypes/bz2.icns",
+        "Resources/xz.icns": "../../../icons/filetypes/xz.icns",
+        "Resources/zst.icns": "../../../icons/filetypes/zst.icns",
+        "Resources/lz4.icns": "../../../icons/filetypes/lz4.icns",
+        "Resources/br.icns": "../../../icons/filetypes/br.icns"
+      }
+    }
+  }
+}

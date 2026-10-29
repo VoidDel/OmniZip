@@ -4,7 +4,7 @@
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, atomic::Ordering},
 };
 
 use base64::Engine as _;
@@ -96,14 +96,13 @@ pub fn app_bootstrap(state: State<'_, AppState>) -> Bootstrap {
     }
 }
 
-/// Pending launch request (a file opened while the window was starting).
+/// Pending launch request (a file opened while the window was starting). The main window asks
+/// once it listens for `app://launch`; later requests go there.
 #[tauri::command]
 pub fn app_take_launch(state: State<'_, AppState>) -> Option<LaunchRequest> {
-    state
-        .launch
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
+    let mut pending = state.launch.lock().unwrap_or_else(|e| e.into_inner());
+    state.launch_ready.store(true, Ordering::SeqCst);
+    pending.take()
 }
 
 #[tauri::command]

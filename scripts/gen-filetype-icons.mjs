@@ -1,16 +1,18 @@
 // Draws the file-type icons of archives (docs/07-shell-integration.md §3.4): a white page with a
 // folded corner, a zipper down its middle and, centred below it, a block in the colour of the
-// format family with the format's name. Writes icons/filetypes/<ext>.ico (16–256 px) and
-// <ext>.svg (the 256 px drawing). The installer gives OmniZip's file types these icons.
+// format family with the format's name. Writes icons/filetypes/<ext>.ico (16–256 px), <ext>.icns
+// (16–1024 px, the macOS document icons) and <ext>.svg (the 256 px drawing). The installer gives
+// OmniZip's file types these icons.
 //
 //   node scripts/gen-filetype-icons.mjs
 //
-// Run on Windows after changing the drawing or the colours: the names are set in Segoe UI Bold.
+// Run on Windows after changing the drawing or the colours: the names are set in Segoe UI Bold
+// (Arial Bold where it is missing).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ico, png } from './lib/icons.mjs';
+import { icns, ico, png } from './lib/icons.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'icons/filetypes');
@@ -46,6 +48,23 @@ const FORMATS = [
 /** Pixel sizes in each .ico: up to 40 drawn on the pixel grid (`small`), from 48 the 256 px drawing scaled. */
 const SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256];
 
+/** Element types of each .icns and their pixel sizes (16@2x is the 32 px drawing, and so on). */
+const ICNS = [
+  ['icp4', 16],
+  ['ic11', 32],
+  ['icp5', 32],
+  ['ic12', 64],
+  ['ic07', 128],
+  ['ic13', 256],
+  ['ic08', 256],
+  ['ic14', 512],
+  ['ic09', 512],
+  ['ic10', 1024],
+];
+
+/** Font of the names: Segoe UI on Windows, Arial Bold elsewhere. */
+const FONT = "'Segoe UI', Arial";
+
 /**
  * The names are capitals, which sit on the baseline and reach about 0.7 of the font size up
  * (Segoe UI): the baseline goes half that below the middle of the block.
@@ -62,7 +81,7 @@ function large(label, color) {
   const teeth = [22, 34, 46, 58, 70, 82, 94]
     .map((y, i) => `<rect x="${i % 2 ? 136 : 124}" y="${y}" width="12" height="8" rx="3"/>`)
     .join('');
-  const text = `<text x="136" y="${(188 + CAP * fs).toFixed(1)}" text-anchor="middle" font-family="Segoe UI" font-size="${fs}" font-weight="700" letter-spacing="1" fill="#FFFFFF">${label}</text>`;
+  const text = `<text x="136" y="${(188 + CAP * fs).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${fs}" font-weight="700" letter-spacing="1" fill="#FFFFFF">${label}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <defs><filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.16"/></filter></defs>
   <path d="M68 12 H166 L218 64 V230 Q218 244 204 244 H68 Q54 244 54 230 V26 Q54 12 68 12 Z" fill="${PAGE}" stroke="${EDGE}" stroke-width="4" filter="url(#s)"/>
@@ -137,7 +156,7 @@ function small(label, color, size) {
     name = `<g fill="#FFFFFF" shape-rendering="crispEdges">${pixels}</g>`;
   } else {
     const fs = bh * (label.length <= 3 ? 0.86 : 0.72);
-    name = `<text x="${bx + bw / 2}" y="${(by + bh / 2 + CAP * fs).toFixed(1)}" text-anchor="middle" font-family="Segoe UI" font-size="${fs.toFixed(1)}" font-weight="700" fill="#FFFFFF">${label}</text>`;
+    name = `<text x="${bx + bw / 2}" y="${(by + bh / 2 + CAP * fs).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${fs.toFixed(1)}" font-weight="700" fill="#FFFFFF">${label}</text>`;
   }
   const cx = Math.floor((page[0] + page[1]) / 2) - 1;
   const teeth = [];
@@ -161,11 +180,13 @@ function small(label, color, size) {
 
 mkdirSync(out, { recursive: true });
 for (const [ext, label, color] of FORMATS) {
-  const images = SIZES.map((size) => {
-    const svg = size <= 40 ? small(label, color, size) : large(label, color);
-    return { size, data: png(svg, size) };
-  });
-  writeFileSync(path.join(out, `${ext}.ico`), ico(images));
+  const drawn = new Map();
+  const draw = (size) => {
+    if (!drawn.has(size)) drawn.set(size, png(size <= 40 ? small(label, color, size) : large(label, color), size));
+    return drawn.get(size);
+  };
+  writeFileSync(path.join(out, `${ext}.ico`), ico(SIZES.map((size) => ({ size, data: draw(size) }))));
+  writeFileSync(path.join(out, `${ext}.icns`), icns(ICNS.map(([type, size]) => ({ type, data: draw(size) }))));
   writeFileSync(path.join(out, `${ext}.svg`), large(label, color));
-  console.log(`icons/filetypes/${ext}.ico`);
+  console.log(`icons/filetypes/${ext}.ico, .icns`);
 }

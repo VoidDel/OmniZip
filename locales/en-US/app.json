@@ -450,7 +450,8 @@
     "shell": {
       "status": "Status",
       "notRegistered": "Not registered yet",
-      "pending": "The context menu ships with the installer of this release.",
+      "pending": "The context menu on this system arrives in an upcoming release.",
+      "unsupported": "Not available on this system yet",
       "style": "Menu style",
       "cascade": "Submenu",
       "flat": "Top level",

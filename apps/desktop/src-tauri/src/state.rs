@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
 
@@ -55,6 +55,9 @@ pub struct AppState {
     pub settings: Mutex<Settings>,
     pub themes: Mutex<Vec<(ThemeFile, bool)>>,
     pub launch: Mutex<Option<LaunchRequest>>,
+    /// Whether the main window listens for launch requests (it has called `app_take_launch`);
+    /// until then a request waits in `launch`. Changed only while `launch` is locked.
+    pub launch_ready: AtomicBool,
     /// Requests of standalone dialog windows (`shell-<n>`), by window label.
     pub shell_requests: Mutex<HashMap<String, LaunchRequest>>,
     next_shell: AtomicU32,
@@ -91,6 +94,7 @@ impl AppState {
             settings: Mutex::new(settings),
             themes: Mutex::new(themes),
             launch: Mutex::new(None),
+            launch_ready: AtomicBool::new(false),
             shell_requests: Mutex::new(HashMap::new()),
             next_shell: AtomicU32::new(1),
             recent: Mutex::new(recent),

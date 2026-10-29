@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the Info.plist of OmniZip.app (bundle.macOS.infoPlist in
+  apps/desktop/src-tauri/tauri.macos.conf.json; docs/07-shell-integration.md §4.2).
+
+  CFBundleDocumentTypes: the archive formats OmniZip opens, the same as the file associations of
+  tauri.conf.json, each with its document icon (icons/filetypes/<ext>.icns, copied to Resources).
+  They are declared here rather than by bundle.fileAssociations, which has no per-type icon.
+
+  UTImportedTypeDeclarations: the formats without a type declared by every supported macOS
+  (12 and later), under the identifiers other archive tools use. Where the system declares the
+  type too, its declaration wins.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>ZIP archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>zip.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>ZIPX archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.winzip.zipx-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>zipx.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>7z archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.7-zip.7-zip-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>7z.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>RAR archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.rarlab.rar-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>rar.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>TAR archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.tar-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>tar.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>TAR.GZ archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.gnu.gnu-zip-tar-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>tgz.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>TAR.BZ2 archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.tar-bzip2-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>tbz2.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>TAR.XZ archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.tukaani.tar-xz-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>txz.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>TAR.ZST archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.facebook.tar-zstd-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>tzst.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>GZ compressed file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.gnu.gnu-zip-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>gz.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>BZ2 compressed file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.bzip2-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>bz2.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>XZ compressed file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.tukaani.xz-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>xz.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>ZST compressed file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.facebook.zstd-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>zst.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>LZ4 compressed file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.lz4.lz4-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>lz4.icns</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Brotli compressed file</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.google.brotli-archive</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>br.icns</string>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.winzip.zipx-archive</string>
+			<key>UTTypeDescription</key>
+			<string>ZIPX archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>zipx</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.7-zip.7-zip-archive</string>
+			<key>UTTypeDescription</key>
+			<string>7z archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>7z</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-7z-compressed</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.rarlab.rar-archive</string>
+			<key>UTTypeDescription</key>
+			<string>RAR archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rar</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/vnd.rar</string>
+					<string>application/x-rar-compressed</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>public.tar-bzip2-archive</string>
+			<key>UTTypeDescription</key>
+			<string>TAR.BZ2 archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.bzip2-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tbz2</string>
+					<string>tbz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.tukaani.tar-xz-archive</string>
+			<key>UTTypeDescription</key>
+			<string>TAR.XZ archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>txz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.facebook.tar-zstd-archive</string>
+			<key>UTTypeDescription</key>
+			<string>TAR.ZST archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tzst</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.tukaani.xz-archive</string>
+			<key>UTTypeDescription</key>
+			<string>XZ compressed file</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>xz</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-xz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.facebook.zstd-archive</string>
+			<key>UTTypeDescription</key>
+			<string>ZST compressed file</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>zst</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/zstd</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.lz4.lz4-archive</string>
+			<key>UTTypeDescription</key>
+			<string>LZ4 compressed file</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>lz4</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-lz4</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.google.brotli-archive</string>
+			<key>UTTypeDescription</key>
+			<string>Brotli compressed file</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>br</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

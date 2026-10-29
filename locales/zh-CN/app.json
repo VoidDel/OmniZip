@@ -450,7 +450,8 @@
     "shell": {
       "status": "状态",
       "notRegistered": "尚未注册",
-      "pending": "右键菜单将随本版本的安装程序一起提供。",
+      "pending": "此系统的右键菜单将在后续版本中提供。",
+      "unsupported": "此系统暂不支持",
       "style": "菜单样式",
       "cascade": "子菜单",
       "flat": "平铺",

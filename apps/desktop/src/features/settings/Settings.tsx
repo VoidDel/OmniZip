@@ -193,7 +193,7 @@ function ShellStatusRow() {
   if (!status.supported) {
     return (
       <Row label={t('settings.shell.status')} hint={t('settings.shell.pending')}>
-        <span className="status-warn"><Icon name="alert" />{t('settings.shell.notRegistered')}</span>
+        <span className="status-warn"><Icon name="alert" />{t('settings.shell.unsupported')}</span>
       </Row>
     );
   }
@@ -546,6 +546,14 @@ export function SettingsView() {
           </>
         );
       case 'shell': {
+        // macOS has no context menu yet (docs/07-shell-integration.md §4): nothing to set up.
+        if (document.documentElement.dataset.platform === 'mac') {
+          return (
+            <div className="set-group">
+              <ShellStatusRow />
+            </div>
+          );
+        }
         return (
           <>
             <div className="set-group">

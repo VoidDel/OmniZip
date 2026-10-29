@@ -52,7 +52,7 @@
 
 ## 构建与运行
 
-前置条件：Rust stable（≥ 1.97）、Node 22+、pnpm 10（`corepack enable` 或 `npx pnpm@10`）。Windows 另需 Visual Studio 2022 C++ 生成工具与 WebView2；Linux 另需 `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`。
+前置条件：Rust stable（≥ 1.97）、Node 22+、pnpm 10（`corepack enable` 或 `npx pnpm@10`）。Windows 另需 Visual Studio 2022 C++ 生成工具与 WebView2；macOS 另需 Xcode 命令行工具；Linux 另需 `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`。
 
 ```sh
 pnpm install
@@ -63,6 +63,7 @@ cargo run -p omnizip-cli -- --help
 pnpm dev                         # 开发模式运行桌面应用
 pnpm bundle:windows              # NSIS 安装包（含 CLI、右键菜单 DLL 与 Win11 菜单包，需 Windows SDK）→ target/release/bundle/nsis/
 pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # 完整 MSIX（商店渠道，签名可选）
+pnpm build                       # 在 Mac 上：OmniZip.app 与 .dmg（未签名，含文件关联与文档图标）→ target/release/bundle/
 ```
 
 模糊测试在 nightly 上运行：`cargo +nightly fuzz run zip`（目标见 `fuzz/fuzz_targets/`）；稳定版可运行其冒烟测试 `cargo test --manifest-path fuzz/Cargo.toml --lib`。

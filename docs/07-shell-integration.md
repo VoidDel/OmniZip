@@ -97,6 +97,8 @@
 - 设为默认：`NSWorkspace.setDefaultApplication(at:toOpen:)`（macOS 12+，系统会弹确认）；设置页"将所有压缩格式设为用 OmniZip 打开"一键执行并逐类确认。
 - 每格式独立文档图标（`.icns`）。
 
+**当前实现**：`platform/macos/Info.plist`（由 `tauri.macos.conf.json` 合并进 `.app`）声明与 Windows 文件关联相同的 15 种格式（zip、zipx、7z、rar、tar、tgz、tbz2、txz、tzst、gz、bz2、xz、zst、lz4、br；rar 为 Viewer，其余 Editor），各带 `CFBundleTypeIconFile`（`icons/filetypes/<扩展名>.icns`，与 Windows 图标同一套绘制）。不用 Tauri 的 `fileAssociations` 生成，因为它不支持按类型设图标，macOS 上将其清空。系统未声明或较早版本未声明的类型以 `UTImportedTypeDeclarations` 导入：`com.winzip.zipx-archive`、`org.7-zip.7-zip-archive`、`com.rarlab.rar-archive`、`public.tar-bzip2-archive`、`org.tukaani.tar-xz-archive`、`org.facebook.tar-zstd-archive`、`org.tukaani.xz-archive`、`org.facebook.zstd-archive`、`org.lz4.lz4-archive`、`com.google.brotli-archive`；系统也声明时以系统的为准。Finder 只显示默认打开方式所声明的图标：zip、7z 等系统自带"归档实用工具"处理的格式仍显示系统图标，用户在"显示简介 → 打开方式 → 全部更改"选 OmniZip 后改用 OmniZip 的图标；rar、zst 等无其他处理程序的格式安装后即由 OmniZip 打开并显示其图标。Finder 打开文件（双击、打开方式、拖到 Dock 图标）以 `RunEvent::Opened` 送达而非命令行参数：主窗口开始监听前到达的请求暂存，由前端注册监听后调用 `app_take_launch` 取走，之后直接发 `app://launch`；一次打开多个文件时只打开第一个（与 Windows 的命令行启动一致）。已在 macOS 上用调试构建实机验证：rar / zst 显示 OmniZip 图标，冷启动与运行中打开都显示该压缩包。未做：设为默认（`NSWorkspace.setDefaultApplication`）、`InfoPlist.strings` 本地化类型名称、`public.iso-image`。
+
 ### 4.3 行为
 
 - Dock 图标拖放、Dock 进度徽标、菜单栏常驻图标（可选）。

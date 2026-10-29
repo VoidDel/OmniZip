@@ -27,6 +27,30 @@ use crate::{
     state::AppState,
 };
 
+/// Archives opened from Finder (double-click, "Open With", dropped on the Dock icon): macOS hands
+/// them over as an event, at start-up too, not as arguments. Until the main window listens for
+/// launch requests the request waits for it, like one given at start-up.
+#[cfg(target_os = "macos")]
+fn open_urls(app: &AppHandle, urls: &[tauri::Url]) {
+    let paths = urls.iter().filter_map(|u| u.to_file_path().ok()).collect();
+    let Some(req) = launch::to_request(&Invocation {
+        verb: Verb::Open,
+        paths,
+    }) else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    {
+        let mut pending = state.launch.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.launch_ready.load(std::sync::atomic::Ordering::SeqCst) {
+            *pending = Some(req);
+            return;
+        }
+    }
+    let _ = app.emit("app://launch", req);
+    windows::focus_main(app);
+}
+
 /// Runs a file-manager invocation: background verbs get a mini progress window, dialog verbs a
 /// standalone dialog window, the others are handed to the main window.
 fn handle_invocation(app: &AppHandle, inv: Invocation, startup: bool) {
@@ -327,9 +351,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building OmniZip")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                app.state::<AppState>().mounts.unmount_all();
-            }
+        .run(|app, event| match event {
+            tauri::RunEvent::Exit => app.state::<AppState>().mounts.unmount_all(),
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => open_urls(app, &urls),
+            _ => {}
         });
 }
