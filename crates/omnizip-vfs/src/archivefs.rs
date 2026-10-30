@@ -2,17 +2,19 @@
 //!
 //! Directory structure comes from the core [`TreeIndex`]; names are cleaned per directory on
 //! first use ([`crate::names`]); file data is decoded on the first read of each entry into the
-//! [`ContentCache`] and served by offset afterwards. Solid archives (mount class C) can be
-//! decoded in one pass on first access instead, since every entry would otherwise restart
-//! the solid block.
+//! [`ContentCache`] and served by offset afterwards. Solid archives (mount class C) and
+//! single-stream ones (D) are decoded in one pass on first access instead, since every entry
+//! would otherwise restart the solid block or the stream. Files stored as they are (plain tar,
+//! stored ZIP entries) are read in place from the archive file, neither decoded nor cached.
 
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
+    fs::File,
     io,
     path::PathBuf,
     sync::{
-        Arc, Mutex, RwLock,
+        Arc, Mutex, OnceLock, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -119,6 +121,10 @@ pub struct ArchiveFs {
     fallback_time: SystemTime,
     stats: FsStats,
     warmed: AtomicBool,
+    /// The archive file, for reading stored entries in place (an archive of one file).
+    file: Option<File>,
+    /// Per entry, where its data lies as it is in [`file`](Self::file), asked once.
+    stored: Vec<OnceLock<Option<(u64, u64)>>>,
 }
 
 impl std::fmt::Debug for ArchiveFs {
@@ -178,7 +184,17 @@ impl ArchiveFs {
             Some(p) => Arc::new(FixedPassword(p.clone())),
             None => Arc::new(NoInteraction),
         };
+        let file = if info.volumes <= 1 {
+            File::open(&info.path).ok()
+        } else {
+            None
+        };
+        let stored = std::iter::repeat_with(OnceLock::new)
+            .take(entries.len())
+            .collect();
         Ok(Self {
+            file,
+            stored,
             reader: Mutex::new(reader),
             info,
             entries,
@@ -494,6 +510,38 @@ impl ArchiveFs {
         self.decode(reader.as_mut(), HashSet::from([e.id]))
     }
 
+    /// Where an entry's data lies as it is in the archive file, asked of the reader once.
+    fn stored(&self, id: EntryId) -> Option<(u64, u64)> {
+        self.file.as_ref()?;
+        *self.stored.get(id as usize)?.get_or_init(|| {
+            self.reader
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .stored_range(id)
+        })
+    }
+
+    /// Reads a stored entry in place: up to `size` bytes at `offset`, never past `declared`.
+    fn read_stored(
+        &self,
+        (start, len): (u64, u64),
+        declared: u64,
+        offset: u64,
+        size: u32,
+    ) -> FsResult<Vec<u8>> {
+        let f = self.file.as_ref().ok_or(FsError::Io)?;
+        let n = len
+            .min(declared)
+            .saturating_sub(offset)
+            .min(u64::from(size)) as usize;
+        let mut buf = vec![0; n];
+        if crate::pos::read_full_at(f, &mut buf, start + offset)? < n {
+            // The archive is shorter than its directory says.
+            return Err(FsError::Io);
+        }
+        Ok(buf)
+    }
+
     fn handle_node(&self, fh: FileHandle) -> FsResult<NodeId> {
         self.handles
             .lock()
@@ -639,6 +687,9 @@ impl VirtualFs for ArchiveFs {
             (_, Data::Entry(id)) => {
                 if offset >= shape.attr.size && self.entries[id as usize].size_known {
                     return Ok(Vec::new());
+                }
+                if let Some(range) = self.stored(id) {
+                    return self.read_stored(range, shape.attr.size, offset, size);
                 }
                 Ok(self.content(id)?.read_at(offset, size as usize)?)
             }

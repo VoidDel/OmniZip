@@ -13,8 +13,8 @@ use std::{
 };
 
 use omnizip_core::{
-    ArchiveInfo, ArchiveReader, Capabilities, Codec, Engine, Entry, EntryData, EntryKind, Error,
-    ErrorCode, ExtractSink, FormatId, JobCtx, OpenOptions, Phase, Report, Result, Source,
+    ArchiveInfo, ArchiveReader, Capabilities, Codec, Engine, Entry, EntryData, EntryId, EntryKind,
+    Error, ErrorCode, ExtractSink, FormatId, JobCtx, OpenOptions, Phase, Report, Result, Source,
     SourceKind, WriteOptions,
     detect::is_tar_header,
     encoding,
@@ -150,6 +150,8 @@ pub struct TarReader {
     entries: Vec<Entry>,
     /// Ordinal of each raw tar header → entry id (`None` for skipped meta headers).
     ordinals: Vec<Option<u32>>,
+    /// Per entry, where its data lies as it is in the archive file: `(offset, length)`.
+    stored: Vec<Option<(u64, u64)>>,
     codec: Option<Codec>,
     single: bool,
 }
@@ -169,58 +171,39 @@ impl TarReader {
                 info,
                 entries: vec![entry],
                 ordinals: vec![Some(0)],
+                stored: vec![None],
                 codec,
                 single: true,
             });
         }
 
         ctx.begin(Phase::Scanning, archive_size, 0);
-        let input = ProgressReader::new(volume::open_input(path)?, ctx);
-        let stream: Box<dyn Read + Send + '_> = match codec {
-            Some(c) => codec::decoder(c, input).map_err(|e| decode_err(e, path))?,
-            None => Box::new(input),
+        let (raw, ordinals, positions) = match codec {
+            Some(c) => {
+                let input = ProgressReader::new(volume::open_input(path)?, ctx);
+                let stream = codec::decoder(c, input).map_err(|e| decode_err(e, path))?;
+                let mut ar = tar::Archive::new(stream);
+                scan(ar.entries().map_err(|e| decode_err(e, path))?, path, ctx)?
+            }
+            // A plain tar is listed by seeking from header to header.
+            None => {
+                let mut ar = tar::Archive::new(volume::open_input(path)?);
+                scan(
+                    ar.entries_with_seek().map_err(|e| decode_err(e, path))?,
+                    path,
+                    ctx,
+                )?
+            }
         };
-        let mut ar = tar::Archive::new(stream);
-        let mut raw: Vec<RawHeader> = Vec::new();
-        let mut ordinals = Vec::new();
-        for item in ar.entries().map_err(|e| decode_err(e, path))? {
-            ctx.check()?;
-            let ent = item.map_err(|e| decode_err(e, path))?;
-            let h = ent.header();
-            let kind = match h.entry_type() {
-                tar::EntryType::Regular
-                | tar::EntryType::Continuous
-                | tar::EntryType::GNUSparse => EntryKind::File,
-                tar::EntryType::Directory => EntryKind::Dir,
-                tar::EntryType::Symlink => EntryKind::Symlink,
-                tar::EntryType::Link => EntryKind::Hardlink,
-                tar::EntryType::XGlobalHeader
-                | tar::EntryType::XHeader
-                | tar::EntryType::GNULongName
-                | tar::EntryType::GNULongLink => {
-                    ordinals.push(None);
-                    continue;
-                }
-                _ => EntryKind::Other,
-            };
-            let name = ent.path_bytes().into_owned();
-            let link = ent.link_name_bytes().map(|l| l.into_owned());
-            let size = if kind == EntryKind::File {
-                ent.size()
-            } else {
-                0
-            };
-            ordinals.push(Some(raw.len() as u32));
-            raw.push((
-                name,
-                kind,
-                size,
-                h.mtime().unwrap_or(0),
-                h.mode().unwrap_or(0),
-                link,
-            ));
-            ctx.policy.check_entries(raw.len() as u64)?;
-        }
+        // In a plain tar of one file, file data lies as it is: mounts read it in place.
+        let stored = positions
+            .iter()
+            .zip(&raw)
+            .map(|(pos, r)| {
+                pos.filter(|_| codec.is_none() && info.volumes <= 1)
+                    .map(|p| (p, r.2))
+            })
+            .collect();
 
         // Names: tar has no encoding field; treat invalid UTF-8 as a legacy code page.
         let legacy: Vec<&[u8]> = raw
@@ -262,6 +245,7 @@ impl TarReader {
             info,
             entries,
             ordinals,
+            stored,
             codec,
             single: false,
         })
@@ -280,6 +264,64 @@ impl TarReader {
 
 /// `(name, kind, size, mtime, mode, link target)` read from one tar header.
 type RawHeader = (Vec<u8>, EntryKind, u64, u64, u32, Option<Vec<u8>>);
+
+/// Reads the headers of a tar stream: the entries, which entry each raw header is (`None` for
+/// meta headers), and where the data of each regular file starts in the stream (`None` for
+/// sparse files and everything else).
+#[allow(clippy::type_complexity)]
+fn scan<R: Read>(
+    entries: tar::Entries<'_, R>,
+    path: &Path,
+    ctx: &JobCtx,
+) -> Result<(Vec<RawHeader>, Vec<Option<u32>>, Vec<Option<u64>>)> {
+    let mut raw: Vec<RawHeader> = Vec::new();
+    let mut ordinals = Vec::new();
+    let mut positions = Vec::new();
+    for item in entries {
+        ctx.check()?;
+        let ent = item.map_err(|e| decode_err(e, path))?;
+        let h = ent.header();
+        let kind = match h.entry_type() {
+            tar::EntryType::Regular | tar::EntryType::Continuous | tar::EntryType::GNUSparse => {
+                EntryKind::File
+            }
+            tar::EntryType::Directory => EntryKind::Dir,
+            tar::EntryType::Symlink => EntryKind::Symlink,
+            tar::EntryType::Link => EntryKind::Hardlink,
+            tar::EntryType::XGlobalHeader
+            | tar::EntryType::XHeader
+            | tar::EntryType::GNULongName
+            | tar::EntryType::GNULongLink => {
+                ordinals.push(None);
+                continue;
+            }
+            _ => EntryKind::Other,
+        };
+        let name = ent.path_bytes().into_owned();
+        let link = ent.link_name_bytes().map(|l| l.into_owned());
+        let size = if kind == EntryKind::File {
+            ent.size()
+        } else {
+            0
+        };
+        let plain = matches!(
+            h.entry_type(),
+            tar::EntryType::Regular | tar::EntryType::Continuous
+        );
+        positions.push(plain.then(|| ent.raw_file_position()));
+        ordinals.push(Some(raw.len() as u32));
+        raw.push((
+            name,
+            kind,
+            size,
+            h.mtime().unwrap_or(0),
+            h.mode().unwrap_or(0),
+            link,
+        ));
+        ctx.policy.check_entries(raw.len() as u64)?;
+    }
+    Ok((raw, ordinals, positions))
+}
 
 /// Builds the single entry of a `.gz`-style file.
 fn single_entry(path: &Path, format: FormatId, archive_size: u64) -> Result<Entry> {
@@ -335,6 +377,10 @@ fn single_entry(path: &Path, format: FormatId, archive_size: u64) -> Result<Entr
 impl ArchiveReader for TarReader {
     fn info(&self) -> &ArchiveInfo {
         &self.info
+    }
+
+    fn stored_range(&mut self, id: EntryId) -> Option<(u64, u64)> {
+        self.stored.get(id as usize).copied().flatten()
     }
 
     fn entries(&self) -> &[Entry] {

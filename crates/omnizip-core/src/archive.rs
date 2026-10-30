@@ -82,6 +82,13 @@ pub trait ArchiveReader: Send {
     /// Delivers every entry the sink wants, in archive order.
     fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> Result<()>;
 
+    /// Where a file's data lies byte for byte in the archive file, as `(offset, length)`:
+    /// stored, unencrypted, in an archive of one file. Mounts read such files in place instead
+    /// of decoding them. `None` when that is not so, or not known.
+    fn stored_range(&mut self, _id: EntryId) -> Option<(u64, u64)> {
+        None
+    }
+
     /// Verifies every entry. The default decodes everything into a [`TestSink`].
     fn test(&mut self, selection: Selection, ctx: &JobCtx) -> Result<Report> {
         let mut sink = TestSink::new(selection);

@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Attr, DirEntry, FileHandle, FileType, FsError, FsResult, FsStats, NameRules, NodeId, OpenFlags,
     ROOT, VirtualFs,
+    pos::{read_full_at, write_at},
 };
 
 /// Ids of the nodes the layer creates; below are the lower volume's own.
@@ -121,26 +122,6 @@ fn name_str(name: &OsStr) -> FsResult<&str> {
         return Err(FsError::Invalid);
     }
     Ok(n)
-}
-
-#[cfg(windows)]
-fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-    std::os::windows::fs::FileExt::seek_read(f, buf, offset)
-}
-
-#[cfg(unix)]
-fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-    std::os::unix::fs::FileExt::read_at(f, buf, offset)
-}
-
-#[cfg(windows)]
-fn write_at(f: &File, buf: &[u8], offset: u64) -> io::Result<usize> {
-    std::os::windows::fs::FileExt::seek_write(f, buf, offset)
-}
-
-#[cfg(unix)]
-fn write_at(f: &File, buf: &[u8], offset: u64) -> io::Result<usize> {
-    std::os::unix::fs::FileExt::write_at(f, buf, offset)
 }
 
 impl OverlayFs {
@@ -567,13 +548,7 @@ impl VirtualFs for OverlayFs {
         }
         let f = self.disk(fh)?;
         let mut buf = vec![0; size as usize];
-        let mut n = 0;
-        while n < buf.len() {
-            match read_at(&f, &mut buf[n..], offset + n as u64)? {
-                0 => break,
-                k => n += k,
-            }
-        }
+        let n = read_full_at(&f, &mut buf, offset)?;
         buf.truncate(n);
         Ok(buf)
     }

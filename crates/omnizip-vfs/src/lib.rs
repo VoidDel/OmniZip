@@ -17,6 +17,7 @@ pub mod backend;
 pub mod cache;
 pub mod names;
 pub mod overlay;
+mod pos;
 
 use std::{ffi::OsStr, fmt, path::PathBuf, time::SystemTime};
 

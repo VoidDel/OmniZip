@@ -88,6 +88,46 @@ fn names(fs: &dyn VirtualFs, dir: u32) -> Vec<String> {
         .collect()
 }
 
+/// Files stored as they are (plain tar, ZIP entries without compression) are read in place:
+/// nothing is decoded into the cache, and random reads land where they should.
+#[test]
+fn stored_files_are_read_in_place() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, big) = source_tree(d.path());
+    for (name, format, level) in [
+        ("photos.tar", FormatId::Tar, Level::Normal),
+        ("stored.zip", FormatId::Zip, Level::Store),
+    ] {
+        let archive = create(
+            d.path(),
+            &root,
+            name,
+            WriteOptions {
+                format,
+                level,
+                ..Default::default()
+            },
+        );
+        let fs = mount(&archive, opts());
+        let b = resolve(&fs, "photos/media/big.bin").unwrap();
+        assert_eq!(read_all(&fs, b.node, 65536).unwrap(), big, "{name}");
+        let fh = fs.open(b.node, OpenFlags::default()).unwrap();
+        assert_eq!(
+            fs.read(fh, 2_000_000, 8).unwrap(),
+            &big[2_000_000..2_000_008],
+            "{name}"
+        );
+        assert!(
+            fs.read(fh, 3 << 20, 8).unwrap().is_empty(),
+            "{name}: at the end"
+        );
+        fs.release(fh);
+        let a = resolve(&fs, "photos/相册/a.txt").unwrap();
+        assert_eq!(read_all(&fs, a.node, 2).unwrap(), b"alpha", "{name}");
+        assert_eq!(fs.cache().len(), 0, "{name}: nothing decoded");
+    }
+}
+
 #[test]
 fn zip_volume_reads_like_a_disk() {
     let d = tempfile::tempdir().unwrap();

@@ -9,7 +9,7 @@ use std::{
 };
 
 use omnizip_core::{
-    ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryKind, Error,
+    ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryId, EntryKind, Error,
     ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Source,
     SourceKind, UpdateOp, WriteOptions,
     encoding::{self, NameEncoding},
@@ -293,6 +293,18 @@ impl ZipReader {
 impl ArchiveReader for ZipReader {
     fn info(&self) -> &ArchiveInfo {
         &self.info
+    }
+
+    fn stored_range(&mut self, id: EntryId) -> Option<(u64, u64)> {
+        if self.info.volumes > 1 {
+            return None;
+        }
+        // Reads the local header, which says where the data starts.
+        let f = self.archive.by_index_raw(id as usize).ok()?;
+        if f.compression() != CompressionMethod::Stored || f.encrypted() || f.is_dir() {
+            return None;
+        }
+        Some((f.data_start()?, f.compressed_size()))
     }
 
     fn entries(&self) -> &[Entry] {
