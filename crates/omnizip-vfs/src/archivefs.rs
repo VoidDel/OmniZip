@@ -521,25 +521,24 @@ impl ArchiveFs {
         })
     }
 
-    /// Reads a stored entry in place: up to `size` bytes at `offset`, never past `declared`.
+    /// Reads a stored entry in place into `buf`, from `offset` and never past `declared`.
     fn read_stored(
         &self,
         (start, len): (u64, u64),
         declared: u64,
         offset: u64,
-        size: u32,
-    ) -> FsResult<Vec<u8>> {
+        buf: &mut [u8],
+    ) -> FsResult<usize> {
         let f = self.file.as_ref().ok_or(FsError::Io)?;
         let n = len
             .min(declared)
             .saturating_sub(offset)
-            .min(u64::from(size)) as usize;
-        let mut buf = vec![0; n];
-        if crate::pos::read_full_at(f, &mut buf, start + offset)? < n {
+            .min(buf.len() as u64) as usize;
+        if crate::pos::read_full_at(f, &mut buf[..n], start + offset)? < n {
             // The archive is shorter than its directory says.
             return Err(FsError::Io);
         }
-        Ok(buf)
+        Ok(n)
     }
 
     fn handle_node(&self, fh: FileHandle) -> FsResult<NodeId> {
@@ -678,20 +677,38 @@ impl VirtualFs for ArchiveFs {
     }
 
     fn read(&self, fh: FileHandle, offset: u64, size: u32) -> FsResult<Vec<u8>> {
+        let shape = self.shape(self.handle_node(fh)?)?;
+        // Sized to what is there, when the size is known.
+        let known = match shape.data {
+            Data::Entry(id) => self.entries[id as usize].size_known,
+            _ => true,
+        };
+        let cap = if known {
+            u64::from(size).min(shape.attr.size.saturating_sub(offset))
+        } else {
+            u64::from(size)
+        };
+        let mut buf = vec![0; cap as usize];
+        let n = self.read_into(fh, offset, &mut buf)?;
+        buf.truncate(n);
+        Ok(buf)
+    }
+
+    fn read_into(&self, fh: FileHandle, offset: u64, buf: &mut [u8]) -> FsResult<usize> {
         let node = self.handle_node(fh)?;
         let shape = self.shape(node)?;
         match (shape.attr.kind, shape.data) {
             (FileType::Dir, _) => Err(FsError::IsDir),
-            (_, Data::None) => Ok(Vec::new()),
-            (_, Data::Text(t)) => Ok(Content::Mem(t).read_at(offset, size as usize)?),
+            (_, Data::None) => Ok(0),
+            (_, Data::Text(t)) => Ok(Content::Mem(t).read_into(offset, buf)?),
             (_, Data::Entry(id)) => {
                 if offset >= shape.attr.size && self.entries[id as usize].size_known {
-                    return Ok(Vec::new());
+                    return Ok(0);
                 }
                 if let Some(range) = self.stored(id) {
-                    return self.read_stored(range, shape.attr.size, offset, size);
+                    return self.read_stored(range, shape.attr.size, offset, buf);
                 }
-                Ok(self.content(id)?.read_at(offset, size as usize)?)
+                Ok(self.content(id)?.read_into(offset, buf)?)
             }
         }
     }

@@ -998,16 +998,14 @@ unsafe extern "C" fn read(
         // SAFETY: see above.
         let (v, file) = unsafe { (Volume::of(fs), file(ctx)) };
         let fh = file.fh.ok_or(STATUS_INVALID_DEVICE_REQUEST)?;
-        let data = v.fs.read(fh, offset, len).map_err(status)?;
-        if data.is_empty() && len > 0 {
+        // SAFETY: WinFsp's buffer holds `len` writable bytes for the length of the call.
+        let out = unsafe { slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize) };
+        let n = v.fs.read_into(fh, offset, out).map_err(status)?;
+        if n == 0 && len > 0 {
             return Err(STATUS_END_OF_FILE);
         }
-        let n = data.len().min(len as usize);
-        // SAFETY: WinFsp's buffer holds `len` bytes.
-        unsafe {
-            ptr::copy_nonoverlapping(data.as_ptr(), buf.cast::<u8>(), n);
-            *done = n as u32;
-        }
+        // SAFETY: see above.
+        unsafe { *done = n as u32 };
         Ok(())
     })
 }

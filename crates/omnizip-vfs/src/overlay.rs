@@ -38,14 +38,24 @@ struct Node {
     lower: Option<NodeId>,
     /// Exists in the layer (created there, or copied up).
     upper: bool,
+    /// Size and modification time of what the layer holds for this node, kept up to date as
+    /// it changes, so attributes never have to be asked of the disk (as OverlayFS takes them
+    /// from the upper inode).
+    meta: Option<(u64, SystemTime)>,
 }
 
 struct Open {
     node: NodeId,
     /// The lower volume's handle, for reading what has not been copied up.
     lower: Option<FileHandle>,
-    /// The layer's file, opened on first use.
-    disk: Option<Arc<File>>,
+}
+
+/// The layer's file of a node with open handles, shared by them: opened once (or kept from
+/// [`VirtualFs::create`]) and closed with the last handle.
+#[derive(Default)]
+struct UpperFile {
+    file: Option<Arc<File>>,
+    handles: usize,
 }
 
 struct Whiteout {
@@ -63,6 +73,7 @@ struct State {
     /// Lower entries deleted or moved away, by folded path.
     whiteouts: HashMap<String, Whiteout>,
     opens: HashMap<u64, Open>,
+    uppers: HashMap<NodeId, UpperFile>,
     next_node: NodeId,
     next_handle: u64,
 }
@@ -141,6 +152,7 @@ impl OverlayFs {
                 kind: FileType::Dir,
                 lower: Some(ROOT),
                 upper: true,
+                meta: None,
             },
         );
         state.paths.insert(String::new(), ROOT);
@@ -199,6 +211,7 @@ impl OverlayFs {
                 kind: attr.kind,
                 lower: Some(attr.node),
                 upper: false,
+                meta: None,
             },
         );
         state.paths.insert(key, attr.node);
@@ -206,15 +219,22 @@ impl OverlayFs {
     }
 
     fn attr(&self, state: &State, id: NodeId) -> FsResult<Attr> {
-        let n = Self::node(state, id)?;
+        let n = state.nodes.get(&id).ok_or(FsError::NotFound)?;
         if n.upper && !(n.kind == FileType::Dir && n.lower.is_some()) {
-            let meta = fs::metadata(self.on_disk(&n.path))?;
+            let (size, mtime) = match n.meta {
+                Some(m) => m,
+                None => {
+                    let meta = fs::metadata(self.on_disk(&n.path))?;
+                    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                    (meta.len(), mtime)
+                }
+            };
             let dir = n.kind == FileType::Dir;
             return Ok(Attr {
                 node: id,
                 kind: n.kind,
-                size: if dir { 0 } else { meta.len() },
-                mtime: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                size: if dir { 0 } else { size },
+                mtime,
                 mode: if dir { 0o755 } else { 0o644 },
                 nlink: 1,
             });
@@ -224,6 +244,17 @@ impl OverlayFs {
             node: id,
             ..self.lower.getattr(lower)?
         })
+    }
+
+    /// Records what the layer now holds for a node.
+    fn set_meta(
+        &self,
+        id: NodeId,
+        change: impl FnOnce(Option<(u64, SystemTime)>) -> (u64, SystemTime),
+    ) {
+        if let Some(n) = self.lock().nodes.get_mut(&id) {
+            n.meta = Some(change(n.meta));
+        }
     }
 
     /// The children of a directory: the layer's, and the lower volume's not hidden.
@@ -250,6 +281,7 @@ impl OverlayFs {
                             kind: e.attr.kind,
                             lower: Some(e.attr.node),
                             upper: false,
+                            meta: None,
                         },
                     );
                     state.paths.insert(key, e.attr.node);
@@ -318,11 +350,11 @@ impl OverlayFs {
         let dest = self.on_disk(&n.path);
         let tmp = dest.with_file_name(format!(".{}.omnizip-copy", name_of(&n.path)));
         let attr = self.lower.getattr(lower)?;
+        let mut offset = 0u64;
         {
             let mut out = File::create(&tmp)?;
             if !empty {
                 let fh = self.lower.open(lower, OpenFlags::default())?;
-                let mut offset = 0u64;
                 let copied = loop {
                     match self.lower.read(fh, offset, 1 << 20) {
                         Ok(data) if data.is_empty() => break Ok(()),
@@ -347,6 +379,7 @@ impl OverlayFs {
         fs::rename(&tmp, &dest)?;
         if let Some(n) = self.lock().nodes.get_mut(&id) {
             n.upper = true;
+            n.meta = Some((offset, attr.mtime));
         }
         Ok(())
     }
@@ -377,6 +410,9 @@ impl OverlayFs {
         if n.kind == FileType::Dir && !self.entries(state, id)?.is_empty() {
             return Err(FsError::NotEmpty);
         }
+        // Handles still open on it (deleted when its last one closes) keep it in the layer
+        // only as long as they need it.
+        state.uppers.remove(&id);
         if n.upper {
             let p = self.on_disk(&n.path);
             match if n.kind == FileType::Dir {
@@ -411,17 +447,31 @@ impl OverlayFs {
         }
     }
 
-    /// The layer's file for a handle, opened on first use.
-    fn disk(&self, fh: FileHandle) -> FsResult<Arc<File>> {
+    /// The node a handle is open on.
+    fn handle_node(&self, fh: FileHandle) -> FsResult<NodeId> {
+        Ok(self.lock().opens.get(&fh.0).ok_or(FsError::BadHandle)?.node)
+    }
+
+    /// What a handle reads: its node, the lower handle, and whether the layer holds the node.
+    fn handle_source(&self, fh: FileHandle) -> FsResult<(NodeId, Option<FileHandle>, bool)> {
+        let state = self.lock();
+        let o = state.opens.get(&fh.0).ok_or(FsError::BadHandle)?;
+        let upper = state.nodes.get(&o.node).ok_or(FsError::NotFound)?.upper;
+        Ok((o.node, o.lower, upper))
+    }
+
+    /// The layer's file of an upper node: the one its handles share, opened on first use (and
+    /// kept while any handle is open), or opened just for the caller.
+    fn upper_file(&self, node: NodeId) -> FsResult<Arc<File>> {
         let mut state = self.lock();
-        let node = state.opens.get(&fh.0).ok_or(FsError::BadHandle)?.node;
-        let path = self.on_disk(&Self::node(&state, node)?.path);
-        let open = state.opens.get_mut(&fh.0).ok_or(FsError::BadHandle)?;
-        if let Some(f) = &open.disk {
-            return Ok(f.clone());
+        if let Some(f) = state.uppers.get(&node).and_then(|u| u.file.clone()) {
+            return Ok(f);
         }
+        let path = self.on_disk(&Self::node(&state, node)?.path);
         let f = Arc::new(File::options().read(true).write(true).open(path)?);
-        open.disk = Some(f.clone());
+        if let Some(u) = state.uppers.get_mut(&node) {
+            u.file = Some(f.clone());
+        }
         Ok(f)
     }
 
@@ -523,39 +573,50 @@ impl VirtualFs for OverlayFs {
         };
         let h = state.next_handle;
         state.next_handle += 1;
-        state.opens.insert(
-            h,
-            Open {
-                node,
-                lower,
-                disk: None,
-            },
-        );
+        state.opens.insert(h, Open { node, lower });
+        state.uppers.entry(node).or_default().handles += 1;
         Ok(FileHandle(h))
     }
 
     fn read(&self, fh: FileHandle, offset: u64, size: u32) -> FsResult<Vec<u8>> {
-        let (node, lower) = {
-            let state = self.lock();
-            let o = state.opens.get(&fh.0).ok_or(FsError::BadHandle)?;
-            (o.node, o.lower)
-        };
-        let upper = Self::node(&self.lock(), node)?.upper;
+        let (_, lower, upper) = self.handle_source(fh)?;
         if !upper {
             return self
                 .lower
                 .read(lower.ok_or(FsError::BadHandle)?, offset, size);
         }
-        let f = self.disk(fh)?;
         let mut buf = vec![0; size as usize];
-        let n = read_full_at(&f, &mut buf, offset)?;
+        let n = self.read_into(fh, offset, &mut buf)?;
         buf.truncate(n);
         Ok(buf)
     }
 
+    fn read_into(&self, fh: FileHandle, offset: u64, buf: &mut [u8]) -> FsResult<usize> {
+        let (node, lower, upper) = self.handle_source(fh)?;
+        if !upper {
+            return self
+                .lower
+                .read_into(lower.ok_or(FsError::BadHandle)?, offset, buf);
+        }
+        let f = self.upper_file(node)?;
+        Ok(read_full_at(&f, buf, offset)?)
+    }
+
     fn release(&self, fh: FileHandle) {
-        let open = self.lock().opens.remove(&fh.0);
-        if let Some(l) = open.and_then(|o| o.lower) {
+        let lower = {
+            let mut state = self.lock();
+            let Some(open) = state.opens.remove(&fh.0) else {
+                return;
+            };
+            if let Some(u) = state.uppers.get_mut(&open.node) {
+                u.handles = u.handles.saturating_sub(1);
+                if u.handles == 0 {
+                    state.uppers.remove(&open.node);
+                }
+            }
+            open.lower
+        };
+        if let Some(l) = lower {
             self.lower.release(l);
         }
     }
@@ -591,11 +652,18 @@ impl VirtualFs for OverlayFs {
         self.make_upper_dir(&mut state, parent)?;
         let path = join(&Self::node(&state, parent)?.path, name);
         let disk = self.on_disk(&path);
-        if dir {
+        let file = if dir {
             fs::create_dir(&disk)?;
+            None
         } else {
-            File::options().write(true).create_new(true).open(&disk)?;
-        }
+            // Kept for the handles about to open it.
+            let f = File::options()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&disk)?;
+            Some(Arc::new(f))
+        };
         let id = state.next_node;
         state.next_node += 1;
         state.nodes.insert(
@@ -605,27 +673,35 @@ impl VirtualFs for OverlayFs {
                 kind: if dir { FileType::Dir } else { FileType::File },
                 lower: None,
                 upper: true,
+                meta: Some((0, SystemTime::now())),
             },
         );
+        if file.is_some() {
+            state.uppers.insert(id, UpperFile { file, handles: 0 });
+        }
         state.paths.insert(self.key(&path), id);
         self.attr(&state, id)
     }
 
     fn write(&self, fh: FileHandle, offset: u64, data: &[u8]) -> FsResult<u32> {
-        let node = self.lock().opens.get(&fh.0).ok_or(FsError::BadHandle)?.node;
+        let node = self.handle_node(fh)?;
         self.copy_up(node, false)?;
-        let f = self.disk(fh)?;
+        let f = self.upper_file(node)?;
         let mut n = 0;
         while n < data.len() {
             n += write_at(&f, &data[n..], offset + n as u64)?;
         }
+        let end = offset + n as u64;
+        self.set_meta(node, |m| {
+            (m.map_or(end, |(size, _)| size.max(end)), SystemTime::now())
+        });
         Ok(n as u32)
     }
 
     fn set_size(&self, node: NodeId, size: u64) -> FsResult<()> {
         self.copy_up(node, size == 0)?;
-        let path = self.on_disk(&Self::node(&self.lock(), node)?.path);
-        File::options().write(true).open(path)?.set_len(size)?;
+        self.upper_file(node)?.set_len(size)?;
+        self.set_meta(node, |_| (size, SystemTime::now()));
         Ok(())
     }
 
@@ -636,10 +712,8 @@ impl VirtualFs for OverlayFs {
             return Ok(());
         }
         self.copy_up(node, false)?;
-        File::options()
-            .write(true)
-            .open(self.on_disk(&n.path))?
-            .set_modified(mtime)?;
+        self.upper_file(node)?.set_modified(mtime)?;
+        self.set_meta(node, |m| (m.map_or(0, |(size, _)| size), mtime));
         Ok(())
     }
 
@@ -707,6 +781,10 @@ impl VirtualFs for OverlayFs {
                 n.path = format!("{new_path}{}", &n.path[old.path.len()..]);
                 // It is all in the layer now: the lower entries stay where they were.
                 n.lower = None;
+                if n.meta.is_none() {
+                    // A directory copied up, from now on a new one.
+                    n.meta = Some((0, SystemTime::now()));
+                }
                 Some((m, old_k))
             })
             .collect();
@@ -721,13 +799,10 @@ impl VirtualFs for OverlayFs {
     }
 
     fn flush(&self, fh: FileHandle) -> FsResult<()> {
-        let has_disk = self
-            .lock()
-            .opens
-            .get(&fh.0)
-            .is_some_and(|o| o.disk.is_some());
-        if has_disk {
-            self.disk(fh)?.sync_data()?;
+        let node = self.handle_node(fh)?;
+        let file = self.lock().uppers.get(&node).and_then(|u| u.file.clone());
+        if let Some(f) = file {
+            f.sync_data()?;
         }
         Ok(())
     }

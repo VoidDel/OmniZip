@@ -214,6 +214,15 @@ pub trait VirtualFs: Send + Sync {
     fn open(&self, node: NodeId, flags: OpenFlags) -> FsResult<FileHandle>;
     /// Up to `size` bytes at `offset`; shorter only at the end of the file.
     fn read(&self, fh: FileHandle, offset: u64, size: u32) -> FsResult<Vec<u8>>;
+    /// [`read`](Self::read) into `buf`, up to its length; the number of bytes read. Spares an
+    /// allocation and a copy where the caller has a buffer (a backend's request buffer).
+    fn read_into(&self, fh: FileHandle, offset: u64, buf: &mut [u8]) -> FsResult<usize> {
+        let size = u32::try_from(buf.len()).unwrap_or(u32::MAX);
+        let data = self.read(fh, offset, size)?;
+        let n = data.len().min(buf.len());
+        buf[..n].copy_from_slice(&data[..n]);
+        Ok(n)
+    }
     fn release(&self, fh: FileHandle);
     fn readlink(&self, node: NodeId) -> FsResult<PathBuf>;
     fn statfs(&self) -> FsResult<FsStats>;

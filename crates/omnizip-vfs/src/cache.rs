@@ -73,37 +73,32 @@ impl Content {
 
     /// Up to `size` bytes at `offset` (shorter at the end).
     pub fn read_at(&self, offset: u64, size: usize) -> io::Result<Vec<u8>> {
+        let n = (size as u64).min(self.len().saturating_sub(offset)) as usize;
+        let mut buf = vec![0; n];
+        self.read_into(offset, &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Copies up to `buf.len()` bytes at `offset` into `buf`; the number copied (fewer at the
+    /// end).
+    pub fn read_into(&self, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
         let len = self.len();
         if offset >= len {
-            return Ok(Vec::new());
+            return Ok(0);
         }
-        let n = (size as u64).min(len - offset) as usize;
+        let n = (buf.len() as u64).min(len - offset) as usize;
         match self {
-            Content::Mem(b) => Ok(b[offset as usize..offset as usize + n].to_vec()),
+            Content::Mem(b) => {
+                buf[..n].copy_from_slice(&b[offset as usize..offset as usize + n]);
+            }
             Content::Disk(s) => {
-                let mut buf = vec![0; n];
-                let mut done = 0;
-                while done < n {
-                    let r = read_at(&s.file, &mut buf[done..], offset + done as u64)?;
-                    if r == 0 {
-                        return Err(io::ErrorKind::UnexpectedEof.into());
-                    }
-                    done += r;
+                if crate::pos::read_full_at(&s.file, &mut buf[..n], offset)? < n {
+                    return Err(io::ErrorKind::UnexpectedEof.into());
                 }
-                Ok(buf)
             }
         }
+        Ok(n)
     }
-}
-
-#[cfg(windows)]
-fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-    std::os::windows::fs::FileExt::seek_read(f, buf, offset)
-}
-
-#[cfg(unix)]
-fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-    std::os::unix::fs::FileExt::read_at(f, buf, offset)
 }
 
 /// Collects decoded bytes, moving to a spool file once they outgrow memory.
