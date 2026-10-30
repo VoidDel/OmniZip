@@ -151,9 +151,6 @@ fn is_archive(p: &Path, sniffs: &mut usize) -> bool {
     false
 }
 
-/// File-system name of the volumes OmniZip mounts (`omnizip_vfs` `VolumeStats::fs_name`).
-const MOUNT_FS_NAME: &str = "OmniZip";
-
 /// Whether `p` is a drive letter OmniZip mounted: a fixed drive (as WinFsp drives are) whose
 /// file system calls itself "OmniZip". Network drives are not asked, so the menu cannot hang on
 /// one that is gone.
@@ -163,6 +160,8 @@ fn is_mount_root(p: &Path) -> bool {
         Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumeInformationW},
         core::HSTRING,
     };
+    /// File-system name of the volumes OmniZip mounts (`omnizip_vfs` `VolumeStats::fs_name`).
+    const MOUNT_FS_NAME: &str = "OmniZip";
     const DRIVE_FIXED: u32 = 3;
     let s = p.to_string_lossy();
     let b = s.as_bytes();
