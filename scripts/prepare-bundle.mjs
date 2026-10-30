@@ -10,9 +10,12 @@
 //                            file types at;
 //   * menu-icons/*.ico     — the icons of the context-menu items (icons/menu,
 //                            scripts/gen-menu-icons.mjs), resources the menu extension shows.
+//   * Assets/*.png         — the logos of the context-menu package, also next to the app: a
+//                            dialog started from the Windows 11 menu runs with the package's
+//                            identity, and its taskbar button shows the package logo.
 // Called by `beforeBuildCommand` in apps/desktop/src-tauri/bundle.windows.json (`pnpm bundle:windows`).
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,12 +66,15 @@ if (windows) {
     console.warn('prepare-bundle: context-menu package unsigned (no Windows 11 top-level menu)');
   }
   const publisher = process.env.OMNIZIP_PUBLISHER ? ['-Publisher', process.env.OMNIZIP_PUBLISHER] : [];
+  const arch = triple.startsWith('aarch64') ? 'arm64' : 'x64';
   const pack = [
     '-NoProfile', '-File', path.join(root, 'platform/windows/msix/pack.ps1'),
-    '-Version', version, '-Arch', triple.startsWith('aarch64') ? 'arm64' : 'x64', '-Sparse',
+    '-Version', version, '-Arch', arch, '-Sparse',
     '-Out', path.join(out, 'omnizip_menu.msix'), ...publisher, ...sign,
   ];
   execFileSync('pwsh', pack, { cwd: root, stdio: 'inherit' });
+  // The package's logos next to the app as well (the external location of the package).
+  cpSync(path.join(root, 'target/msix', `sparse-${arch}`, 'Assets'), path.join(out, 'Assets'), { recursive: true });
 }
 for (const f of [`omnizip-${triple}${exe}`, ...(windows ? [`omnizip-mountd-${triple}.exe`, 'omnizip_shell.dll', 'omnizip_menu.msix'] : [])]) {
   if (!existsSync(path.join(out, f))) throw new Error(`missing ${f}`);
