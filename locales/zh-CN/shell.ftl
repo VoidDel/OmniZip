@@ -10,6 +10,7 @@ menu-convert = 转换为…
 menu-add-zip = 添加到“{ $name }.zip”
 menu-add-7z = 添加到“{ $name }.7z”
 menu-add = 添加到压缩包…
+menu-unmount = 弹出
 menu-tooltip = 使用 OmniZip 压缩、解压和挂载
 
 # Notification-area icon (apps/desktop/src-tauri/src/tray.rs).

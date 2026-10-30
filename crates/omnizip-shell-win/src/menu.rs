@@ -25,11 +25,13 @@ pub enum Verb {
     AddZip,
     Add7z,
     Add,
+    /// "Eject" on a drive OmniZip mounted: a menu item of its own on drives, not in the submenu.
+    Unmount,
 }
 
 impl Verb {
-    /// Menu order.
-    pub const ALL: [Verb; 11] = [
+    /// Menu order. New verbs go last: the class id of a verb follows its place here.
+    pub const ALL: [Verb; 12] = [
         Verb::Open,
         Verb::ExtractHere,
         Verb::ExtractSmart,
@@ -41,6 +43,7 @@ impl Verb {
         Verb::AddZip,
         Verb::Add7z,
         Verb::Add,
+        Verb::Unmount,
     ];
 
     /// Key in `[shell.items]` of `config.toml`.
@@ -57,6 +60,7 @@ impl Verb {
             Verb::AddZip => "add_zip",
             Verb::Add7z => "add_7z",
             Verb::Add => "add",
+            Verb::Unmount => "unmount",
         }
     }
 
@@ -74,6 +78,7 @@ impl Verb {
             Verb::AddZip => "add-zip",
             Verb::Add7z => "add-7z",
             Verb::Add => "add",
+            Verb::Unmount => "unmount",
         }
     }
 
@@ -91,6 +96,7 @@ impl Verb {
             Verb::AddZip => "menu-add-zip",
             Verb::Add7z => "menu-add-7z",
             Verb::Add => "menu-add",
+            Verb::Unmount => "menu-unmount",
         }
     }
 
@@ -102,6 +108,11 @@ impl Verb {
     pub fn from_index(i: u8) -> Option<Verb> {
         Verb::ALL.get(i as usize).copied()
     }
+
+    /// Verbs of the OmniZip submenu (or of the flat menu) on files and folders.
+    pub fn in_submenu(self) -> bool {
+        self != Verb::Unmount
+    }
 }
 
 /// What is selected in the file manager.
@@ -111,6 +122,8 @@ pub struct Selection {
     pub others: usize,
     /// Base name used in titles: the archive stem, the folder name, or the parent folder name.
     pub name: String,
+    /// The one item selected is the root of a volume OmniZip mounted.
+    pub mount_root: bool,
 }
 
 /// Paths that need a content sniff are limited so the menu stays fast (`docs/07` §2).
@@ -138,6 +151,43 @@ fn is_archive(p: &Path, sniffs: &mut usize) -> bool {
     false
 }
 
+/// File-system name of the volumes OmniZip mounts (`omnizip_vfs` `VolumeStats::fs_name`).
+const MOUNT_FS_NAME: &str = "OmniZip";
+
+/// Whether `p` is a drive letter OmniZip mounted: a fixed drive (as WinFsp drives are) whose
+/// file system calls itself "OmniZip". Network drives are not asked, so the menu cannot hang on
+/// one that is gone.
+#[cfg(windows)]
+fn is_mount_root(p: &Path) -> bool {
+    use windows::{
+        Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumeInformationW},
+        core::HSTRING,
+    };
+    const DRIVE_FIXED: u32 = 3;
+    let s = p.to_string_lossy();
+    let b = s.as_bytes();
+    let root = b.len() == 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b[2] == b'\\' || b[2] == b'/');
+    if !root {
+        return false;
+    }
+    let path = HSTRING::from(format!("{}:\\", char::from(b[0])));
+    if unsafe { GetDriveTypeW(&path) } != DRIVE_FIXED {
+        return false;
+    }
+    let mut name = [0u16; 32];
+    let ok = unsafe { GetVolumeInformationW(&path, None, None, None, None, Some(&mut name)) };
+    let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    ok.is_ok() && String::from_utf16_lossy(&name[..len]) == MOUNT_FS_NAME
+}
+
+#[cfg(not(windows))]
+fn is_mount_root(_: &Path) -> bool {
+    false
+}
+
 /// Classifies a selection.
 pub fn classify(paths: &[PathBuf]) -> Selection {
     let mut sel = Selection::default();
@@ -150,6 +200,7 @@ pub fn classify(paths: &[PathBuf]) -> Selection {
         }
     }
     sel.others += paths.len().saturating_sub(MAX_ITEMS);
+    sel.mount_root = matches!(paths, [one] if is_mount_root(one));
     sel.name = match paths {
         [one] => {
             let n = one
@@ -186,6 +237,7 @@ pub fn applies(verb: Verb, sel: &Selection) -> bool {
         }
         Verb::ExtractEach => sel.archives > 1 && sel.others == 0,
         Verb::AddZip | Verb::Add7z | Verb::Add => sel.others > 0,
+        Verb::Unmount => sel.mount_root,
     }
 }
 
@@ -348,6 +400,7 @@ mod tests {
 
         let folder = classify(&[p("folder")]);
         assert_eq!(folder.name, "folder");
+        assert!(!folder.mount_root && !applies(Verb::Unmount, &folder));
 
         let sniffed = classify(&[p("NOEXT")]);
         assert_eq!(
@@ -361,11 +414,40 @@ mod tests {
     }
 
     #[test]
+    fn eject_only_on_a_mounted_drive() {
+        // "Eject" applies to the root of a volume OmniZip mounted and to nothing else; that
+        // check against a real WinFsp drive is in omnizip-mount-winfsp/tests/winfsp.rs.
+        let drive = Selection {
+            others: 1,
+            name: "Z:".into(),
+            mount_root: true,
+            ..Default::default()
+        };
+        assert!(applies(Verb::Unmount, &drive));
+        assert!(!Verb::Unmount.in_submenu());
+        assert!(
+            Verb::ALL
+                .iter()
+                .filter(|v| **v != Verb::Unmount)
+                .all(|v| v.in_submenu())
+        );
+        if cfg!(windows) {
+            let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+            let root = classify(&[PathBuf::from(format!(
+                "{system}{}",
+                std::path::MAIN_SEPARATOR
+            ))]);
+            assert!(!root.mount_root, "the system drive is not an OmniZip mount");
+        }
+    }
+
+    #[test]
     fn titles_are_localized() {
         let sel = Selection {
             archives: 1,
             others: 0,
             name: "photos".into(),
+            ..Default::default()
         };
         assert_eq!(
             title(Verb::ExtractSmart, &sel, &Localizer::new("zh-CN")),

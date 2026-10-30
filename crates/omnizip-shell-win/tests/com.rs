@@ -78,7 +78,8 @@ fn explorer_command_behaves_like_explorer_expects() {
         );
         assert_eq!(unsafe { root.GetCanonicalName() }.unwrap(), CLSID_ROOT);
 
-        // Submenu: every verb except the default-off "Convert to…".
+        // Submenu: every verb except the default-off "Convert to…" and "Eject" (an item of its
+        // own on drives).
         let en: IEnumExplorerCommand = unsafe { root.EnumSubCommands() }.unwrap();
         let mut subs = Vec::new();
         loop {
@@ -93,13 +94,14 @@ fn explorer_command_behaves_like_explorer_expects() {
                 break;
             }
         }
-        assert_eq!(subs.len(), Verb::ALL.len() - 1);
+        assert_eq!(subs.len(), Verb::ALL.len() - 2);
         let names: Vec<GUID> = subs
             .iter()
             .map(|c| unsafe { c.GetCanonicalName() }.unwrap())
             .collect();
         assert!(names.contains(&clsid_for(Some(Verb::ExtractHere))));
         assert!(!names.contains(&clsid_for(Some(Verb::Convert))));
+        assert!(!names.contains(&clsid_for(Some(Verb::Unmount))));
 
         // An archive shows extraction verbs and hides "Add to".
         let a = items(&zip);
@@ -118,6 +120,17 @@ fn explorer_command_behaves_like_explorer_expects() {
         let t = items(&txt);
         assert_eq!(state(&here, &t), ECS_HIDDEN.0);
         assert_eq!(state(&add, &t), ECS_ENABLED.0);
+
+        // "Eject" only on a drive OmniZip mounted: hidden on files and on the system drive.
+        let eject = command(clsid_for(Some(Verb::Unmount)));
+        assert_eq!(state(&eject, &a), ECS_HIDDEN.0);
+        assert_eq!(state(&eject, &t), ECS_HIDDEN.0);
+        let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        assert_eq!(
+            state(&eject, &items(Path::new(&format!("{system}\\")))),
+            ECS_HIDDEN.0
+        );
+        assert_eq!(text(unsafe { eject.GetTitle(&t) }.unwrap()), "Eject");
         assert_eq!(
             text(unsafe { add.GetTitle(&t) }.unwrap()),
             "Add to \"notes.zip\""
@@ -155,6 +168,13 @@ fn registration_round_trip_in_a_scratch_key() {
         .unwrap();
     assert_eq!(handler, register::guid_string(CLSID_ROOT));
     assert_eq!(handler, "{6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F00}");
+    // "Eject" on drives: an item of its own, with the class id after the other verbs'.
+    let eject = || {
+        windows_registry::CURRENT_USER
+            .open(format!(r"{BASE}\Drive\shell\OmniZip.unmount"))
+            .and_then(|k| k.get_string("ExplorerCommandHandler"))
+    };
+    assert_eq!(eject().unwrap(), "{6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F0C}");
 
     // Flat layout: one top-level verb per enabled item, no submenu.
     let flat: MenuConfig = toml_flat();
@@ -172,8 +192,19 @@ fn registration_round_trip_in_a_scratch_key() {
             .is_err()
     );
 
+    assert!(
+        windows_registry::CURRENT_USER
+            .open(format!(
+                r"{BASE}\AllFilesystemObjects\shell\OmniZip.unmount"
+            ))
+            .is_err(),
+        "no flat \"Eject\" on files and folders"
+    );
+    assert!(eject().is_ok());
+
     register::unregister_at(BASE).unwrap();
     assert!(!register::status_at(BASE).registered);
+    assert!(eject().is_err());
     let _ = windows_registry::CURRENT_USER.remove_tree(r"Software\OmniZipTest");
 }
 

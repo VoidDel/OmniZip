@@ -493,6 +493,7 @@
       "items_add_zip": "添加到“{name}.zip”",
       "items_add_7z": "添加到“{name}.7z”",
       "items_add": "添加到压缩包…",
+      "items_unmount": "弹出（OmniZip 挂载的盘）",
       "registered": "已为当前用户注册",
       "register": "添加到右键菜单",
       "unregister": "从右键菜单移除",

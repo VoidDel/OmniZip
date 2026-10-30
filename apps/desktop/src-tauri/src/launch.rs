@@ -3,7 +3,7 @@
 //! ```text
 //! omnizip-desktop [--open <archive>]
 //!                 [--shell open|extract-here|extract-smart|extract-to|extract-each|test|mount|
-//!                          add-zip|add-7z|add|convert]
+//!                          add-zip|add-7z|add|convert|unmount]
 //!                 [--cwd <dir>] [--files-from <list-file>] [<paths>…]
 //! ```
 
@@ -26,6 +26,8 @@ pub enum Verb {
     Add7z,
     Add,
     Convert,
+    /// "Eject" on a drive OmniZip mounted.
+    Unmount,
 }
 
 impl Verb {
@@ -42,6 +44,7 @@ impl Verb {
             "add-7z" => Verb::Add7z,
             "add" => Verb::Add,
             "convert" => Verb::Convert,
+            "unmount" => Verb::Unmount,
             _ => return None,
         })
     }
@@ -51,7 +54,7 @@ impl Verb {
     pub fn is_dialog(self) -> bool {
         matches!(
             self,
-            Verb::ExtractTo | Verb::Add | Verb::Convert | Verb::Mount
+            Verb::ExtractTo | Verb::Add | Verb::Convert | Verb::Mount | Verb::Unmount
         )
     }
 
@@ -80,11 +83,25 @@ pub struct Invocation {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum LaunchRequest {
-    Open { path: String },
-    Extract { paths: Vec<String> },
-    Compress { paths: Vec<String> },
-    Mount { path: String },
-    Convert { paths: Vec<String> },
+    Open {
+        path: String,
+    },
+    Extract {
+        paths: Vec<String>,
+    },
+    Compress {
+        paths: Vec<String>,
+    },
+    Mount {
+        path: String,
+    },
+    Convert {
+        paths: Vec<String>,
+    },
+    /// The mount whose drive (or folder) this is.
+    Unmount {
+        path: String,
+    },
 }
 
 fn read_list(file: &Path) -> Vec<PathBuf> {
@@ -163,6 +180,7 @@ pub fn to_request(inv: &Invocation) -> Option<LaunchRequest> {
         Verb::Add => LaunchRequest::Compress { paths: all() },
         Verb::Mount => LaunchRequest::Mount { path: first },
         Verb::Convert => LaunchRequest::Convert { paths: all() },
+        Verb::Unmount => LaunchRequest::Unmount { path: first },
         _ => return None,
     })
 }
@@ -195,7 +213,13 @@ mod tests {
         assert!(inv.verb.is_background());
         // "Extract to…", "Add to archive…", "Convert to…" and "Mount" get a standalone dialog
         // window, not the main one.
-        for v in [Verb::ExtractTo, Verb::Add, Verb::Convert, Verb::Mount] {
+        for v in [
+            Verb::ExtractTo,
+            Verb::Add,
+            Verb::Convert,
+            Verb::Mount,
+            Verb::Unmount,
+        ] {
             assert!(v.is_dialog() && !v.is_background());
         }
         for v in [Verb::Open, Verb::ExtractHere, Verb::Add7z] {

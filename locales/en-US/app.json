@@ -493,6 +493,7 @@
       "items_add_zip": "Add to \"{name}.zip\"",
       "items_add_7z": "Add to \"{name}.7z\"",
       "items_add": "Add to archive…",
+      "items_unmount": "Eject (drives OmniZip mounted)",
       "registered": "Registered for this user",
       "register": "Add to context menu",
       "unregister": "Remove from context menu",

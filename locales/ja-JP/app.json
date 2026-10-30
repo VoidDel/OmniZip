@@ -493,6 +493,7 @@
       "items_add_zip": "「{name}.zip」に追加",
       "items_add_7z": "「{name}.7z」に追加",
       "items_add": "アーカイブに追加…",
+      "items_unmount": "取り出し（OmniZip がマウントしたドライブ）",
       "registered": "このユーザーに登録済み",
       "register": "右クリックメニューに追加",
       "unregister": "右クリックメニューから削除",

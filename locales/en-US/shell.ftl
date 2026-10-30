@@ -12,6 +12,7 @@ menu-convert = Convert to…
 menu-add-zip = Add to "{ $name }.zip"
 menu-add-7z = Add to "{ $name }.7z"
 menu-add = Add to archive…
+menu-unmount = Eject
 menu-tooltip = Compress, extract and mount archives with OmniZip
 
 # Notification-area icon (apps/desktop/src-tauri/src/tray.rs).

@@ -87,7 +87,7 @@ function ThemeCard({ th, selected, onPick, lang }: { th: ThemeSummary; selected:
 
 /** Registration state of the Windows context menu, with register / remove actions. */
 /** Context-menu items in menu order (`Verb::ALL` in crates/omnizip-shell-win/src/menu.rs). */
-const MENU_ITEMS = ['open', 'extract_here', 'extract_smart', 'extract_to', 'extract_each', 'mount', 'test', 'convert', 'add_zip', 'add_7z', 'add'] as const;
+const MENU_ITEMS = ['open', 'extract_here', 'extract_smart', 'extract_to', 'extract_each', 'mount', 'test', 'convert', 'add_zip', 'add_7z', 'add', 'unmount'] as const;
 type MenuItem = (typeof MENU_ITEMS)[number];
 
 /** What the preview menu is opened on, and the items that apply to it (`applies` in menu.rs). */
@@ -109,6 +109,7 @@ const MENU_ICONS: Record<Exclude<MenuItem, 'open'>, IconName> = {
   add_zip: 'package',
   add_7z: 'package',
   add: 'menuAdd',
+  unmount: 'eject',
 };
 
 /** Whether an item is shown; one missing from the settings is, except "Convert" (`MenuConfig::enabled`). */

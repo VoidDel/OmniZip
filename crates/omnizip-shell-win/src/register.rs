@@ -22,6 +22,8 @@ pub const CLASSES: &str = r"Software\Classes";
 /// File-system objects (files and folders) share this ProgID.
 const TARGET: &str = r"AllFilesystemObjects\shell";
 const VERB_KEY: &str = "OmniZip";
+/// Drives: "Eject" on the drives OmniZip mounted (hidden on the others), like a mounted ISO.
+const DRIVE_VERB: &str = r"Drive\shell\OmniZip.unmount";
 
 /// `{6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F00}`
 pub fn guid_string(g: GUID) -> String {
@@ -71,7 +73,10 @@ pub fn register_at(base: &str, dll: &Path, cfg: &MenuConfig) -> std::io::Result<
         )?;
     }
     if cfg.flat() {
-        for v in Verb::ALL.into_iter().filter(|v| cfg.enabled(*v)) {
+        for v in Verb::ALL
+            .into_iter()
+            .filter(|v| v.in_submenu() && cfg.enabled(*v))
+        {
             let key = CURRENT_USER
                 .create(format!(r"{base}\{TARGET}\{VERB_KEY}.{}", v.key()))
                 .map_err(err)?;
@@ -86,6 +91,16 @@ pub fn register_at(base: &str, dll: &Path, cfg: &MenuConfig) -> std::io::Result<
             .map_err(err)?;
         key.set_string("MUIVerb", "OmniZip").map_err(err)?;
     }
+    if cfg.enabled(Verb::Unmount) {
+        let key = CURRENT_USER
+            .create(format!(r"{base}\{DRIVE_VERB}"))
+            .map_err(err)?;
+        key.set_string(
+            "ExplorerCommandHandler",
+            guid_string(clsid_for(Some(Verb::Unmount))),
+        )
+        .map_err(err)?;
+    }
     Ok(())
 }
 
@@ -98,6 +113,7 @@ pub fn unregister_at(base: &str) -> std::io::Result<()> {
         let _ = CURRENT_USER.remove_tree(format!(r"{base}\{TARGET}\{VERB_KEY}.{}", v.key()));
     }
     let _ = CURRENT_USER.remove_tree(format!(r"{base}\{TARGET}\{VERB_KEY}"));
+    let _ = CURRENT_USER.remove_tree(format!(r"{base}\{DRIVE_VERB}"));
     Ok(())
 }
 

@@ -10,6 +10,7 @@ menu-convert = 形式を変換…
 menu-add-zip = 「{ $name }.zip」に追加
 menu-add-7z = 「{ $name }.7z」に追加
 menu-add = アーカイブに追加…
+menu-unmount = 取り出し
 menu-tooltip = OmniZip で圧縮・展開・マウント
 
 # Notification-area icon (apps/desktop/src-tauri/src/tray.rs).

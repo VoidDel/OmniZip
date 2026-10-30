@@ -493,6 +493,7 @@
       "items_add_zip": "加入「{name}.zip」",
       "items_add_7z": "加入「{name}.7z」",
       "items_add": "加入壓縮檔…",
+      "items_unmount": "退出（OmniZip 掛載的磁碟）",
       "registered": "已為目前使用者註冊",
       "register": "加入右鍵選單",
       "unregister": "從右鍵選單移除",

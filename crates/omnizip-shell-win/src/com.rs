@@ -161,10 +161,11 @@ impl Command {
         Self { verb, cfg, l }
     }
 
+    /// The submenu's verbs ("Eject" is an item of its own on drives).
     fn visible_verbs(&self) -> Vec<Verb> {
         Verb::ALL
             .into_iter()
-            .filter(|v| self.cfg.enabled(*v))
+            .filter(|v| v.in_submenu() && self.cfg.enabled(*v))
             .collect()
     }
 }

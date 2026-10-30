@@ -25,4 +25,6 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 omnizip-core.workspace = true
 omnizip-formats.workspace = true
+# "Eject" in the context menu recognizes the drives OmniZip mounted.
+omnizip-shell-win = { path = "../omnizip-shell-win" }
 tempfile.workspace = true

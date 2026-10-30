@@ -266,6 +266,29 @@ fn free_letters_shrink_while_mounted() {
     assert!(free_drive_letters().contains(&letter));
 }
 
+/// The context menu's "Eject" shows on the drive OmniZip mounted (its file system reports
+/// "OmniZip"), not on a folder inside it, nor on the system drive.
+#[test]
+fn eject_shows_on_the_mounted_drive() {
+    use omnizip_shell::menu::{Verb, applies, classify};
+    if !ready() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let (zip, _) = archive(d.path(), "photos.zip", FormatId::Zip);
+    let m = WinFsp
+        .mount(volume(&zip), &MountOptions::default())
+        .unwrap();
+    let r = root(m.as_ref());
+    let drive = classify(std::slice::from_ref(&r));
+    assert!(drive.mount_root, "{}", r.display());
+    assert!(applies(Verb::Unmount, &drive));
+    let inside = classify(&[r.join("photos")]);
+    assert!(!inside.mount_root && !applies(Verb::Unmount, &inside));
+    let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    assert!(!classify(&[PathBuf::from(format!("{system}\\"))]).mount_root);
+}
+
 /// A writable layer over the archive, changed through the ordinary file APIs: new files and
 /// folders, overwrite, append, truncate, rename (also over an existing file, as editors save),
 /// delete, copy, times. The archive stays as it was; the layer lists what changed.

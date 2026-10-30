@@ -107,7 +107,9 @@ export type LaunchRequest =
   | { kind: 'extract'; paths: string[] }
   | { kind: 'compress'; paths: string[] }
   | { kind: 'mount'; path: string }
-  | { kind: 'convert'; paths: string[] };
+  | { kind: 'convert'; paths: string[] }
+  /** "Eject" on a drive OmniZip mounted. */
+  | { kind: 'unmount'; path: string };
 
 export interface Bootstrap {
   settings: Settings;
