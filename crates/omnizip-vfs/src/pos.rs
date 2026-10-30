@@ -33,3 +33,15 @@ pub fn read_full_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> 
     }
     Ok(n)
 }
+
+/// Writes all of `buf` at `offset`.
+pub fn write_all_at(f: &File, buf: &[u8], offset: u64) -> io::Result<()> {
+    let mut n = 0;
+    while n < buf.len() {
+        match write_at(f, &buf[n..], offset + n as u64)? {
+            0 => return Err(io::ErrorKind::WriteZero.into()),
+            k => n += k,
+        }
+    }
+    Ok(())
+}

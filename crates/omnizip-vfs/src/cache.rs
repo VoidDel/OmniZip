@@ -6,17 +6,22 @@
 //! Both pools have a budget; the least recently used entries are dropped first. Content that
 //! a reader still holds stays valid after eviction (it is reference counted), and a spool
 //! file is deleted when its last holder lets go.
+//!
+//! A large entry can be read while it is being decoded ([`Partial`]): readers wait only until
+//! the bytes they ask for are in the spool file, not for the whole entry.
 
 use std::{
     collections::HashMap,
     fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex, OnceLock},
 };
 
 use omnizip_core::EntryId;
 use tempfile::{NamedTempFile, TempDir, TempPath};
+
+use crate::{FsError, FsResult};
 
 /// Budgets of the cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +106,77 @@ impl Content {
     }
 }
 
+/// An entry being decoded into a spool file, readable as far as it has been written.
+#[derive(Default)]
+pub struct Partial {
+    /// A handle on the spool file, set when it is created.
+    file: OnceLock<File>,
+    state: Mutex<PartialState>,
+    grew: Condvar,
+}
+
+#[derive(Default)]
+struct PartialState {
+    written: u64,
+    /// The finished content, or why decoding stopped.
+    done: Option<FsResult<Content>>,
+}
+
+impl Partial {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, PartialState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn advance(&self, written: u64) {
+        self.lock().written = written;
+        self.grew.notify_all();
+    }
+
+    /// Records how decoding ended; only the first end counts.
+    pub fn end(&self, result: FsResult<Content>) {
+        let mut st = self.lock();
+        if st.done.is_none() {
+            st.done = Some(result);
+        }
+        drop(st);
+        self.grew.notify_all();
+    }
+
+    /// Whether decoding has ended.
+    pub fn ended(&self) -> bool {
+        self.lock().done.is_some()
+    }
+
+    /// Copies up to `buf.len()` bytes at `offset` into `buf`, waiting until they are decoded
+    /// (or decoding ends); the number copied, fewer only at the end of the entry.
+    pub fn read_into(&self, offset: u64, buf: &mut [u8]) -> FsResult<usize> {
+        let want = offset.saturating_add(buf.len() as u64);
+        let mut st = self.lock();
+        while st.written < want && st.done.is_none() {
+            st = self.grew.wait(st).unwrap_or_else(|e| e.into_inner());
+        }
+        match &st.done {
+            Some(Ok(c)) => {
+                let c = c.clone();
+                drop(st);
+                return Ok(c.read_into(offset, buf)?);
+            }
+            Some(Err(e)) => return Err(*e),
+            None => {}
+        }
+        drop(st);
+        let f = self.file.get().ok_or(FsError::Io)?;
+        if crate::pos::read_full_at(f, buf, offset)? < buf.len() {
+            return Err(FsError::Io);
+        }
+        Ok(buf.len())
+    }
+}
+
 /// Collects decoded bytes, moving to a spool file once they outgrow memory.
 ///
 /// Writing past `cap` fails: an entry may not produce more than it declared (bomb guard).
@@ -111,6 +187,9 @@ pub struct ContentBuilder {
     inline_max: u64,
     cap: u64,
     dir: PathBuf,
+    /// Readers of the entry while it is being decoded: the spool file starts with the first
+    /// byte, and every write is published.
+    partial: Option<Arc<Partial>>,
 }
 
 /// Error text when an entry outgrows its cap (see [`ContentBuilder`]).
@@ -162,19 +241,29 @@ impl Write for ContentBuilder {
         if self.len + buf.len() as u64 > self.cap {
             return Err(io::Error::new(io::ErrorKind::FileTooLarge, OVERSIZE));
         }
-        if self.file.is_none() && self.len + buf.len() as u64 > self.inline_max {
-            let mut f = tempfile::Builder::new()
+        if self.file.is_none()
+            && (self.partial.is_some() || self.len + buf.len() as u64 > self.inline_max)
+        {
+            let f = tempfile::Builder::new()
                 .prefix("entry-")
                 .tempfile_in(&self.dir)?;
-            f.write_all(&self.mem)?;
+            // Every write says where it goes: a duplicated handle (the readers') shares the
+            // file position, which their reads move.
+            crate::pos::write_all_at(f.as_file(), &self.mem, 0)?;
             self.mem = Vec::new();
+            if let Some(p) = &self.partial {
+                let _ = p.file.set(f.as_file().try_clone()?);
+            }
             self.file = Some(f);
         }
-        match &mut self.file {
-            Some(f) => f.write_all(buf)?,
+        match &self.file {
+            Some(f) => crate::pos::write_all_at(f.as_file(), buf, self.len)?,
             None => self.mem.extend_from_slice(buf),
         }
         self.len += buf.len() as u64;
+        if let Some(p) = &self.partial {
+            p.advance(self.len);
+        }
         Ok(buf.len())
     }
 
@@ -250,6 +339,15 @@ impl ContentCache {
             inline_max: self.limits.inline_max,
             cap,
             dir: self.dir.path().to_owned(),
+            partial: None,
+        }
+    }
+
+    /// A builder whose bytes `partial`'s readers get as they are written.
+    pub fn streaming_builder(&self, cap: u64, partial: Arc<Partial>) -> ContentBuilder {
+        ContentBuilder {
+            partial: Some(partial),
+            ..self.builder(cap)
         }
     }
 

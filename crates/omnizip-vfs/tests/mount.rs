@@ -209,6 +209,11 @@ fn zip_volume_reads_like_a_disk() {
         assert_eq!(got, &big[off as usize..end], "offset {off}");
     }
     assert!(fs.read(fh, big.len() as u64, 10).unwrap().is_empty());
+    // Decoded in the background: in the cache a moment after the last byte was read.
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while fs.cache().usage().1 == 0 && Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     let (_, disk) = fs.cache().usage();
     assert_eq!(disk, big.len() as u64, "big entry spooled to disk");
     fs.release(fh);
@@ -608,4 +613,112 @@ fn large_archives_mount_and_list_quickly() {
     eprintln!("mount 100k entries: {mounted:?}; list 10k: {listing:?}");
     // Generous bounds: this runs unoptimized in debug builds.
     assert!(mounted.as_secs() < 10 && listing.as_secs() < 5);
+}
+
+/// One file whose data stops after `gate` bytes until the test opens the gate.
+struct Gated {
+    info: ArchiveInfo,
+    entries: Vec<Entry>,
+    data: Arc<Vec<u8>>,
+    gate: usize,
+    open: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+struct GatedRead<'a> {
+    g: &'a Gated,
+    pos: usize,
+}
+
+impl std::io::Read for GatedRead<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos >= self.g.gate {
+            let (lock, cv) = &*self.g.open;
+            let mut open = lock.lock().unwrap();
+            while !*open {
+                open = cv.wait(open).unwrap();
+            }
+        }
+        let end = if self.pos < self.g.gate {
+            self.g.gate
+        } else {
+            self.g.data.len()
+        };
+        let n = buf.len().min(end - self.pos);
+        buf[..n].copy_from_slice(&self.g.data[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+impl ArchiveReader for Gated {
+    fn info(&self) -> &ArchiveInfo {
+        &self.info
+    }
+
+    fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> omnizip_core::Result<()> {
+        let e = self.entries[0].clone();
+        if sink.wants(&e) {
+            let mut r = GatedRead { g: self, pos: 0 };
+            sink.entry(&e, EntryData::Stream(&mut r), ctx)?;
+        }
+        Ok(())
+    }
+}
+
+/// A large file is readable while it is being decoded: the start comes back before the rest
+/// is there, and the whole file is right once it is.
+#[test]
+fn large_files_are_read_while_they_decode() {
+    let data = Arc::new(noise(6 << 20, 9));
+    let open = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let mut e = Entry::new(0, "video.bin".into(), EntryKind::File);
+    e.size = data.len() as u64;
+    e.size_known = true;
+    let reader = Gated {
+        info: ArchiveInfo::new(Path::new("gated.zip"), FormatId::Zip, 0),
+        entries: vec![e],
+        data: data.clone(),
+        gate: 1 << 20,
+        open: open.clone(),
+    };
+    let fs = Arc::new(ArchiveFs::new(Box::new(reader), opts()).unwrap());
+    let node = resolve(fs.as_ref(), "video.bin").unwrap().node;
+    let fh = fs.open(node, OpenFlags::default()).unwrap();
+
+    // The first megabyte, while the decoder waits at the gate.
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let fs = fs.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(fs.read(fh, 1000, 64 << 10));
+        });
+    }
+    let head = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the start is readable before the rest is decoded")
+        .unwrap();
+    assert_eq!(head, &data[1000..1000 + (64 << 10)]);
+    assert_eq!(fs.cache().len(), 0, "still decoding");
+
+    // Beyond the gate a read waits; opening it lets everything through.
+    {
+        let (lock, cv) = &*open;
+        *lock.lock().unwrap() = true;
+        cv.notify_all();
+    }
+    assert_eq!(
+        fs.read(fh, (6 << 20) - 10, 64).unwrap(),
+        &data[(6 << 20) - 10..]
+    );
+    fs.release(fh);
+    assert_eq!(read_all(fs.as_ref(), node, 1 << 20).unwrap(), *data);
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while fs.cache().is_empty() && Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(fs.cache().len(), 1);
 }

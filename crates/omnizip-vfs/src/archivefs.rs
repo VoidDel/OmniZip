@@ -6,12 +6,14 @@
 //! single-stream ones (D) are decoded in one pass on first access instead, since every entry
 //! would otherwise restart the solid block or the stream. Files stored as they are (plain tar,
 //! stored ZIP entries) are read in place from the archive file, neither decoded nor cached.
+//! A large entry of its own stream (class B) is decoded by a background thread, and reads are
+//! answered as soon as the bytes they want are decoded ([`Partial`]).
 
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs::File,
-    io,
+    io::{self, Write},
     path::PathBuf,
     sync::{
         Arc, Mutex, OnceLock, RwLock,
@@ -21,16 +23,18 @@ use std::{
 };
 
 use omnizip_core::{
-    ArchiveInfo, ArchiveReader, Entry, EntryData, EntryId, EntryKind, Error, ErrorCode,
-    ExtractSink, FixedPassword, Interaction, JobCtx, MountClass, NoInteraction, NullProgress,
-    TreeIndex, path::logical_components,
+    ArchiveInfo, ArchiveReader, CancelToken, Entry, EntryData, EntryId, EntryKind, Error,
+    ErrorCode, ExtractSink, FixedPassword, Interaction, JobCtx, MountClass, NoInteraction,
+    NullProgress, TreeIndex, path::logical_components,
 };
 
 use crate::{
     Attr, DirEntry, FileHandle, FileType, FsError, FsResult, FsStats, NodeId, OpenFlags, VirtualFs,
-    cache::{CacheLimits, Content, ContentBuilder, ContentCache},
+    cache::{CacheLimits, Content, ContentBuilder, ContentCache, Partial},
     names::{NameRules, assign},
 };
+
+type SharedReader = Arc<Mutex<Box<dyn ArchiveReader>>>;
 
 /// How symbolic links are shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,13 +112,17 @@ struct Shape {
 
 /// A mounted archive.
 pub struct ArchiveFs {
-    reader: Mutex<Box<dyn ArchiveReader>>,
+    reader: SharedReader,
     info: ArchiveInfo,
     entries: Vec<Entry>,
     tree: TreeIndex,
     opts: FsOptions,
     dirs: RwLock<HashMap<NodeId, Arc<DirView>>>,
-    cache: ContentCache,
+    cache: Arc<ContentCache>,
+    /// Large entries being decoded in the background, readable as far as they are.
+    decoding: Arc<Mutex<HashMap<EntryId, Arc<Partial>>>>,
+    /// Stops decoding when the volume goes away.
+    cancel: CancelToken,
     handles: Mutex<HashMap<u64, NodeId>>,
     next_handle: Mutex<u64>,
     interaction: Arc<dyn Interaction>,
@@ -125,6 +133,13 @@ pub struct ArchiveFs {
     file: Option<File>,
     /// Per entry, where its data lies as it is in [`file`](Self::file), asked once.
     stored: Vec<OnceLock<Option<(u64, u64)>>>,
+}
+
+impl Drop for ArchiveFs {
+    /// A decode still running in the background stops (and lets go of the archive file).
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 impl std::fmt::Debug for ArchiveFs {
@@ -154,7 +169,7 @@ impl ArchiveFs {
         let info = reader.info().clone();
         let entries = reader.entries().to_vec();
         let tree = TreeIndex::build(&entries);
-        let cache = ContentCache::new(opts.cache, opts.cache_dir.as_deref())?;
+        let cache = Arc::new(ContentCache::new(opts.cache, opts.cache_dir.as_deref())?);
         let meta = std::fs::metadata(&info.path).ok();
         let fallback_time = meta
             .as_ref()
@@ -195,13 +210,15 @@ impl ArchiveFs {
         Ok(Self {
             file,
             stored,
-            reader: Mutex::new(reader),
+            reader: Arc::new(Mutex::new(reader)),
             info,
             entries,
             tree,
             opts,
             dirs: RwLock::new(HashMap::new()),
             cache,
+            decoding: Arc::default(),
+            cancel: CancelToken::new(),
             handles: Mutex::new(HashMap::new()),
             next_handle: Mutex::new(1),
             interaction,
@@ -233,6 +250,69 @@ impl ArchiveFs {
 
     fn ctx(&self) -> JobCtx {
         JobCtx::new(Arc::new(NullProgress), self.interaction.clone())
+            .with_cancel(self.cancel.clone())
+    }
+
+    /// Whether an entry is read while a background thread decodes it: a large file with its
+    /// own stream (class B). Solid and single-stream archives are decoded in one pass instead.
+    fn streams(&self, id: EntryId) -> bool {
+        let e = &self.entries[id as usize];
+        self.mount_class() == MountClass::B
+            && e.size_known
+            && e.size > self.cache.limits().inline_max
+    }
+
+    /// The decoding of a large entry: the one under way, or one started now.
+    fn stream(&self, id: EntryId) -> FsResult<Arc<Partial>> {
+        let mut decoding = self.decoding.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(p) = decoding.get(&id) {
+            return Ok(p.clone());
+        }
+        let partial = Arc::new(Partial::new());
+        decoding.insert(id, partial.clone());
+        drop(decoding);
+        let (reader, cache, decoding) = (
+            self.reader.clone(),
+            self.cache.clone(),
+            self.decoding.clone(),
+        );
+        let ctx = self.ctx();
+        let p = partial.clone();
+        let spawned = std::thread::Builder::new()
+            .name("omnizip-decode".into())
+            .spawn(move || {
+                let decoded = {
+                    let mut reader = reader.lock().unwrap_or_else(|e| e.into_inner());
+                    match cache.get(id) {
+                        // Decoded meanwhile.
+                        Some(c) => {
+                            p.end(Ok(c));
+                            Ok(())
+                        }
+                        None => decode(
+                            reader.as_mut(),
+                            &cache,
+                            HashSet::from([id]),
+                            Some((id, &p)),
+                            &ctx,
+                        ),
+                    }
+                };
+                // The sink ends it with the content; whatever stopped it short ends it here.
+                p.end(decoded.and(Err(FsError::Io)));
+                decoding
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&id);
+            });
+        if spawned.is_err() {
+            self.decoding
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id);
+            return Err(FsError::Io);
+        }
+        Ok(partial)
     }
 
     fn dir_view(&self, dir: NodeId) -> FsResult<Arc<DirView>> {
@@ -439,7 +519,7 @@ impl ArchiveFs {
         if one_pass && !self.warmed.swap(true, Ordering::SeqCst) {
             targets.extend(self.warm_targets());
         }
-        self.decode(reader.as_mut(), targets)?;
+        decode(reader.as_mut(), &self.cache, targets, None, &self.ctx())?;
         drop(reader);
         self.cache.get(id).ok_or(FsError::Io)
     }
@@ -461,20 +541,6 @@ impl ArchiveFs {
         out
     }
 
-    fn decode(&self, reader: &mut dyn ArchiveReader, targets: HashSet<EntryId>) -> FsResult<()> {
-        let mut sink = CacheSink {
-            fs: self,
-            pending: targets,
-        };
-        match reader.extract_to(&mut sink, &self.ctx()) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                tracing::warn!(code = e.code().id(), "mount: decoding failed");
-                Err(e.into())
-            }
-        }
-    }
-
     /// Decodes every file into the cache in one pass, as far as the disk budget allows
     /// ("warm up", useful before seeking around a solid archive). Returns the number of
     /// entries now cached.
@@ -483,7 +549,7 @@ impl ArchiveFs {
         self.warmed.store(true, Ordering::SeqCst);
         let targets = self.warm_targets();
         if !targets.is_empty() {
-            self.decode(reader.as_mut(), targets)?;
+            decode(reader.as_mut(), &self.cache, targets, None, &self.ctx())?;
         }
         Ok(self.cache.len())
     }
@@ -507,7 +573,13 @@ impl ArchiveFs {
             return Ok(());
         }
         let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
-        self.decode(reader.as_mut(), HashSet::from([e.id]))
+        decode(
+            reader.as_mut(),
+            &self.cache,
+            HashSet::from([e.id]),
+            None,
+            &self.ctx(),
+        )
     }
 
     /// Where an entry's data lies as it is in the archive file, asked of the reader once.
@@ -571,10 +643,59 @@ pub fn volume_label(info: &ArchiveInfo) -> String {
     if label.is_empty() { name } else { label }
 }
 
+/// Decodes `targets` into the cache; `partial` gets the bytes of the entry being streamed.
+fn decode(
+    reader: &mut dyn ArchiveReader,
+    cache: &ContentCache,
+    targets: HashSet<EntryId>,
+    partial: Option<(EntryId, &Arc<Partial>)>,
+    ctx: &JobCtx,
+) -> FsResult<()> {
+    let mut sink = CacheSink {
+        cache,
+        pending: targets,
+        partial,
+    };
+    match reader.extract_to(&mut sink, ctx) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if e.code() != ErrorCode::Cancelled {
+                tracing::warn!(code = e.code().id(), "mount: decoding failed");
+            }
+            Err(e.into())
+        }
+    }
+}
+
 /// Receives decoded entries into the cache.
 struct CacheSink<'a> {
-    fs: &'a ArchiveFs,
+    cache: &'a ContentCache,
     pending: HashSet<EntryId>,
+    /// The entry being streamed, and its readers.
+    partial: Option<(EntryId, &'a Arc<Partial>)>,
+}
+
+/// Copies an entry in chunks of up to 1 MiB (no larger than the entry), checking for
+/// cancellation between them.
+fn copy(
+    r: &mut dyn io::Read,
+    w: &mut ContentBuilder,
+    size: Option<u64>,
+    ctx: &JobCtx,
+) -> io::Result<()> {
+    let chunk = size.map_or(1 << 20, |s| (s + 1).clamp(8 << 10, 1 << 20));
+    let mut buf = vec![0; chunk as usize];
+    loop {
+        if ctx.check().is_err() {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        match r.read(&mut buf) {
+            Ok(0) => return Ok(()),
+            Ok(n) => w.write_all(&buf[..n])?,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 impl ExtractSink for CacheSink<'_> {
@@ -590,7 +711,11 @@ impl ExtractSink for CacheSink<'_> {
     ) -> omnizip_core::Result<()> {
         ctx.check()?;
         self.pending.remove(&entry.id);
-        let cache = &self.fs.cache;
+        let cache = self.cache;
+        let partial = self
+            .partial
+            .filter(|(id, _)| *id == entry.id)
+            .map(|(_, p)| p);
         let limits = cache.limits();
         // Never more than declared (bomb guard); unknown sizes are bounded by the disk budget.
         let cap = if entry.size_known {
@@ -607,8 +732,14 @@ impl ExtractSink for CacheSink<'_> {
         };
         let content = match data {
             EntryData::Stream(r) => {
-                let mut b = cache.builder(cap);
-                io::copy(r, &mut b).map_err(oversize)?;
+                let mut b = match partial {
+                    Some(p) => cache.streaming_builder(cap, p.clone()),
+                    None => cache.builder(cap),
+                };
+                if let Err(e) = copy(r, &mut b, entry.size_known.then_some(entry.size), ctx) {
+                    ctx.check()?;
+                    return Err(oversize(e));
+                }
                 b.finish()?
             }
             EntryData::WriteTo(w) => {
@@ -621,7 +752,10 @@ impl ExtractSink for CacheSink<'_> {
             }
             EntryData::None => Content::Mem(Arc::from(&[][..])),
         };
-        cache.insert(entry.id, content);
+        let content = cache.insert(entry.id, content);
+        if let Some(p) = partial {
+            p.end(Ok(content));
+        }
         Ok(())
     }
 
@@ -707,6 +841,14 @@ impl VirtualFs for ArchiveFs {
                 }
                 if let Some(range) = self.stored(id) {
                     return self.read_stored(range, shape.attr.size, offset, buf);
+                }
+                if let Some(c) = self.cache.get(id) {
+                    return Ok(c.read_into(offset, buf)?);
+                }
+                if self.streams(id) {
+                    // Never past the declared size: a read there would wait for the end.
+                    let n = shape.attr.size.saturating_sub(offset).min(buf.len() as u64);
+                    return self.stream(id)?.read_into(offset, &mut buf[..n as usize]);
                 }
                 Ok(self.content(id)?.read_into(offset, buf)?)
             }
