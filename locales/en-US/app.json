@@ -39,6 +39,7 @@
     "add": "Add",
     "extract": "Extract to…",
     "extractSelected": "Extract selected…",
+    "extractButton": "Extract",
     "extractHere": "Extract here",
     "mount": "Mount",
     "test": "Test",

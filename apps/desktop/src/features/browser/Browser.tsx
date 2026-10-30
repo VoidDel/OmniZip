@@ -551,7 +551,7 @@ export function Browser() {
         ) : (
           <>
             {btn('add', 'plus', t('cmd.add'), () => void cmd.add(), { disabled: readonly })}
-            {btn('extract', 'extract', n ? t('cmd.extractSelected') : t('cmd.extract'), () => cmd.extract(selectedNodes), { primary: true })}
+            {btn('extract', 'extract', n ? t('cmd.extractSelected') : t('cmd.extractButton'), () => cmd.extract(selectedNodes), { primary: true })}
             {btn('mount', 'drive', t('cmd.mount'), cmd.mount)}
             {btn('test', 'checkCircle', t('cmd.test'), cmd.test)}
           </>

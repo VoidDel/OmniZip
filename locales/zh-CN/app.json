@@ -39,6 +39,7 @@
     "add": "添加",
     "extract": "解压到…",
     "extractSelected": "解压所选…",
+    "extractButton": "解压",
     "extractHere": "解压到此处",
     "mount": "挂载",
     "test": "测试",

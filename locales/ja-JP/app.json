@@ -39,6 +39,7 @@
     "add": "追加",
     "extract": "展開先…",
     "extractSelected": "選択項目を展開…",
+    "extractButton": "展開",
     "extractHere": "ここに展開",
     "mount": "マウント",
     "test": "テスト",

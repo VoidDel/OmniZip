@@ -39,6 +39,7 @@
     "add": "加入",
     "extract": "解壓縮到…",
     "extractSelected": "解壓縮所選…",
+    "extractButton": "解壓縮",
     "extractHere": "解壓縮到此處",
     "mount": "掛載",
     "test": "測試",
