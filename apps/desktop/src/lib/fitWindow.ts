@@ -77,9 +77,13 @@ export function useFitWindowToDialog(width: number | null, options: FitOptions =
     };
     const observer = new MutationObserver(fit);
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    // Text wraps differently once the window has its width (it is created wider): measured
+    // again then, or a question measured on one line is cut off on two.
+    window.addEventListener('resize', fit);
     fit();
     return () => {
       observer.disconnect();
+      window.removeEventListener('resize', fit);
       cancel();
     };
   }, [width]);
