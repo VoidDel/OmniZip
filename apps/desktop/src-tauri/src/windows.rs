@@ -202,7 +202,13 @@ fn with_material<'a>(
 
 /// Brings the main window to the front.
 pub fn focus_main(app: &AppHandle) {
+    let created = app.get_webview_window("main").is_none();
     if let Ok(w) = main_window(app) {
+        // A process started for a file-manager verb has just got its main window: the
+        // notification-area icon belongs to it now.
+        if created {
+            crate::tray::sync(app);
+        }
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();

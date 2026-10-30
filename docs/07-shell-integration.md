@@ -78,7 +78,7 @@
 
 - 任务栏进度（`ITaskbarList3::SetProgressValue/State`）。
 - Mark-of-the-Web：读取压缩包的 `Zone.Identifier` ADS，按设置传播到解压文件（默认开启，与 SmartScreen 协同）。
-- 可选托盘图标：显示任务与挂载，关闭窗口时后台保留任务。
+- 可选托盘图标：显示任务与挂载，关闭窗口时后台保留任务（已实施，见 04 §4.4 前后的"通知区域图标"）。
 - v2：`IPreviewHandler` 在预览窗格显示压缩包内容列表；`IThumbnailProvider` 显示包内首张图片。
 
 ## 4. macOS

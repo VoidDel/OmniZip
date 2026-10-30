@@ -155,6 +155,7 @@ fn now_ms() -> i64 {
 
 fn emit(app: &AppHandle, info: &JobInfo) {
     let _ = app.emit("job://update", info);
+    crate::tray::jobs_changed(app);
 }
 
 fn set_taskbar(app: &AppHandle, info: &JobInfo) {

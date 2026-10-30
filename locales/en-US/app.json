@@ -399,9 +399,10 @@
       "extractAsk": "Ask every time",
       "extractSame": "Next to the archive",
       "extractDownloads": "Downloads",
-      "close": "When closing the window",
-      "closeExit": "Quit",
-      "closeTray": "Keep tasks running",
+      "close": "When closing the main window",
+      "closeExit": "Quit OmniZip",
+      "closeTray": "Hide in the notification area",
+      "closeTrayHint": "The notification-area icon opens OmniZip, unmounts archives and quits; tasks keep running in the background.",
       "notify": "Notify when a task finishes",
       "notifyHint": "Only when OmniZip is in the background",
       "openAfter": "Open the folder after extracting"

@@ -190,6 +190,7 @@ pub struct MountManager {
 impl MountManager {
     fn changed(app: &AppHandle) {
         let _ = app.emit("mounts://changed", ());
+        crate::tray::mounts_changed(app);
     }
 
     /// The mounts of both daemons.
@@ -301,6 +302,16 @@ impl MountManager {
 
     pub fn is_empty(&self) -> bool {
         self.list().is_empty()
+    }
+}
+
+/// Where a mount is opened: the root of a drive letter, or the folder.
+pub fn root(m: &MountInfo) -> PathBuf {
+    let p = &m.mount_point;
+    if p.len() == 2 && p.ends_with(':') {
+        PathBuf::from(format!("{p}{}", std::path::MAIN_SEPARATOR))
+    } else {
+        PathBuf::from(p)
     }
 }
 

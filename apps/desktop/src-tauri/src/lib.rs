@@ -14,6 +14,7 @@ pub mod settings;
 pub mod state;
 pub mod system;
 pub mod theme;
+pub mod tray;
 pub mod windows;
 
 use std::path::{Path, PathBuf};
@@ -240,6 +241,16 @@ pub fn run() {
         )
         .manage(AppState::new())
         .on_window_event(|window, event| {
+            // With the notification-area icon the main window hides instead of closing; the
+            // icon's menu quits.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+                && tray::shown(window.app_handle())
+            {
+                api.prevent_close();
+                let _ = window.hide();
+                return;
+            }
             if let tauri::WindowEvent::Destroyed = event
                 && let Some(state) = window.try_state::<AppState>()
             {
@@ -272,9 +283,11 @@ pub fn run() {
                 Some(inv) => {
                     handle_invocation(&handle, inv, true);
                     windows::main_window(&handle)?;
+                    tray::sync(&handle);
                 }
                 None => {
                     windows::main_window(&handle)?;
+                    tray::sync(&handle);
                 }
             }
             Ok(())

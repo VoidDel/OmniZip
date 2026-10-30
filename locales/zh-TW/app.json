@@ -399,9 +399,10 @@
       "extractAsk": "每次詢問",
       "extractSame": "壓縮檔所在位置",
       "extractDownloads": "下載資料夾",
-      "close": "關閉視窗時",
-      "closeExit": "結束",
-      "closeTray": "保留工作繼續執行",
+      "close": "關閉主視窗時",
+      "closeExit": "結束 OmniZip",
+      "closeTray": "隱藏到通知區域",
+      "closeTrayHint": "通知區域的圖示可開啟 OmniZip、卸載掛載和結束；工作在背景繼續執行。",
       "notify": "工作完成時傳送通知",
       "notifyHint": "僅在 OmniZip 位於背景時",
       "openAfter": "解壓縮後開啟目標資料夾"

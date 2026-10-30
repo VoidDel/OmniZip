@@ -11,3 +11,12 @@ menu-add-zip = 加入「{ $name }.zip」
 menu-add-7z = 加入「{ $name }.7z」
 menu-add = 加入壓縮檔…
 menu-tooltip = 使用 OmniZip 壓縮、解壓縮和掛載
+
+# Notification-area icon (apps/desktop/src-tauri/src/tray.rs).
+tray-open = 開啟 OmniZip
+tray-no-mounts = 沒有已掛載的壓縮檔
+tray-mount-open = 開啟
+tray-mount-eject = 卸載
+tray-eject-all = 全部卸載
+tray-quit = 結束 OmniZip
+tray-tooltip-jobs = OmniZip：{ $count } 個工作進行中 · { $percent }%

@@ -13,3 +13,15 @@ menu-add-zip = Add to "{ $name }.zip"
 menu-add-7z = Add to "{ $name }.7z"
 menu-add = Add to archive…
 menu-tooltip = Compress, extract and mount archives with OmniZip
+
+# Notification-area icon (apps/desktop/src-tauri/src/tray.rs).
+tray-open = Open OmniZip
+tray-no-mounts = No archives are mounted
+tray-mount-open = Open
+tray-mount-eject = Unmount
+tray-eject-all = Unmount all
+tray-quit = Quit OmniZip
+tray-tooltip-jobs = OmniZip: { $count ->
+    [one] 1 task
+   *[other] { $count } tasks
+} running · { $percent }%

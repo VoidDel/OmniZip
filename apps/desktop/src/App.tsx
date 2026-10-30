@@ -98,8 +98,8 @@ export function App() {
   useEffect(() => {
     const refresh = () => void useApp.getState().refreshMounts();
     refresh();
-    const un = events.onMounts(refresh);
-    return () => void un.then((f) => f());
+    const subs = [events.onMounts(refresh), events.onTrayUnmount((id) => void useApp.getState().unmount(id))];
+    return () => subs.forEach((s) => void s.then((f) => f()));
   }, []);
 
   // Drag and drop from the file manager.

@@ -399,9 +399,10 @@
       "extractAsk": "毎回確認",
       "extractSame": "アーカイブと同じ場所",
       "extractDownloads": "ダウンロード",
-      "close": "ウィンドウを閉じるとき",
-      "closeExit": "終了",
-      "closeTray": "タスクの実行を続ける",
+      "close": "メインウィンドウを閉じるとき",
+      "closeExit": "OmniZip を終了",
+      "closeTray": "通知領域に隠す",
+      "closeTrayHint": "通知領域のアイコンから OmniZip を開く・アンマウント・終了ができます。タスクはバックグラウンドで続行します。",
       "notify": "タスク完了時に通知",
       "notifyHint": "OmniZip がバックグラウンドのときのみ",
       "openAfter": "展開後にフォルダーを開く"

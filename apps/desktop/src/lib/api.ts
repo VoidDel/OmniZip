@@ -139,4 +139,6 @@ export const events = {
   onLaunch: (f: (r: LaunchRequest) => void): Promise<UnlistenFn> => listen<LaunchRequest>('app://launch', (e) => f(e.payload)),
   onClipboard: (f: (c: Clip | null) => void): Promise<UnlistenFn> => listen<Clip | null>('clipboard://changed', (e) => f(e.payload)),
   onMounts: (f: () => void): Promise<UnlistenFn> => listen('mounts://changed', () => f()),
+  /** The notification-area icon unmounts a mount with unsaved changes: ask about them. */
+  onTrayUnmount: (f: (id: number) => void): Promise<UnlistenFn> => listen<number>('tray://unmount', (e) => f(e.payload)),
 };

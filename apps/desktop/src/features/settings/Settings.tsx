@@ -323,6 +323,9 @@ export function SettingsView() {
               <Row label={t('settings.general.startup')}>
                 <Select label={t('settings.general.startup')} value={settings.general.startup} onChange={(v) => set((s) => (s.general.startup = v))} options={[['home', t('settings.general.startupHome')], ['last', t('settings.general.startupLast')]]} />
               </Row>
+              <Row label={t('settings.general.close')} hint={settings.general.close_behavior === 'tray' ? t('settings.general.closeTrayHint') : undefined}>
+                <Select label={t('settings.general.close')} value={settings.general.close_behavior} onChange={(v) => set((s) => (s.general.close_behavior = v))} options={[['exit', t('settings.general.closeExit')], ['tray', t('settings.general.closeTray')]]} />
+              </Row>
               <Row label={t('settings.general.extractTo')}>
                 <Select
                   label={t('settings.general.extractTo')}

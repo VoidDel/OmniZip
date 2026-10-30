@@ -115,6 +115,8 @@ pub fn settings_set(
     let material_changed = previous.appearance.material != settings.appearance.material
         || previous.appearance.material_kind != settings.appearance.material_kind;
     let menu_changed = previous.shell != settings.shell;
+    let tray_changed = previous.general.close_behavior != settings.general.close_behavior
+        || previous.language.ui != settings.language.ui;
     if let Some(p) = &state.config_file {
         settings::save(p, &settings).map_err(|e| err(Error::io(e, p)))?;
     }
@@ -125,6 +127,9 @@ pub fn settings_set(
     // Flat versus submenu layout lives in the registry: apply it right away.
     if menu_changed {
         integration::refresh_classic();
+    }
+    if tray_changed {
+        crate::tray::sync(&app);
     }
     Ok(settings)
 }

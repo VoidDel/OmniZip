@@ -26,7 +26,7 @@ omnizip-formats.workspace = true
 omnizip-i18n.workspace = true
 omnizip-vfs.workspace = true
 omnizip-mountd.workspace = true
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
