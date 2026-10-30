@@ -318,25 +318,44 @@ export function SettingsView() {
     switch (tab) {
       case 'general':
         return (
-          <div className="set-group">
-            <Row label={t('settings.general.startup')}>
-              <Select label={t('settings.general.startup')} value={settings.general.startup} onChange={(v) => set((s) => (s.general.startup = v))} options={[['home', t('settings.general.startupHome')], ['last', t('settings.general.startupLast')]]} />
-            </Row>
-            <Row label={t('settings.general.extractTo')}>
-              <Select
-                label={t('settings.general.extractTo')}
-                value={settings.general.extract_to}
-                onChange={(v) => set((s) => (s.general.extract_to = v))}
-                options={[['ask', t('settings.general.extractAsk')], ['same', t('settings.general.extractSame')], ['downloads', t('settings.general.extractDownloads')]]}
-              />
-            </Row>
-            <Row label={t('settings.general.openAfter')}>
-              <Switch label={t('settings.general.openAfter')} checked={settings.general.open_after_extract} onChange={(v) => set((s) => (s.general.open_after_extract = v))} />
-            </Row>
-            <Row label={t('settings.general.notify')} hint={t('settings.general.notifyHint')}>
-              <Switch label={t('settings.general.notify')} checked={settings.general.notify} onChange={(v) => set((s) => (s.general.notify = v))} />
-            </Row>
-          </div>
+          <>
+            <div className="set-group">
+              <Row label={t('settings.general.startup')}>
+                <Select label={t('settings.general.startup')} value={settings.general.startup} onChange={(v) => set((s) => (s.general.startup = v))} options={[['home', t('settings.general.startupHome')], ['last', t('settings.general.startupLast')]]} />
+              </Row>
+              <Row label={t('settings.general.extractTo')}>
+                <Select
+                  label={t('settings.general.extractTo')}
+                  value={settings.general.extract_to}
+                  onChange={(v) => set((s) => (s.general.extract_to = v))}
+                  options={[['ask', t('settings.general.extractAsk')], ['same', t('settings.general.extractSame')], ['downloads', t('settings.general.extractDownloads')]]}
+                />
+              </Row>
+              <Row label={t('settings.general.openAfter')}>
+                <Switch label={t('settings.general.openAfter')} checked={settings.general.open_after_extract} onChange={(v) => set((s) => (s.general.open_after_extract = v))} />
+              </Row>
+              <Row label={t('settings.general.notify')} hint={t('settings.general.notifyHint')}>
+                <Switch label={t('settings.general.notify')} checked={settings.general.notify} onChange={(v) => set((s) => (s.general.notify = v))} />
+              </Row>
+            </div>
+            {/* Defaults of the compress dialog. */}
+            <div className="set-group">
+              <Row label={t('settings.formats.defaultFormat')}>
+                <Select label={t('settings.formats.defaultFormat')} value={settings.formats.default_format} onChange={(v) => set((s) => (s.formats.default_format = v))} options={['zip', '7z', 'tar.zst', 'tar.gz', 'tar.xz'].map((f) => [f, f.toUpperCase()] as [string, string])} />
+              </Row>
+              <Row label={t('settings.formats.defaultLevel')}>
+                <Select
+                  label={t('settings.formats.defaultLevel')}
+                  value={settings.formats.default_level}
+                  onChange={(v) => set((s) => (s.formats.default_level = v))}
+                  options={(['store', 'fastest', 'fast', 'normal', 'better', 'best', 'ultra'] as const).map((l) => [l, t(`compress.levels.${l}`)] as [S['formats']['default_level'], string])}
+                />
+              </Row>
+              <Row label={t('settings.formats.skipCompressed')} hint={t('settings.formats.skipCompressedHint')}>
+                <Switch label={t('settings.formats.skipCompressed')} checked={settings.formats.skip_compressed} onChange={(v) => set((s) => (s.formats.skip_compressed = v))} />
+              </Row>
+            </div>
+          </>
         );
       case 'appearance': {
         const lights = themes.filter((x) => x.appearance === 'light');
@@ -475,9 +494,6 @@ export function SettingsView() {
                 options={[['auto', t('settings.language.unitAuto')], ['kb', t('settings.language.unitKb')], ['kib', t('settings.language.unitKib')]]}
               />
             </Row>
-            <Row label={t('settings.language.sample')}>
-              <span className="mono hint">{fmt.date(Date.now())}</span>
-            </Row>
             <Row label={t('settings.language.encoding')}>
               <Select
                 label={t('settings.language.encoding')}
@@ -492,6 +508,14 @@ export function SettingsView() {
       case 'formats':
         return (
           <>
+            <div className="set-group">
+              <Row label={t('settings.formats.defaultApp')} hint={t('settings.formats.defaultAppHint')}>
+                <button type="button" className="btn outline" onClick={() => void api.openDefaultApps()}>
+                  <Icon name="external" />
+                  <span>{t('settings.formats.openDefaultApps')}</span>
+                </button>
+              </Row>
+            </div>
             <div className="set-group">
               <table className="fmt-table">
                 <thead>
@@ -523,28 +547,6 @@ export function SettingsView() {
                     })}
                 </tbody>
               </table>
-            </div>
-            <div className="set-group">
-              <Row label={t('settings.formats.defaultFormat')}>
-                <Select label={t('settings.formats.defaultFormat')} value={settings.formats.default_format} onChange={(v) => set((s) => (s.formats.default_format = v))} options={['zip', '7z', 'tar.zst', 'tar.gz', 'tar.xz'].map((f) => [f, f.toUpperCase()] as [string, string])} />
-              </Row>
-              <Row label={t('settings.formats.defaultLevel')}>
-                <Select
-                  label={t('settings.formats.defaultLevel')}
-                  value={settings.formats.default_level}
-                  onChange={(v) => set((s) => (s.formats.default_level = v))}
-                  options={(['store', 'fastest', 'fast', 'normal', 'better', 'best', 'ultra'] as const).map((l) => [l, t(`compress.levels.${l}`)] as [S['formats']['default_level'], string])}
-                />
-              </Row>
-              <Row label={t('settings.formats.skipCompressed')} hint={t('settings.formats.skipCompressedHint')}>
-                <Switch label={t('settings.formats.skipCompressed')} checked={settings.formats.skip_compressed} onChange={(v) => set((s) => (s.formats.skip_compressed = v))} />
-              </Row>
-              <Row label={t('settings.formats.defaultApp')} hint={t('settings.formats.defaultAppHint')}>
-                <button type="button" className="btn outline" onClick={() => void api.openDefaultApps()}>
-                  <Icon name="external" />
-                  <span>{t('settings.formats.openDefaultApps')}</span>
-                </button>
-              </Row>
             </div>
           </>
         );
