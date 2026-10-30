@@ -5,7 +5,9 @@
 //! (written, truncated, its time set, or moved), and from then on every handle reads the copy.
 //! A directory created where a deleted one was does not show the old contents.
 //!
-//! [`OverlayFs::changes`] lists what differs, for saving into the archive.
+//! [`OverlayFs::changes`] lists what differs, for saving into the archive. New items that systems
+//! put on volumes on their own (recycle bins, `desktop.ini`, `.DS_Store`, …) stay out of it:
+//! [`is_system_item`].
 
 use std::{
     collections::{HashMap, HashSet},
@@ -479,10 +481,7 @@ impl OverlayFs {
     pub fn changes(&self) -> Changes {
         let state = self.lock();
         let mut c = Changes::default();
-        for (&id, n) in &state.nodes {
-            if id == ROOT || !n.upper {
-                continue;
-            }
+        for n in state.nodes.values().filter(|n| is_change(n)) {
             match n.kind {
                 FileType::File => {
                     c.files.push(n.path.clone());
@@ -492,8 +491,8 @@ impl OverlayFs {
                         c.entries.push(entry);
                     }
                 }
-                FileType::Dir if n.lower.is_none() => c.dirs.push(n.path.clone()),
-                _ => {}
+                FileType::Dir => c.dirs.push(n.path.clone()),
+                FileType::Symlink => {}
             }
         }
         // What was in a deleted directory goes with it.
@@ -516,11 +515,57 @@ impl OverlayFs {
     /// Whether anything differs from the lower volume.
     pub fn is_dirty(&self) -> bool {
         let state = self.lock();
-        !state.whiteouts.is_empty()
-            || state.nodes.iter().any(|(&id, n)| {
-                id != ROOT && n.upper && (n.kind == FileType::File || n.lower.is_none())
-            })
+        !state.whiteouts.is_empty() || state.nodes.values().any(is_change)
     }
+}
+
+/// Whether a node is a change to save: what the layer holds for it, unless it is a new item a
+/// system put there on its own ([`is_system_item`]). A file of the archive that was changed
+/// counts whatever its name.
+fn is_change(n: &Node) -> bool {
+    n.upper
+        && match n.kind {
+            FileType::File => n.lower.is_some() || !is_system_item(&n.path),
+            FileType::Dir => n.lower.is_none() && !is_system_item(&n.path),
+            FileType::Symlink => false,
+        }
+}
+
+/// Items systems put on a volume on their own: recycle bins and indexing data at the root
+/// (Windows, macOS, Linux desktops), and in any folder Explorer's folder settings and thumbnail
+/// caches, Finder's metadata and Office's lock files. New ones are not saved into the archive.
+pub fn is_system_item(path: &str) -> bool {
+    const ROOT_DIRS: &[&str] = &[
+        "$recycle.bin",
+        "recycler",
+        "recycled",
+        "system volume information",
+        ".trashes",
+        ".trash",
+        ".spotlight-v100",
+        ".fseventsd",
+        ".temporaryitems",
+        ".documentrevisions-v100",
+    ];
+    const FILES: &[&str] = &[
+        "desktop.ini",
+        "thumbs.db",
+        "ehthumbs.db",
+        "ehthumbs_vista.db",
+        ".ds_store",
+        ".directory",
+    ];
+    let top = path.split('/').next().unwrap_or("").to_ascii_lowercase();
+    // `.Trash-1000`: a Linux desktop's trash on a removable volume.
+    let user_trash = top
+        .strip_prefix(".trash-")
+        .is_some_and(|uid| !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()));
+    if ROOT_DIRS.contains(&top.as_str()) || user_trash {
+        return true;
+    }
+    let name = name_of(path).to_ascii_lowercase();
+    // `._name`: macOS resource forks; `~$name.docx`: Office's "who has it open".
+    FILES.contains(&name.as_str()) || name.starts_with("._") || name.starts_with("~$")
 }
 
 impl VirtualFs for OverlayFs {

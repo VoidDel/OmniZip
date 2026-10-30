@@ -354,3 +354,117 @@ fn entries_keep_their_archive_names() {
     assert_eq!(c.deleted, ["x/c_d.txt"]);
     assert_eq!(c.entries, ["x/a:b.txt", "x/c:d.txt"]);
 }
+
+/// Creates `path` (and the folders above it) in the overlay.
+fn make(fs: &OverlayFs, path: &str, dir: bool) -> u32 {
+    let parts: Vec<&str> = path.split('/').collect();
+    let mut node = ROOT;
+    for (i, p) in parts.iter().enumerate() {
+        let leaf_dir = i + 1 < parts.len() || dir;
+        node = match fs.lookup(node, OsStr::new(p)) {
+            Ok(a) => a.node,
+            Err(_) => fs.create(node, OsStr::new(p), leaf_dir).unwrap().node,
+        };
+    }
+    node
+}
+
+/// What systems put on a volume on their own (recycle bin, indexing data, folder settings,
+/// Finder and Office leftovers) is neither saved nor a reason to ask; what it stands for still
+/// is: a file sent to the recycle bin is a deleted file.
+#[test]
+fn system_items_are_not_changes() {
+    let s = setup();
+    for item in [
+        "$RECYCLE.BIN/S-1-5-21-1/desktop.ini",
+        "$RECYCLE.BIN/S-1-5-21-1/$IABC123.txt",
+        "System Volume Information/IndexerVolumeGuid",
+        ".Trash-1000/files/old.txt",
+        ".Spotlight-V100/Store-V2/x",
+        "docs/desktop.ini",
+        "docs/Thumbs.db",
+        "docs/~$report.docx",
+        "media/.DS_Store",
+        "keep/._a.txt",
+    ] {
+        make(&s.fs, item, false);
+        write(&s.fs, item, 0, b"x");
+    }
+    assert!(s.fs.changes().is_empty(), "{:?}", s.fs.changes());
+    assert!(!s.fs.is_dirty());
+
+    // Explorer's delete on a volume with a recycle bin: a move into it.
+    let bin = make(&s.fs, "$RECYCLE.BIN/S-1-5-21-1", true);
+    s.fs.rename(
+        node(&s.fs, "keep"),
+        OsStr::new("a.txt"),
+        bin,
+        OsStr::new("$RABC123.txt"),
+        false,
+    )
+    .unwrap();
+    // Below the root, these names are the user's.
+    make(&s.fs, "docs/System Volume Information/mine.txt", false);
+    let c = s.fs.changes();
+    assert_eq!(c.deleted, ["keep/a.txt"]);
+    assert_eq!(c.dirs, ["docs/System Volume Information"]);
+    assert_eq!(c.files, ["docs/System Volume Information/mine.txt"]);
+    assert!(s.fs.is_dirty());
+}
+
+/// A file of the archive keeps counting when changed, whatever its name.
+#[test]
+fn archive_files_with_system_names_are_saved() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("src");
+    fs::create_dir_all(root.join("site")).unwrap();
+    fs::write(root.join("site/desktop.ini"), "[.ShellClassInfo]").unwrap();
+    let ctx = JobCtx::default();
+    let sources = source::collect(&[root.join("site")], &CollectOptions::default(), &ctx).unwrap();
+    let zip = dir.path().join("site.zip");
+    omnizip_formats::shared()
+        .create(&zip, &sources, &WriteOptions::default(), &ctx)
+        .unwrap();
+    let reader = omnizip_formats::shared()
+        .open(&zip, &OpenOptions::default(), &ctx)
+        .unwrap();
+    let lower = Arc::new(ArchiveFs::new(reader, FsOptions::default()).unwrap());
+    let fs = OverlayFs::new(lower, dir.path().join("layer")).unwrap();
+    write(
+        &fs,
+        "site/desktop.ini",
+        0,
+        b"[.ShellClassInfo]\nIconIndex=1",
+    );
+    assert_eq!(fs.changes().files, ["site/desktop.ini"]);
+    assert!(fs.is_dirty());
+}
+
+#[test]
+fn system_item_names() {
+    use omnizip_vfs::overlay::is_system_item;
+    for yes in [
+        "$Recycle.Bin",
+        "$RECYCLE.BIN/S-1-5-21/$R1.txt",
+        "System Volume Information/WPSettings.dat",
+        ".Trash-1000",
+        "a/b/Thumbs.db",
+        "a/DESKTOP.INI",
+        "a/._photo.jpg",
+        "a/~$Book1.xlsx",
+        ".DS_Store",
+    ] {
+        assert!(is_system_item(yes), "{yes}");
+    }
+    for no in [
+        "docs/$RECYCLE.BIN",
+        "a/System Volume Information",
+        ".Trash-x",
+        "thumbs.db.bak",
+        "a/desktop.ini.txt",
+        "a/_photo.jpg",
+        "readme.txt",
+    ] {
+        assert!(!is_system_item(no), "{no}");
+    }
+}
