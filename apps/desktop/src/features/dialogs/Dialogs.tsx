@@ -8,7 +8,7 @@ import { FileIcon, Icon } from '../../components/Icon';
 import { Modal, PasswordInput, Segmented, Tabs } from '../../components/ui';
 import { errorText } from '../../i18n';
 import { api, asError } from '../../lib/api';
-import { archiveStem, basename, dirname, joinPath } from '../../lib/format';
+import { archiveStem, basename, dirname, joinPath, shortLabel } from '../../lib/format';
 import { useFmt } from '../../lib/hooks';
 import type { FormatId, Level, MountInfo, MountProbe, MountTarget, NodeInfo, OverwriteMode, PathStats, Preview } from '../../lib/types';
 import { type Dialog, mountRoot, useApp } from '../../store/app';
@@ -1265,7 +1265,7 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
       )}
       <div className="frow">
         <label htmlFor="mt-label">{t('mount.label')}</label>
-        <input id="mt-label" className="inp" value={label} placeholder={archiveStem(target.name)} maxLength={32} onChange={(e) => setLabel(e.target.value)} />
+        <input id="mt-label" className="inp" value={label} placeholder={shortLabel(archiveStem(target.name))} maxLength={32} onChange={(e) => setLabel(e.target.value)} />
       </div>
       {password !== null && (
         <div className="frow">

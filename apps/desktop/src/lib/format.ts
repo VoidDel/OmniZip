@@ -69,6 +69,43 @@ export function extOf(name: string): string {
 }
 
 /** File name without known archive suffixes: `a.tar.gz` → `a`. */
+/** Columns of a default volume label (CJK characters count two), and those kept from its end. */
+const LABEL_COLUMNS = 20;
+const LABEL_TAIL = 8;
+
+/**
+ * A default volume label shortened in the middle with "…" (`short_label` in
+ * crates/omnizip-vfs/src/archivefs.rs): Explorer shows a drive's name and letter on one line
+ * above its capacity, and a longer name wraps and pushes the capacity out of the drive's tile.
+ */
+export function shortLabel(label: string): string {
+  const width = (c: string) => {
+    const n = c.codePointAt(0) ?? 0;
+    const wide =
+      (n >= 0x1100 && n <= 0x115f) || (n >= 0x2e80 && n <= 0xa4cf) || (n >= 0xac00 && n <= 0xd7a3) || (n >= 0xf900 && n <= 0xfaff) ||
+      (n >= 0xfe30 && n <= 0xfe4f) || (n >= 0xff00 && n <= 0xff60) || (n >= 0xffe0 && n <= 0xffe6) || (n >= 0x20000 && n <= 0x3fffd);
+    return wide ? 2 : 1;
+  };
+  const chars = Array.from(label);
+  if (chars.reduce((w, c) => w + width(c), 0) <= LABEL_COLUMNS) return label;
+  const tail: string[] = [];
+  let used = 0;
+  for (const c of [...chars].reverse()) {
+    if (used + width(c) > LABEL_TAIL) break;
+    used += width(c);
+    tail.unshift(c);
+  }
+  const room = LABEL_COLUMNS - 1 - used;
+  let head = '';
+  used = 0;
+  for (const c of chars) {
+    if (used + width(c) > room) break;
+    used += width(c);
+    head += c;
+  }
+  return `${head.trimEnd()}…${tail.join('').trimStart()}`;
+}
+
 export function archiveStem(name: string): string {
   const lower = name.toLowerCase();
   const suffixes = ['.tar.gz', '.tar.bz2', '.tar.xz', '.tar.zst', '.tar.lz4', '.tar.br', '.tgz', '.tbz2', '.txz', '.tzst', '.zip', '.7z', '.rar', '.tar', '.gz', '.bz2', '.xz', '.zst', '.lz4', '.br'];

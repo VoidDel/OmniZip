@@ -640,7 +640,48 @@ pub fn volume_label(info: &ArchiveInfo) -> String {
         .max()
         .unwrap_or(0);
     let label = name[..name.len() - cut].to_owned();
-    if label.is_empty() { name } else { label }
+    short_label(if label.is_empty() { &name } else { &label })
+}
+
+/// Default labels wider than this (in columns, CJK characters count two) are shortened: Explorer
+/// shows a drive's name and letter on one line above its capacity, and a longer name wraps and
+/// pushes the capacity out of the drive's tile.
+const LABEL_COLUMNS: usize = 20;
+/// Columns kept from the end of a shortened label: dates and versions tell releases apart.
+const LABEL_TAIL: usize = 8;
+
+/// `label` shortened in the middle with "…" to [`LABEL_COLUMNS`] columns.
+pub fn short_label(label: &str) -> String {
+    let width = |c: char| {
+        let wide = matches!(c as u32,
+            0x1100..=0x115F | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6 | 0x2_0000..=0x3_FFFD);
+        if wide { 2 } else { 1 }
+    };
+    if label.chars().map(width).sum::<usize>() <= LABEL_COLUMNS {
+        return label.to_owned();
+    }
+    let mut tail = Vec::new();
+    let mut used = 0;
+    for c in label.chars().rev() {
+        if used + width(c) > LABEL_TAIL {
+            break;
+        }
+        used += width(c);
+        tail.push(c);
+    }
+    let room = LABEL_COLUMNS - 1 - used;
+    let mut head = String::new();
+    let mut used = 0;
+    for c in label.chars() {
+        if used + width(c) > room {
+            break;
+        }
+        used += width(c);
+        head.push(c);
+    }
+    let tail: String = tail.into_iter().rev().collect();
+    format!("{}…{}", head.trim_end(), tail.trim_start())
 }
 
 /// Decodes `targets` into the cache; `partial` gets the bytes of the entry being streamed.
@@ -875,5 +916,26 @@ impl VirtualFs for ArchiveFs {
 
     fn archive_path(&self, node: NodeId) -> Option<String> {
         self.tree.node(node).map(|_| self.tree.path(node))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::short_label;
+
+    #[test]
+    fn long_labels_are_shortened_in_the_middle() {
+        assert_eq!(short_label("photos-2026"), "photos-2026");
+        assert_eq!(short_label("12345678901234567890"), "12345678901234567890");
+        assert_eq!(
+            short_label("NJ_Torque_MES_Release_20261028"),
+            "NJ_Torque_M…20261028"
+        );
+        // CJK characters take two columns.
+        assert_eq!(short_label("项目资料"), "项目资料");
+        assert_eq!(
+            short_label("这是一个非常长的压缩包名称用于测试"),
+            "这是一个非…用于测试"
+        );
     }
 }

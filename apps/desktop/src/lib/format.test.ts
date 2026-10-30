@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { archiveStem, basename, dirname, extOf, formatSize, unitSystem } from './format';
+import { archiveStem, basename, dirname, extOf, formatSize, shortLabel, unitSystem } from './format';
 
 describe('sizes', () => {
   it('follows the platform convention', () => {
@@ -19,6 +19,12 @@ describe('sizes', () => {
 });
 
 describe('names', () => {
+  it('shortens long volume labels in the middle, like the mount daemon', () => {
+    expect(shortLabel('photos-2026')).toBe('photos-2026');
+    expect(shortLabel('NJ_Torque_MES_Release_20261028')).toBe('NJ_Torque_M…20261028');
+    expect(shortLabel('这是一个非常长的压缩包名称用于测试')).toBe('这是一个非…用于测试');
+  });
+
   it('strips archive suffixes', () => {
     expect(archiveStem('backup-2026.tar.zst')).toBe('backup-2026');
     expect(archiveStem('movie.part1.rar')).toBe('movie');
