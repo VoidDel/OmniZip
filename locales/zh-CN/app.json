@@ -133,7 +133,7 @@
       "best": "最好",
       "ultra": "极限"
     },
-    "estimate": "预计 {from} → 约 {to}",
+    "estimate": "{count} 个文件 · {from} → 约 {to}",
     "password": "密码",
     "showPassword": "显示密码",
     "strength": "强度",

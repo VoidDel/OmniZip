@@ -133,7 +133,7 @@
       "best": "最高",
       "ultra": "極限"
     },
-    "estimate": "予想 {from} → 約 {to}",
+    "estimate": "{count} ファイル · {from} → 約 {to}",
     "password": "パスワード",
     "showPassword": "パスワードを表示",
     "strength": "強度",

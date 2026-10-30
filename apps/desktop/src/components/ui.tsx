@@ -40,6 +40,42 @@ export function Segmented<T extends string>({ value, options, onChange, large, l
   );
 }
 
+/**
+ * Tabs over panels the caller renders (each with `role="tabpanel"` and `aria-labelledby` set to
+ * `${id}-${value}`). Unlike `Segmented`, which picks a value, they switch what is shown: text
+ * with an underline under the current tab. A tab marked `true` holds a setting that is not the
+ * default (a dot). Arrow keys, Home and End move between tabs.
+ */
+export function Tabs<T extends string>({ id, value, options, onChange, label }: {
+  id: string;
+  value: T;
+  options: [T, ReactNode, boolean?][];
+  onChange: (v: T) => void;
+  label?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  /** Moves to the tab a key points at; whether it was such a key. */
+  const move = (key: string) => {
+    const at = options.findIndex(([v]) => v === value);
+    const to = ({ ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: options.length - 1 } as Record<string, number>)[key];
+    if (to === undefined) return false;
+    const next = options[(to + options.length) % options.length][0];
+    onChange(next);
+    ref.current?.querySelector<HTMLElement>(`#${id}-${next}`)?.focus();
+    return true;
+  };
+  return (
+    <div ref={ref} className="tabs" role="tablist" aria-label={label} onKeyDown={(e) => move(e.key) && e.preventDefault()}>
+      {options.map(([v, text, marked]) => (
+        <button type="button" role="tab" key={v} id={`${id}-${v}`} aria-selected={v === value} tabIndex={v === value ? 0 : -1} onClick={() => onChange(v)}>
+          {text}
+          {marked && <i className="mark" aria-hidden="true" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ProgressBar({ value, indeterminate }: { value: number; indeterminate?: boolean }) {
   return (
     <div className={`progress${indeterminate ? ' indeterminate' : ''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value * 100)}>
@@ -48,14 +84,13 @@ export function ProgressBar({ value, indeterminate }: { value: number; indetermi
   );
 }
 
-/** Modal dialog or side sheet with focus trapping and Escape to close. */
-export function Modal({ title, onClose, children, footer, width, sheet, sticky }: {
+/** Modal dialog with focus trapping and Escape to close. */
+export function Modal({ title, onClose, children, footer, width, sticky }: {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   width?: number;
-  sheet?: boolean;
   /** Clicking the backdrop does not close (answers that block a job). */
   sticky?: boolean;
 }) {
@@ -100,7 +135,7 @@ export function Modal({ title, onClose, children, footer, width, sheet, sticky }
     };
   }, []);
   return createPortal(
-    <div className={`scrim${sheet ? ' sheet' : ''}`} onMouseDown={(e) => !sticky && e.target === e.currentTarget && onClose()}>
+    <div className="scrim" onMouseDown={(e) => !sticky && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="modal" role="dialog" aria-modal="true" style={{ ['--mw' as string]: `${width ?? 520}px` }}>
         <header data-tauri-drag-region={drag}>
           <h2 data-tauri-drag-region={drag}>{title}</h2>

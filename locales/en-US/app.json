@@ -133,7 +133,7 @@
       "best": "Best",
       "ultra": "Ultra"
     },
-    "estimate": "Estimated {from} → about {to}",
+    "estimate": "{count, plural, one {# file} other {# files}} · {from} → about {to}",
     "password": "Password",
     "showPassword": "Show password",
     "strength": "Strength",

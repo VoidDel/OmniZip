@@ -133,7 +133,7 @@
       "best": "最佳",
       "ultra": "極限"
     },
-    "estimate": "預估 {from} → 約 {to}",
+    "estimate": "{count} 個檔案 · {from} → 約 {to}",
     "password": "密碼",
     "showPassword": "顯示密碼",
     "strength": "強度",

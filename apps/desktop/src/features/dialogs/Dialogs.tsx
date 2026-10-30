@@ -1,11 +1,11 @@
 // Dialogs (docs/04-ui-design.md §4.2–§4.10). The host renders the top-most open dialog.
 
 import { open as pick, save } from '@tauri-apps/plugin-dialog';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FileIcon, Icon } from '../../components/Icon';
-import { Modal, PasswordInput, Segmented } from '../../components/ui';
+import { Modal, PasswordInput, Segmented, Tabs } from '../../components/ui';
 import { errorText } from '../../i18n';
 import { api, asError } from '../../lib/api';
 import { archiveStem, basename, dirname, joinPath } from '../../lib/format';
@@ -211,7 +211,7 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
 // ---------------------------------------------------------------------------------- compress
 
 /** The compression level slider with its labels; `children` go below it. */
-function LevelField({ level, onChange, children }: { level: number; onChange: (level: number) => void; children?: ReactNode }) {
+function LevelField({ level, onChange }: { level: number; onChange: (level: number) => void }) {
   const { t } = useTranslation();
   return (
     <div className="field">
@@ -224,7 +224,6 @@ function LevelField({ level, onChange, children }: { level: number; onChange: (l
           <span key={l}>{t(`compress.levels.${l}`)}</span>
         ))}
       </div>
-      {children}
     </div>
   );
 }
@@ -234,7 +233,7 @@ type AdvTab = 'encrypt' | 'volume' | 'method' | 'other';
 
 const WRITABLE: FormatId[] = ['zip', '7z', 'tar.zst', 'tar.gz', 'tar.xz', 'tar.bz2', 'tar', 'gz', 'xz', 'zst', 'bz2'];
 
-function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
+function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const { t } = useTranslation();
   const fmt = useFmt();
   const close = useClose(d);
@@ -301,7 +300,14 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
     ...(!draft || format === 'zip' ? (['other'] as const) : []),
   ];
   const tab = tabs.includes(advTab) ? advTab : 'encrypt';
-  const panel = (id: AdvTab) => ({ className: `tabpanel${tab === id ? '' : ' off'}`, inert: tab !== id });
+  const panel = (id: AdvTab) => ({ className: `tabpanel${tab === id ? '' : ' off'}`, inert: tab !== id, role: 'tabpanel', 'aria-labelledby': `cf-tab-${id}` });
+  // Tabs holding a setting that is not the default show a dot.
+  const changed: Record<AdvTab, boolean> = {
+    encrypt: canEncrypt && !!password,
+    volume: volume !== 'none',
+    method: !!method || (format === '7z' && !solid),
+    other: (format === 'zip' && !!comment) || (!draft && !!exclude.trim()),
+  };
   const activeAdvanced = [
     canEncrypt && password ? t('props.encrypted') : null,
     volume !== 'none' ? `${t('compress.volume')} ${volume === 'custom' ? `${customMb} MB` : t(`compress.volumes.${volume}`)}` : null,
@@ -346,10 +352,17 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
     <Modal
       title={t('compress.title')}
       onClose={close}
-      sheet={!shell}
-      width={shell ? 600 : undefined}
+      width={600}
       footer={
         <>
+          {/* What is compressed and what it should come to, next to the button that starts it
+              (the estimate follows the format as much as the level). */}
+          <span className="est grow">
+            {stats &&
+              (bytes > 0
+                ? `${t('compress.estimate', { count: stats.files, from: fmt.size(bytes), to: fmt.size(out) })} · ${fmt.duration(secs)}`
+                : t('compress.sources', { count: stats.files, size: fmt.size(bytes) }))}
+          </span>
           <button type="button" className="btn" onClick={close}>{t('common.cancel')}</button>
           <button type="button" className="btn primary" disabled={!dest || tooMany || !stats} onClick={() => void start()}>
             <Icon name="package" />
@@ -359,7 +372,11 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
       }
     >
       <div className="field">
-        <label htmlFor="cf-name">{t('compress.saveTo')}</label>
+        {/* The full path follows the label; a long one loses its start, not the file name. */}
+        <div className="lrow">
+          <label htmlFor="cf-name">{t('compress.saveTo')}</label>
+          <span className="hint mono path-tail" title={dest}><bdi>{dest}</bdi></span>
+        </div>
         <div className="inline">
           <input id="cf-name" className="inp grow" value={stem} onChange={(e) => setStem(e.target.value)} />
           <span className="mono hint">{ext}</span>
@@ -377,8 +394,6 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
             {t('common.browse')}
           </button>
         </div>
-        <div className="hint mono ellipsis" title={dest}>{dest}</div>
-        {stats && <div className="hint">{t('compress.sources', { count: stats.files, size: fmt.size(stats.bytes) })}</div>}
         {exists && <div className="note warn"><Icon name="alert" /><span>{t('compress.exists', { name: stem + ext })}</span></div>}
         {tooMany && <div className="note warn"><Icon name="alert" /><span>{t('compress.singleFile', { format: format.toUpperCase() })}</span></div>}
       </div>
@@ -399,13 +414,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
             ))}
           </select>
         </div>
-        <LevelField level={level} onChange={setLevel}>
-          {bytes > 0 && (
-            <div className="est">
-              {t('compress.estimate', { from: fmt.size(bytes), to: fmt.size(out) })} · {fmt.duration(secs)}
-            </div>
-          )}
-        </LevelField>
+        <LevelField level={level} onChange={setLevel} />
       </div>
       <details className="adv" open={moreOpen} onToggle={(e) => setMoreOpen((e.target as HTMLDetailsElement).open)}>
         <summary>
@@ -415,7 +424,7 @@ function CompressSheet({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
           <span className="hint">{activeAdvanced.length > 0 ? activeAdvanced.join(' · ') : t('compress.advancedHint')}</span>
         </summary>
         <div className="advbody">
-          <Segmented value={tab} onChange={setAdvTab} label={t('compress.advanced')} options={tabs.map((id) => [id, t(`compress.tabs.${id}`)])} />
+          <Tabs id="cf-tab" value={tab} onChange={setAdvTab} label={t('compress.advanced')} options={tabs.map((id) => [id, t(`compress.tabs.${id}`), changed[id]])} />
           {/* The panels share one cell: the section is as tall as the tallest, so switching tabs
               does not resize the window. */}
           <div className="tabpanels">
@@ -1288,7 +1297,7 @@ export function DialogHost() {
     case 'extract':
       return <ExtractDialog key={d.id} d={d} />;
     case 'compress':
-      return <CompressSheet key={d.id} d={d} />;
+      return <CompressDialog key={d.id} d={d} />;
     case 'convert':
       return <ConvertDialog key={d.id} d={d} />;
     case 'openPassword':

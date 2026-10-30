@@ -322,6 +322,15 @@ input.inp.mono { font-family: var(--font-mono); font-size: .84rem; }
 .seg button[aria-pressed="true"] { background: var(--bg-surface); color: var(--fg-primary); box-shadow: var(--shadow-1); }
 .seg button:disabled { color: var(--fg-disabled); cursor: default; }
 .seg.lg button { height: 30px; padding: 0 14px; font-size: .9rem; }
+/* Tabs switch what is shown (Segmented picks a value): text, the current one underlined in the
+   accent color over a hairline across the width; a dot marks a tab holding a non-default setting. */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-subtle); }
+.tabs button { position: relative; height: 32px; padding: 0 12px; color: var(--fg-secondary); font-size: .88rem; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; transition: color var(--dur); }
+.tabs button:hover { color: var(--fg-primary); }
+.tabs button:focus-visible { outline-offset: -2px; }
+.tabs button[aria-selected="true"] { color: var(--fg-primary); }
+.tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 1px; background: var(--accent); }
+.tabs .mark { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; width: 100%; }
 .tcard { border: 2px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; background: var(--bg-surface); transition: border-color var(--dur); min-width: 0; }
 .tcard:hover { border-color: var(--border-strong); }
@@ -372,10 +381,14 @@ input[type=range] { accent-color: var(--accent); width: 160px; }
 .modal .mb { padding: 4px 16px 8px; overflow: auto; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .modal footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px 16px; flex: none; flex-wrap: wrap; }
 .modal footer .grow { flex: 1; }
-.scrim.sheet { justify-content: flex-end; align-items: stretch; padding: 0; }
-.scrim.sheet .modal { width: min(100%, 470px); height: 100%; border-radius: 0; animation: slide 220ms ease-out; max-height: none; border-width: 0 0 0 1px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label, .field > .flabel { font-size: .86rem; color: var(--fg-secondary); }
+/* A label with something after it on the same line (the compress dialog's destination path). */
+.field > .lrow { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.field > .lrow > label { font-size: .86rem; color: var(--fg-secondary); flex: none; }
+/* A path cut at its start when too long, so the file name stays visible: right-to-left for
+   the ellipsis, the path itself isolated (<bdi>) so it still reads left to right. */
+.path-tail { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .frow { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px 12px; }
 .fpair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .fpair select.sel { width: 100%; }
@@ -407,7 +420,6 @@ details.adv summary .ic { width: 14px; height: 14px; transition: transform var(-
 details.adv[open] summary .ic { transform: rotate(90deg); }
 details.adv summary .hint { margin-left: 4px; }
 details.adv .advbody { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
-details.adv .advbody > .seg { align-self: flex-start; }
 /* Tab panels stacked in one cell, so the section keeps the height of the tallest. */
 details.adv .tabpanels { display: grid; }
 details.adv .tabpanel { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
