@@ -534,6 +534,9 @@ pre.code { margin: 0; font-family: var(--font-mono); font-size: .82rem; line-hei
 
 /* Moving items by dragging them onto a folder (features/browser/drag.tsx). */
 body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; }
+/* Box selection in the file list (features/browser/marquee.tsx); under the sticky table header. */
+.marquee { position: absolute; z-index: 1; border: 1px solid var(--accent); border-radius: 2px; background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
+body.selecting, body.selecting * { user-select: none; }
 /* Items cut, until pasted. */
 .trow.cut, .gcell.cut { opacity: .5; }
 /* The project's page on GitHub (settings, About), in GitHub's own button colours: dark on light

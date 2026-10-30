@@ -15,6 +15,7 @@ import { extOf } from '../../lib/format';
 import type { Crumb, Row } from '../../lib/types';
 import { useApp, type SortKey } from '../../store/app';
 import { dragImage, useDragItems } from './drag';
+import { useMarquee } from './marquee';
 
 const PAGE = 200;
 
@@ -361,6 +362,63 @@ export function Browser() {
 
   const scrollToIndex = (i: number) => virt.scrollToIndex(viewMode === 'grid' ? Math.floor(i / cols) : i, { align: 'auto' });
 
+  // ---- box selection: the items are found by the same layout the list is drawn with.
+  const boxBase = useRef<{ nodes: Set<number>; bytes: number; mode: 'replace' | 'add' | 'toggle' }>({ nodes: new Set(), bytes: 0, mode: 'replace' });
+  const marquee = useMarquee(
+    scrollRef,
+    () => scrollRef.current?.querySelector<HTMLElement>('.gridv, .rows') ?? null,
+    (r) => {
+      const out: number[] = [];
+      if (viewMode === 'grid') {
+        const w = (size.width - 32) / cols;
+        const l1 = Math.min(lineCount - 1, Math.floor(r.bottom / lineH));
+        const c1 = Math.min(cols - 1, Math.floor(r.right / w));
+        for (let l = Math.max(0, Math.floor(r.top / lineH)); l <= l1; l += 1) {
+          for (let c = Math.max(0, Math.floor(r.left / w)); c <= c1; c += 1) {
+            const i = l * cols + c;
+            // Not when the box only reaches into the gap after a cell.
+            if (i < total && r.left <= c * w + w - 6 && r.top <= l * lineH + lineH - 6) out.push(i);
+          }
+        }
+      } else {
+        const last = Math.min(total - 1, Math.floor(r.bottom / rowH));
+        for (let i = Math.max(0, Math.floor(r.top / rowH)); i <= last; i += 1) out.push(i);
+      }
+      return out;
+    },
+    (indices) => {
+      const { nodes: base, bytes: baseBytes, mode } = boxBase.current;
+      if (indices.length) ensure(indices[0], indices[indices.length - 1]);
+      const next = new Set(mode === 'replace' ? [] : base);
+      let bytes = mode === 'replace' ? 0 : baseBytes;
+      let first: number | null = null;
+      for (const i of indices) {
+        const r = rows.get(i);
+        if (!r) continue;
+        first ??= r.node;
+        if (mode === 'toggle' && base.has(r.node)) {
+          next.delete(r.node);
+          bytes -= r.size;
+        } else if (!next.has(r.node)) {
+          next.add(r.node);
+          bytes += r.size;
+        }
+      }
+      setSelection(next, first, first, bytes);
+    },
+  );
+  /**
+   * A press that may become a box selection: Ctrl toggles the items it touches, Shift adds
+   * them, otherwise they replace the selection. On blank space the press itself clears it.
+   */
+  const pressSpace = (e: React.PointerEvent, blank: boolean) => {
+    const s = useApp.getState();
+    const mode = e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'add' : 'replace';
+    boxBase.current = { nodes: s.selection, bytes: s.selectionBytes, mode };
+    if (blank && mode === 'replace') s.clearSelection();
+    marquee.press(e);
+  };
+
   // ---- keyboard (docs/04-ui-design.md §5.1)
   const typeahead = useRef({ text: '', at: 0 });
   const onKey = (e: React.KeyboardEvent) => {
@@ -647,8 +705,12 @@ export function Browser() {
         aria-label={archive.name}
         aria-rowcount={total}
         onKeyDown={onKey}
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) useApp.getState().clearSelection();
+        onPointerDown={(e) => {
+          // Blank space: the list itself or the space between grid cells, not its scroll bar.
+          const el = e.currentTarget;
+          if (e.target !== el && !(e.target as HTMLElement).matches('.gridv, .rows')) return;
+          if (e.clientX - el.getBoundingClientRect().left >= el.clientLeft + el.clientWidth) return;
+          pressSpace(e, true);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -700,7 +762,7 @@ export function Browser() {
                     data-drop-archive={archive.id}
                     data-drop-dir={!readonly && r?.isDir ? r.node : undefined}
                     onPointerDown={(e) => r && pressRow(e, r)}
-                    onClick={(e) => r && !dragItems.dragged.current && clickRow(e, i, r)}
+                    onClick={(e) => r && !dragItems.dragged.current && !marquee.happened.current && clickRow(e, i, r)}
                     onDoubleClick={() => r && openRow(r)}
                   >
                     {r ? (
@@ -738,8 +800,10 @@ export function Browser() {
                     style={{ transform: `translateY(${it.start}px)` }}
                     data-drop-archive={archive.id}
                     data-drop-dir={!readonly && r.isDir ? r.node : undefined}
-                    onPointerDown={(e) => pressRow(e, r)}
-                    onClick={(e) => !dragItems.dragged.current && clickRow(e, it.index, r)}
+                    // The icon and the name drag the item; elsewhere in the row a drag selects
+                    // with a box, as in the file manager's details view.
+                    onPointerDown={(e) => ((e.target as HTMLElement).closest('.fi, .nm-txt, .marks') ? pressRow(e, r) : pressSpace(e, false))}
+                    onClick={(e) => !dragItems.dragged.current && !marquee.happened.current && clickRow(e, it.index, r)}
                     onDoubleClick={() => openRow(r)}
                   >
                     <div className="nm" role="gridcell">
@@ -764,6 +828,7 @@ export function Browser() {
             </div>
           </>
         )}
+        {marquee.element}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {dragItems.ghost}
