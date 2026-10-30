@@ -138,6 +138,9 @@ fn explorer_command_behaves_like_explorer_expects() {
 
         // Invoke launches the desktop app; point it at a harmless executable for the test.
         unsafe { std::env::set_var("OMNIZIP_DESKTOP_EXE", r"C:\Windows\System32\where.exe") };
+        // The selection is listed in a file in the temporary folder, which the app would read and
+        // remove: here it goes to the test's own folder.
+        unsafe { std::env::set_var("TMP", dir.path()) };
         unsafe { here.Invoke(&a, None) }.expect("invoke");
 
         // Unknown class ids are refused.
@@ -204,6 +207,16 @@ fn registration_round_trip_in_a_scratch_key() {
 
     register::unregister_at(BASE).unwrap();
     assert!(!register::status_at(BASE).registered);
+    assert!(eject().is_err());
+
+    // With the context-menu package only "Eject" on drives is registered here; it follows
+    // its setting.
+    register::register_drive_at(BASE, dll, &MenuConfig::default()).unwrap();
+    assert!(eject().is_ok());
+    assert!(!register::status_at(BASE).registered, "no classic menu");
+    let mut off = MenuConfig::default();
+    off.shell.items.insert("unmount".into(), false);
+    register::register_drive_at(BASE, dll, &off).unwrap();
     assert!(eject().is_err());
     let _ = windows_registry::CURRENT_USER.remove_tree(r"Software\OmniZipTest");
 }

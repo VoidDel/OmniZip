@@ -91,17 +91,30 @@ pub fn register_at(base: &str, dll: &Path, cfg: &MenuConfig) -> std::io::Result<
             .map_err(err)?;
         key.set_string("MUIVerb", "OmniZip").map_err(err)?;
     }
-    if cfg.enabled(Verb::Unmount) {
-        let key = CURRENT_USER
-            .create(format!(r"{base}\{DRIVE_VERB}"))
-            .map_err(err)?;
-        key.set_string(
-            "ExplorerCommandHandler",
-            guid_string(clsid_for(Some(Verb::Unmount))),
-        )
-        .map_err(err)?;
+    register_drive_at(base, dll, cfg)
+}
+
+/// "Eject" on the drives OmniZip mounted, in the registry whichever menu is in use: the
+/// context-menu package cannot reach drives (its manifest takes file types and folders only,
+/// `desktop5:ItemType`), so with the package this is all that is registered here.
+pub fn register_drive_at(base: &str, dll: &Path, cfg: &MenuConfig) -> std::io::Result<()> {
+    let _ = CURRENT_USER.remove_tree(format!(r"{base}\{DRIVE_VERB}"));
+    if !cfg.enabled(Verb::Unmount) {
+        return Ok(());
     }
+    let clsid = clsid_for(Some(Verb::Unmount));
+    register_class(base, clsid, dll, "OmniZip unmount")?;
+    let key = CURRENT_USER
+        .create(format!(r"{base}\{DRIVE_VERB}"))
+        .map_err(err)?;
+    key.set_string("ExplorerCommandHandler", guid_string(clsid))
+        .map_err(err)?;
     Ok(())
+}
+
+/// [`register_drive_at`] for the current user.
+pub fn register_drive(dll: &Path, cfg: &MenuConfig) -> std::io::Result<()> {
+    register_drive_at(CLASSES, dll, cfg)
 }
 
 /// Removes everything [`register_at`] created.

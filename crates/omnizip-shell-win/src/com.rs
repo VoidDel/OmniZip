@@ -192,9 +192,10 @@ impl IExplorerCommand_Impl for Command_Impl {
             if !self.cfg.shell.icons {
                 return Err(E_NOTIMPL.into());
             }
-            // The submenu and "Open with OmniZip" carry the app icon, the other items their own.
+            // The submenu, "Open with OmniZip" and "Eject" (an item of its own on drives) carry
+            // the app icon, the other items their own.
             let icon = match self.verb {
-                None | Some(Verb::Open) => desktop_exe(),
+                None | Some(Verb::Open) | Some(Verb::Unmount) => desktop_exe(),
                 Some(v) => menu_icon(v),
             };
             let icon = icon.ok_or_else(|| windows::core::Error::from(E_NOTIMPL))?;

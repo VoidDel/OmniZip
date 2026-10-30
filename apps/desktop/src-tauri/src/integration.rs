@@ -426,7 +426,13 @@ mod win {
             return classic();
         };
         match register_package(&file, &dir) {
-            Ok(()) => omnizip_shell::register::unregister().map_err(Error::from),
+            // The package's menu replaces the classic one, except "Eject" on drives, which a
+            // package cannot reach.
+            Ok(()) => {
+                omnizip_shell::register::unregister().map_err(Error::from)?;
+                let cfg = omnizip_shell::menu::MenuConfig::load();
+                omnizip_shell::register::register_drive(&dll, &cfg).map_err(Error::from)
+            }
             Err(e) => {
                 classic()?;
                 Err(e)
@@ -471,11 +477,13 @@ mod win {
     /// Re-registers a registered classic menu with the current menu settings (flat or submenu
     /// lives in the registry).
     pub fn refresh_classic() {
-        if omnizip_shell::register::status().registered
-            && let Some(dll) = dll()
-        {
-            let cfg = omnizip_shell::menu::MenuConfig::load();
+        let Some(dll) = dll() else { return };
+        let cfg = omnizip_shell::menu::MenuConfig::load();
+        if omnizip_shell::register::status().registered {
             let _ = omnizip_shell::register::register(&dll, &cfg);
+        } else if !registered().is_empty() {
+            // With the package only "Eject" on drives is in the registry.
+            let _ = omnizip_shell::register::register_drive(&dll, &cfg);
         }
     }
 
