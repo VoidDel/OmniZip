@@ -214,12 +214,17 @@ pub fn run() {
     let invocation = launch::parse(&args, &cwd);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(
-            |app, argv, cwd| match launch::parse(&argv, Path::new(&cwd)) {
-                Some(inv) => handle_invocation(app, inv, false),
-                None => windows::focus_main(app),
-            },
-        ))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            // This runs on the main thread while the second instance waits for it (on Windows
+            // inside the message it sent). Building a window here deadlocks: its WebView can
+            // only be created once the main thread is free again. So the launch is handled on
+            // another thread, where building a window waits for the main thread instead.
+            let app = app.clone();
+            std::thread::spawn(move || match launch::parse(&argv, Path::new(&cwd)) {
+                Some(inv) => handle_invocation(&app, inv, false),
+                None => windows::focus_main(&app),
+            });
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
