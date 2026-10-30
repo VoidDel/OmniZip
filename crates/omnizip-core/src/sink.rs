@@ -69,7 +69,8 @@ pub struct Report {
     pub bytes: u64,
     pub skipped: u64,
     pub warnings: Vec<Warning>,
-    /// Where things were written (extraction root, or archive volumes).
+    /// Where things were written: the folder extracted (the single folder written below the
+    /// destination, otherwise the destination), or archive volumes.
     pub outputs: Vec<PathBuf>,
 }
 
@@ -163,6 +164,10 @@ pub struct FsSink {
     bomb_confirmed: bool,
     /// Copy buffer shared by all files (allocated on first use).
     buf: Vec<u8>,
+    /// The folder written directly below the root, while it is the only item there; `top_mixed`
+    /// once anything else is.
+    top_dir: Option<PathBuf>,
+    top_mixed: bool,
 }
 
 impl FsSink {
@@ -198,6 +203,8 @@ impl FsSink {
             archive_size,
             bomb_confirmed: false,
             buf: Vec::new(),
+            top_dir: None,
+            top_mixed: false,
         })
     }
 
@@ -228,8 +235,23 @@ impl FsSink {
         for (p, t) in &self.dir_times {
             let _ = filetime::set_file_mtime(p, filetime::FileTime::from_system_time(*t));
         }
-        self.report.outputs = vec![self.root.clone()];
+        // A single folder (an archive holding one folder, without a wrapper folder) is what was
+        // extracted, not the destination around it.
+        let out = match self.top_dir.take() {
+            Some(d) if !self.top_mixed => d,
+            _ => self.root.clone(),
+        };
+        self.report.outputs = vec![out];
         Ok(self.report)
+    }
+
+    /// Records an item written directly below the root: a folder (`Some`) or anything else.
+    fn note_top(&mut self, dir: Option<PathBuf>) {
+        match (dir, &self.top_dir) {
+            (Some(d), Some(t)) if d == *t => {}
+            (Some(d), None) if !self.top_mixed => self.top_dir = Some(d),
+            _ => self.top_mixed = true,
+        }
     }
 
     /// Relative components for an entry, or `None` (with a warning) when it must be skipped.
@@ -606,6 +628,12 @@ impl ExtractSink for FsSink {
             }
             Err(e) => return Err(e),
         };
+        match (comps.as_slice(), entry.kind) {
+            ([top, _, ..], _) => self.note_top(Some(self.root.join(top))),
+            // Noted once it is a directory.
+            (_, EntryKind::Dir) => {}
+            _ => self.note_top(None),
+        }
         match entry.kind {
             EntryKind::Dir => {
                 if self.opts.path_mode == PathMode::Flat {
@@ -625,6 +653,9 @@ impl ExtractSink for FsSink {
                         }
                     }
                     self.known_dirs.insert(target.clone());
+                }
+                if comps.len() == 1 {
+                    self.note_top(Some(target.clone()));
                 }
                 if self.opts.restore_permissions
                     && let Some(mode) = entry.unix_mode
@@ -962,6 +993,48 @@ mod tests {
         assert_eq!((r.files, r.dirs, r.bytes), (1, 1, 5));
         let leftovers: Vec<_> = fs::read_dir(d.path().join("a/b")).unwrap().collect();
         assert_eq!(leftovers.len(), 1, "no temp files left behind");
+    }
+
+    #[test]
+    fn reports_the_folder_extracted() {
+        let ctx = JobCtx::default();
+        // One folder at the top: that folder, also when only its files are in the archive.
+        let d = tempfile::tempdir().unwrap();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        s.entry(
+            &Entry::new(0, "photos/".into(), EntryKind::Dir),
+            EntryData::None,
+            &ctx,
+        )
+        .unwrap();
+        put(&mut s, &file_entry(1, "photos/a.jpg", b"a"), b"a", &ctx);
+        put(
+            &mut s,
+            &file_entry(2, "photos/2026/b.jpg", b"b"),
+            b"b",
+            &ctx,
+        );
+        assert_eq!(s.finish(&ctx).unwrap().outputs, [d.path().join("photos")]);
+        let d = tempfile::tempdir().unwrap();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        put(&mut s, &file_entry(0, "docs/a.txt", b"a"), b"a", &ctx);
+        assert_eq!(s.finish(&ctx).unwrap().outputs, [d.path().join("docs")]);
+
+        // Anything else at the top: the destination.
+        for paths in [
+            &["docs/a.txt", "b.txt"][..],
+            &["b.txt", "docs/a.txt"],
+            &["docs/a.txt", "more/c.txt"],
+            &["b.txt"],
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let mut s = sink(d.path(), ExtractOptions::default());
+            for (i, p) in paths.iter().enumerate() {
+                put(&mut s, &file_entry(i as u32, p, b"x"), b"x", &ctx);
+            }
+            let r = s.finish(&ctx).unwrap();
+            assert_eq!(r.outputs, [d.path().to_owned()], "{paths:?}");
+        }
     }
 
     #[test]
