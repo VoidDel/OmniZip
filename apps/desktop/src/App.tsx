@@ -30,7 +30,7 @@ function handleLaunch(r: LaunchRequest) {
       s.openDialog({ kind: 'compress', paths: r.paths });
       break;
     case 'mount':
-      void s.openArchive(r.path).then((ok) => ok && s.openDialog({ kind: 'mount' }));
+      s.openDialog({ kind: 'mount', path: r.path });
       break;
     case 'convert':
       s.openDialog({ kind: 'convert', paths: r.paths });

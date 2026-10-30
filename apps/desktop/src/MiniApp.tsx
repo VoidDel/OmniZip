@@ -88,7 +88,7 @@ export function MiniApp({ jobId, label: windowLabel }: { jobId: number; label?: 
   return (
     <div className="mini">
       <div className="mini-top" data-tauri-drag-region>
-        <Icon name={job?.state === 'done' ? 'checkCircle' : job?.state === 'failed' ? 'alert' : job?.kind === 'compress' ? 'package' : 'extract'} />
+        <Icon name={job?.state === 'done' ? 'checkCircle' : job?.state === 'failed' ? 'alert' : job?.kind === 'compress' || job?.kind === 'mountSave' ? 'package' : 'extract'} />
         <span className="ttl" data-tauri-drag-region title={title}>{title}</span>
         <span className="mono hint" data-tauri-drag-region>{fmt.percent(job?.state === 'done' ? 1 : frac, 1)}</span>
         <div className="winctl">
@@ -110,6 +110,7 @@ export function MiniApp({ jobId, label: windowLabel }: { jobId: number; label?: 
               {job.kind === 'extract' && t('toast.extracted', { count: job.report.files, dest: job.output ? basename(job.output) : '' })}
               {job.kind === 'compress' && t('toast.compressed', { name: job.output ? basename(job.output) : job.title })}
               {job.kind === 'test' && t('toast.tested', { name: job.title })}
+              {job.kind === 'mountSave' && t('toast.updated', { name: job.title })}
             </span>
           )}
           {job?.report && job.report.warnings.length > 0 && <span>{t('task.warnings', { count: job.report.warnings.length })}</span>}

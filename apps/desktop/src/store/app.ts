@@ -36,7 +36,8 @@ export type DialogSpec =
   | { kind: 'preview'; node: number }
   /** `mkdir`: create a folder named `name` in the folder `node` of a new archive instead. */
   | { kind: 'rename'; node: number; name: string; mkdir?: boolean }
-  | { kind: 'mount' }
+  /** `path`: an archive not open in the browser (the file manager's "Mount"); else the one shown. */
+  | { kind: 'mount'; path?: string }
   | {
       kind: 'ask';
       title: string;
@@ -160,7 +161,12 @@ interface Actions {
   dismissToast(id: number): void;
   reportError(e: unknown, title?: string): void;
   refreshMounts(): Promise<void>;
-  unmount(id: number): Promise<void>;
+  /**
+   * Unmounts, asking first whether to save the changes of a writable mount. Resolves once done:
+   * to the id of the job saving the changes (0 when there is none), or null when cancelled or
+   * failed. A dialog window of the file manager owns that job and shows its progress.
+   */
+  unmount(id: number): Promise<number | null>;
 }
 
 let seq = 1;
@@ -447,35 +453,43 @@ export const useApp = create<State & Actions>()((set, get) => ({
     await get().refreshMounts();
     const m = get().mounts.find((x) => x.id === id);
     const eject = async (save: boolean) => {
+      let job: number | null = null;
       try {
-        await api.unmount(id, save);
+        job = await api.unmount(id, save, get().shellLabel ?? undefined);
         if (m) get().toast({ tone: 'success', text: i18n.t('mount.ejected', { name: m.label }) });
       } catch (e) {
         get().reportError(e);
       }
       await get().refreshMounts();
+      return job;
     };
     if (!m?.dirty) return eject(false);
-    const discard = { label: i18n.t('mount.discardChanges'), danger: true, onClick: () => void eject(false) };
-    get().openDialog(
-      m.saveable
-        ? {
-            kind: 'ask',
-            title: i18n.t('mount.changesTitle', { name: m.label }),
-            message: i18n.t('mount.changesSave', { name: m.name }),
-            confirm: i18n.t('mount.saveChanges'),
-            onConfirm: () => void eject(true),
-            alternative: discard,
-          }
-        : {
-            kind: 'ask',
-            title: i18n.t('mount.changesTitle', { name: m.label }),
-            message: i18n.t('mount.changesNoSave', { format: m.format }),
-            confirm: discard.label,
-            danger: true,
-            onConfirm: discard.onClick,
-          },
-    );
+    return new Promise<number | null>((resolve) => {
+      const then = (save: boolean) => () => void eject(save).then(resolve);
+      const discard = { label: i18n.t('mount.discardChanges'), danger: true, onClick: then(false) };
+      const cancel = () => resolve(null);
+      get().openDialog(
+        m.saveable
+          ? {
+              kind: 'ask',
+              title: i18n.t('mount.changesTitle', { name: m.label }),
+              message: i18n.t('mount.changesSave', { name: m.name }),
+              confirm: i18n.t('mount.saveChanges'),
+              onConfirm: then(true),
+              onCancel: cancel,
+              alternative: discard,
+            }
+          : {
+              kind: 'ask',
+              title: i18n.t('mount.changesTitle', { name: m.label }),
+              message: i18n.t('mount.changesNoSave', { format: m.format }),
+              confirm: discard.label,
+              danger: true,
+              onConfirm: discard.onClick,
+              onCancel: cancel,
+            },
+      );
+    });
   },
 }));
 

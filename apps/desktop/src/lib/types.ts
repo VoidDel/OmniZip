@@ -229,7 +229,7 @@ export interface Report {
   outputs: string[];
 }
 
-export type JobKind = 'extract' | 'compress' | 'convert' | 'test' | 'add' | 'delete' | 'rename' | 'move' | 'copy' | 'clipcopy' | 'clipcut';
+export type JobKind = 'extract' | 'compress' | 'convert' | 'test' | 'add' | 'delete' | 'rename' | 'move' | 'copy' | 'clipcopy' | 'clipcut' | 'mountSave';
 export type JobState = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 
 export interface JobInfo {
@@ -378,6 +378,18 @@ export interface MountRequest {
   elevated?: boolean;
   /** With a temporary writable layer (the setting when absent). */
   writable?: boolean;
+}
+
+/** The archive a mount dialog is for. */
+export interface MountTarget {
+  path: string;
+  name: string;
+  format: FormatId;
+  mountClass: MountClass;
+  /** A password is needed to mount it. */
+  encrypted: boolean;
+  /** The archive open in the browser, whose password and name encoding are reused. */
+  archiveId?: number;
 }
 
 /** Items copied or cut from an open archive. */

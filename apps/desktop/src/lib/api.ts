@@ -25,6 +25,7 @@ import type {
   MountInfo,
   MountProbe,
   MountRequest,
+  MountTarget,
   ShellStatus,
   ThemeSummary,
   TreeItem,
@@ -120,10 +121,12 @@ export const api = {
   mounts: () => invoke<MountInfo[]>('mount_list'),
   /** Drive letters free for a mount (`Z:`, `Y:`, …). */
   freeLetters: () => invoke<string[]>('mount_free_letters'),
+  /** Format and mount class of an archive that is not open, for the mount dialog. */
+  mountTarget: (path: string) => invoke<MountTarget>('mount_target', { path }),
   mount: (request: MountRequest) => invoke<MountInfo>('mount_start', { request }),
   /** Unmounts; a writable mount's changes are saved into the archive by the job whose id comes
-   * back (`save`), or discarded. `0` when there was nothing to save. */
-  unmount: (id: number, save = false) => invoke<number>('mount_stop', { id, save }),
+   * back (`save`), owned by `window`, or discarded. `0` when there was nothing to save. */
+  unmount: (id: number, save = false, window?: string) => invoke<number>('mount_stop', { id, save, window: window ?? null }),
   openMountDriverPage: () => invoke<void>('open_mount_driver_page'),
   shellRegister: () => invoke<ShellStatus>('shell_register'),
   shellUnregister: () => invoke<ShellStatus>('shell_unregister'),

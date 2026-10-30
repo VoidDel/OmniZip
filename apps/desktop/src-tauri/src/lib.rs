@@ -338,6 +338,7 @@ pub fn run() {
             commands::mount_probe,
             commands::mount_list,
             commands::mount_free_letters,
+            commands::mount_target,
             commands::mount_start,
             commands::mount_stop,
             commands::open_mount_driver_page,

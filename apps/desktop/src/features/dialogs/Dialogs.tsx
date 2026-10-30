@@ -10,7 +10,7 @@ import { errorText } from '../../i18n';
 import { api, asError } from '../../lib/api';
 import { archiveStem, basename, dirname, joinPath } from '../../lib/format';
 import { useFmt } from '../../lib/hooks';
-import type { FormatId, Level, MountProbe, NodeInfo, OverwriteMode, PathStats, Preview } from '../../lib/types';
+import type { FormatId, Level, MountInfo, MountProbe, MountTarget, NodeInfo, OverwriteMode, PathStats, Preview } from '../../lib/types';
 import { type Dialog, mountRoot, useApp } from '../../store/app';
 
 const LEVELS: Level[] = ['store', 'fastest', 'fast', 'normal', 'better', 'best', 'ultra'];
@@ -1011,13 +1011,53 @@ function RenameDialog({ d }: { d: Extract<Dialog, { kind: 'rename' }> }) {
 
 // ------------------------------------------------------------------------------------- mount
 
-/** Mount options (docs/04-ui-design.md §4.10). Mounting opens the volume in the file manager. */
+/**
+ * Mount options (docs/04-ui-design.md §4.10) for the archive shown, or for an archive on disk
+ * (the dialog window of the file manager's "Mount"), whose format is looked up first.
+ */
 function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
   const { t } = useTranslation();
   const close = useClose(d);
-  const archive = useApp((s) => s.archive)!;
+  const [target, setTarget] = useState<MountTarget | null>(() => {
+    const a = useApp.getState().archive;
+    return d.path || !a
+      ? null
+      : { path: a.path, name: a.name, format: a.info.format, mountClass: a.mountClass, encrypted: a.info.encrypted, archiveId: a.id };
+  });
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!d.path) return;
+    // The mounts are fetched too, so an archive mounted already shows as such from the start.
+    void Promise.all([api.mountTarget(d.path), useApp.getState().refreshMounts()]).then(
+      ([x]) => setTarget(x),
+      (e) => setError(errorText(t, asError(e))),
+    );
+  }, [d.path, t]);
+  if (target) return <MountForm d={d} target={target} />;
+  // Nothing until the archive is known: a dialog window shows itself once it fits its dialog.
+  if (!error) return null;
+  return (
+    <Modal
+      title={t('mount.title', { name: basename(d.path ?? '') })}
+      onClose={close}
+      width={540}
+      footer={<button type="button" className="btn primary" onClick={close}>{t('common.close')}</button>}
+    >
+      <div className="err"><Icon name="alert" /><span>{error}</span></div>
+    </Modal>
+  );
+}
+
+/** Mounting opens the volume in the file manager. */
+function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; target: MountTarget }) {
+  const { t } = useTranslation();
+  const close = useClose(d);
   const settings = useApp((s) => s.settings)!;
-  const mounted = useApp((s) => s.mounts.find((m) => samePath(m.archive, archive.path)));
+  const shell = useApp((s) => s.shellLabel);
+  const live = useApp((s) => s.mounts.find((m) => samePath(m.archive, target.path)));
+  // While it is being ejected from a dialog window, the mount stays on screen until that is done.
+  const [ejecting, setEjecting] = useState<MountInfo | null>(null);
+  const mounted = ejecting ?? live;
   const [probe, setProbe] = useState<MountProbe | null>(null);
   const [letters, setLetters] = useState<string[]>([]);
   const [as, setAs] = useState<'letter' | 'folder'>('letter');
@@ -1027,8 +1067,9 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
   const [label, setLabel] = useState('');
   const [warm, setWarm] = useState(settings.mount.warm_solid);
   const [writable, setWritable] = useState(settings.mount.writable);
-  // Shown once mounting reports that a password is needed.
-  const [password, setPassword] = useState<string | null>(null);
+  // Asked up front for an encrypted archive that is not open (an open one may know its password
+  // already), otherwise once mounting reports that a password is needed.
+  const [password, setPassword] = useState<string | null>(target.encrypted && target.archiveId == null ? '' : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -1036,8 +1077,31 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
     void api.freeLetters().then(setLetters);
   }, []);
   const ready = !!probe && probe.built && probe.health === 'ready';
-  const solid = archive.mountClass === 'C';
+  const solid = target.mountClass === 'C';
   const windows = useApp((s) => s.boot?.system.platform === 'win');
+
+  /** Opens the volume; a dialog window closes once the file manager has it. */
+  const reveal = async (m: MountInfo) => {
+    if (!shell) {
+      close();
+      return void api.reveal(mountRoot(m));
+    }
+    setBusy(true);
+    await api.reveal(mountRoot(m)).catch(() => undefined);
+    close();
+  };
+
+  const eject = async (m: MountInfo) => {
+    if (!shell) {
+      close();
+      return void useApp.getState().unmount(m.id);
+    }
+    setEjecting(m);
+    const job = await useApp.getState().unmount(m.id);
+    if (job) startedInShell(d.id, job);
+    else if (job === 0) close();
+    else setEjecting(null);
+  };
 
   const start = async (elevated = false) => {
     if (password !== null && !password) return setError(t('pwd.empty'));
@@ -1045,8 +1109,8 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
     setError('');
     try {
       const m = await api.mount({
-        path: archive.path,
-        archiveId: archive.id,
+        path: target.path,
+        archiveId: target.archiveId,
         mountPoint: as === 'folder' ? folder : letter || null,
         label: label.trim() || null,
         warm: solid && warm,
@@ -1054,7 +1118,8 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
         elevated,
         writable,
       });
-      if (password) void api.setArchivePassword(archive.id, password);
+      if (password && target.archiveId != null) void api.setArchivePassword(target.archiveId, password);
+      if (shell) return await reveal(m);
       close();
       const s = useApp.getState();
       await s.refreshMounts();
@@ -1084,30 +1149,16 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
   if (mounted) {
     return (
       <Modal
-        title={t('mount.title', { name: archive.name })}
+        title={t('mount.title', { name: target.name })}
         onClose={close}
         width={520}
         footer={
           <>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                close();
-                void useApp.getState().unmount(mounted.id);
-              }}
-            >
+            <button type="button" className="btn" disabled={busy || !!ejecting} onClick={() => void eject(mounted)}>
               <Icon name="eject" />
               <span>{t('mount.eject')}</span>
             </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => {
-                close();
-                void api.reveal(mountRoot(mounted));
-              }}
-            >
+            <button type="button" className="btn primary" disabled={busy || !!ejecting} onClick={() => void reveal(mounted)}>
               <Icon name="folderOpen" />
               <span>{t('mount.open')}</span>
             </button>
@@ -1124,7 +1175,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
 
   return (
     <Modal
-      title={t('mount.title', { name: archive.name })}
+      title={t('mount.title', { name: target.name })}
       onClose={close}
       width={540}
       footer={
@@ -1181,7 +1232,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
                 type="button"
                 className="btn outline"
                 onClick={async () => {
-                  const p = await pick({ directory: true, multiple: false, defaultPath: folder || dirname(archive.path) });
+                  const p = await pick({ directory: true, multiple: false, defaultPath: folder || dirname(target.path) });
                   if (typeof p === 'string') setFolder(p);
                 }}
               >
@@ -1194,7 +1245,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
       )}
       <div className="frow">
         <label htmlFor="mt-label">{t('mount.label')}</label>
-        <input id="mt-label" className="inp" value={label} placeholder={archiveStem(archive.name)} maxLength={32} onChange={(e) => setLabel(e.target.value)} />
+        <input id="mt-label" className="inp" value={label} placeholder={archiveStem(target.name)} maxLength={32} onChange={(e) => setLabel(e.target.value)} />
       </div>
       {password !== null && (
         <div className="frow">
@@ -1206,7 +1257,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
         <label className="chk">
           <input type="checkbox" checked={writable} onChange={(e) => setWritable(e.target.checked)} /> {t('mount.writable')}
         </label>
-        <span className="hint">{archive.info.format === 'rar' ? t('mount.writableHintNoSave') : t('mount.writableHint')}</span>
+        <span className="hint">{target.format === 'rar' ? t('mount.writableHintNoSave') : t('mount.writableHint')}</span>
       </div>
       {solid && (
         <label className="chk">
@@ -1221,7 +1272,7 @@ function MountDialog({ d }: { d: Extract<Dialog, { kind: 'mount' }> }) {
       ) : (
         <div className={`note${solid ? ' warn' : ''}`}>
           <Icon name={solid ? 'alert' : 'info'} />
-          <span>{password !== null ? t('mount.passwordHint') : t(`mount.class.${archive.mountClass}`, { format: archive.info.format.toUpperCase() })}</span>
+          <span>{password !== null ? t('mount.passwordHint') : t(`mount.class.${target.mountClass}`, { format: target.format.toUpperCase() })}</span>
         </div>
       )}
       {error && <div className="err"><Icon name="alert" /><span>{error}</span></div>}

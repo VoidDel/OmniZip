@@ -49,7 +49,10 @@ impl Verb {
     /// Verbs that show one dialog in its own small window, without the main window. The window
     /// turns into the progress window once the job starts.
     pub fn is_dialog(self) -> bool {
-        matches!(self, Verb::ExtractTo | Verb::Add | Verb::Convert)
+        matches!(
+            self,
+            Verb::ExtractTo | Verb::Add | Verb::Convert | Verb::Mount
+        )
     }
 
     /// Verbs that run in a small progress window without the main window.
@@ -190,12 +193,12 @@ mod tests {
         assert_eq!(inv.verb, Verb::ExtractHere);
         assert_eq!(inv.paths, vec![PathBuf::from("/x").join("b.7z")]);
         assert!(inv.verb.is_background());
-        // "Extract to…", "Add to archive…" and "Convert to…" get a standalone dialog window, not
-        // the main one.
-        for v in [Verb::ExtractTo, Verb::Add, Verb::Convert] {
+        // "Extract to…", "Add to archive…", "Convert to…" and "Mount" get a standalone dialog
+        // window, not the main one.
+        for v in [Verb::ExtractTo, Verb::Add, Verb::Convert, Verb::Mount] {
             assert!(v.is_dialog() && !v.is_background());
         }
-        for v in [Verb::Open, Verb::ExtractHere, Verb::Add7z, Verb::Mount] {
+        for v in [Verb::Open, Verb::ExtractHere, Verb::Add7z] {
             assert!(!v.is_dialog());
         }
     }
