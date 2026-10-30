@@ -192,9 +192,9 @@
     "save": "儲存…",
     "unsaved": "未儲存的新壓縮檔",
     "empty": "把檔案或資料夾拖到這裡，或從下方加入；整理好後按「儲存…」選擇格式與儲存位置",
-    "discardTitle": "放棄新增的壓縮檔？",
+    "discardTitle": "捨棄新增的壓縮檔？",
     "discardMessage": "「{name}」尚未儲存，其中的 {count} 項不會被儲存。",
-    "discard": "放棄"
+    "discard": "捨棄"
   },
   "extract": {
     "title": "解壓縮 {name}",

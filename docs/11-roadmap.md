@@ -117,7 +117,7 @@
 | 主题与语言 | 已完成且超出范围：12 套内置主题、跟随系统、系统强调色；zh-CN、en-US、zh-TW、ja-JP 四种语言 |
 | Shell | 已完成：经典右键菜单（设置页一键注册 / 移除）、轻量进度窗、单实例转发。安装器钩子自动注册与文件关联已写入安装包，但未实际安装验证。Win11 一级菜单已用自签证书的 MSIX 实机验证。macOS：文件关联与每格式文档图标、Finder 打开文件已实机验证，右键菜单（Services、Finder 扩展）未做 |
 | CLI | 已完成：`x e a l t i formats completions`，另有 `d rn convert gui` |
-| 挂载 | Windows 已完成：WinFsp 只读挂载、挂载对话框、侧栏与设置页的已挂载列表；挂载守护进程 `omnizip-mountd`（挂载保留到卸载或注销，与 OmniZip 是否在运行无关）与以管理员身份挂载（挂载管理器全局盘符）；临时可写层（卸载时保存到压缩包或放弃）。CLI `mount` 未做 |
+| 挂载 | Windows 已完成：WinFsp 只读挂载、挂载对话框、侧栏与设置页的已挂载列表；挂载守护进程 `omnizip-mountd`（挂载保留到卸载或注销，与 OmniZip 是否在运行无关）与以管理员身份挂载（挂载管理器全局盘符）；临时可写层（卸载时保存到压缩包或丢弃）。CLI `mount` 未做 |
 | 打包 | NSIS 安装包已产出（含 CLI、Shell DLL、安装 / 卸载钩子）；MSIX 可用自签测试证书签名并安装（`platform/windows/msix/new-test-cert.ps1`），正式签名待证书；macOS 可产出未签名的 `.app` 与 `.dmg`（本机架构） |
 | CI | `ci`、`release`、`nightly-fuzz` 工作流；仓库已推送到 GitHub，`ci` 在 Windows / macOS / Linux 上通过 |
 | 验收 | 已做一轮性能基准与优化（§8.4）。未开始：内部一周试用、崩溃率统计、性能预算全面测量 |

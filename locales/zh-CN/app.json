@@ -192,9 +192,9 @@
     "save": "保存…",
     "unsaved": "未保存的新压缩包",
     "empty": "把文件或文件夹拖到这里，或从下面添加；整理好后点“保存…”选择格式与保存位置",
-    "discardTitle": "放弃新建的压缩包？",
+    "discardTitle": "丢弃新建的压缩包？",
     "discardMessage": "“{name}”尚未保存，其中的 {count} 项不会被保存。",
-    "discard": "放弃"
+    "discard": "丢弃"
   },
   "extract": {
     "title": "解压 {name}",
@@ -247,13 +247,13 @@
     "elevatedBadge": "管理员",
     "writable": "允许写入",
     "writableHint": "改动写入临时层，卸载时可选择是否保存到压缩包。",
-    "writableHintNoSave": "改动写入临时层。RAR 压缩包无法写入，卸载时改动将被放弃。",
+    "writableHintNoSave": "改动写入临时层。RAR 压缩包无法写入，卸载时改动将被丢弃。",
     "writableBadge": "可写",
     "changesTitle": "保存对 {name} 的改动？",
-    "changesSave": "挂载的盘中有文件被修改。要把改动保存到 {name}，还是放弃？",
-    "changesNoSave": "挂载的盘中有文件被修改。{format} 压缩包无法写入，卸载将放弃这些改动。",
+    "changesSave": "挂载的盘中有文件被修改。要把改动保存到 {name}，还是丢弃？",
+    "changesNoSave": "挂载的盘中有文件被修改。{format} 压缩包无法写入，卸载将丢弃这些改动。",
     "saveChanges": "保存到压缩包",
-    "discardChanges": "放弃改动",
+    "discardChanges": "丢弃改动",
     "mounted": "已挂载到 {point}",
     "open": "打开",
     "eject": "卸载",
@@ -530,7 +530,7 @@
       "cache": "磁盘缓存上限",
       "warm": "后台预热固实压缩包",
       "writable": "可写挂载",
-      "writableHint": "新的挂载接受写入，改动保存在临时层，卸载时保存到压缩包或放弃。",
+      "writableHint": "新的挂载接受写入，改动保存在临时层，卸载时保存到压缩包或丢弃。",
       "offline": "将挂载的文件标记为脱机",
       "offlineHint": "避免资源管理器为生成缩略图而读取整个文件"
     },
