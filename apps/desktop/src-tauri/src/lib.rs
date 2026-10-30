@@ -213,7 +213,6 @@ pub fn run() {
         }
         _ => {}
     }
-    let invocation = launch::parse(&args, &cwd);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
@@ -262,6 +261,10 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // Parsed only here, in the instance that stays: a second instance hands its
+            // arguments to the first and exits before this runs. Parsing reads the file with the
+            // file manager's selection and removes it, and the first instance must still find it.
+            let invocation = launch::parse(&args, &cwd);
             let handle = app.handle().clone();
             let sweeper = handle.clone();
             // Mounts are watched (for the sidebar) only by a process with the main window, not by
