@@ -454,6 +454,40 @@ impl ArchiveReader for Scripted {
     }
 }
 
+/// An archive that is one compressed stream (tar.gz) decodes from its start whichever entry is
+/// wanted: reading a whole folder decodes it once, not once per file.
+#[test]
+fn single_stream_archives_are_decoded_in_one_pass() {
+    let names: Vec<String> = (0..50).map(|i| format!("dir/f{i:02}.txt")).collect();
+    for warm_solid in [true, false] {
+        let (mut reader, passes) = Scripted::new(
+            names
+                .iter()
+                .map(|n| (n.as_str(), n.as_bytes().to_vec(), Some(n.len() as u64)))
+                .collect(),
+        );
+        reader.info.format = FormatId::TarGz;
+        let fs = ArchiveFs::new(
+            Box::new(reader),
+            FsOptions {
+                warm_solid,
+                ..opts()
+            },
+        )
+        .unwrap();
+        assert_eq!(fs.mount_class(), MountClass::D);
+        for n in names.iter().rev() {
+            let a = resolve(&fs, n).unwrap();
+            assert_eq!(read_all(&fs, a.node, 64).unwrap(), n.as_bytes());
+        }
+        assert_eq!(
+            passes.load(Ordering::SeqCst),
+            1,
+            "warm_solid = {warm_solid}"
+        );
+    }
+}
+
 #[test]
 fn entries_may_not_outgrow_their_declared_size() {
     let (reader, _) = Scripted::new(vec![

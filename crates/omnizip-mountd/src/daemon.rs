@@ -309,7 +309,8 @@ impl Host {
                 return Err(mount_error(e));
             }
         };
-        let warm = spec.warm && fs.mount_class() == MountClass::C;
+        // Solid archives and single-stream ones (tar.gz) decode from their start anyway.
+        let warm = spec.warm && matches!(fs.mount_class(), MountClass::C | MountClass::D);
         let hosted = Hosted {
             id,
             archive: spec.archive.clone(),

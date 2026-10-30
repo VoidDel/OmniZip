@@ -50,7 +50,9 @@ pub struct FsOptions {
     pub cache_dir: Option<PathBuf>,
     /// Volume label (the archive name without extension when `None`).
     pub label: Option<String>,
-    /// Open handles per volume.
+    /// Open handles per volume. A handle stays open well after a program closes its file while
+    /// the system caches the file's data (Windows closes it when the cache lets go), so copying
+    /// a large folder out keeps many open at once.
     pub max_handles: usize,
     /// Password for encrypted entries. Without one, reading them fails with
     /// [`FsError::Access`].
@@ -71,7 +73,7 @@ impl Default for FsOptions {
             cache: CacheLimits::default(),
             cache_dir: None,
             label: None,
-            max_handles: 4096,
+            max_handles: 1 << 20,
             password: None,
             warm_solid: true,
         }
@@ -408,9 +410,17 @@ impl ArchiveFs {
         if let Some(c) = self.cache.get(id) {
             return Ok(c);
         }
-        let solid = self.mount_class() == MountClass::C;
+        // A solid block, or an archive that is one compressed stream (tar.gz), decodes only
+        // from its start: decoding one entry passes over the ones before it. Caching everything
+        // that fits in one pass keeps reading a whole folder from decoding the same start over
+        // and over. A stream has no other way around it; for solid archives it is a setting.
+        let one_pass = match self.mount_class() {
+            MountClass::C => self.opts.warm_solid,
+            MountClass::D => true,
+            MountClass::A | MountClass::B => false,
+        };
         let mut targets: HashSet<EntryId> = HashSet::from([id]);
-        if solid && self.opts.warm_solid && !self.warmed.swap(true, Ordering::SeqCst) {
+        if one_pass && !self.warmed.swap(true, Ordering::SeqCst) {
             targets.extend(self.warm_targets());
         }
         self.decode(reader.as_mut(), targets)?;
