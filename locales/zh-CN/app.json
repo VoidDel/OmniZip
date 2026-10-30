@@ -526,12 +526,9 @@
       "unsupported": "此系统暂不支持",
       "pending": "此系统的挂载功能将在后续版本中提供。",
       "cache": "磁盘缓存上限",
-      "unmountOnExit": "退出 OmniZip 时卸载",
-      "unmountOnExitHint": "关闭此项时，挂载由后台的挂载服务（omnizip-mountd）保持，退出 OmniZip 后仍可访问；没有挂载 5 分钟后它自动退出。",
-      "restore": "启动时恢复挂载",
       "warm": "后台预热固实压缩包",
       "writable": "可写挂载",
-      "writableHint": "新的挂载接受写入，改动保存在临时层，卸载时保存到压缩包或放弃。有未保存改动的挂载在退出 OmniZip 时不会卸载。",
+      "writableHint": "新的挂载接受写入，改动保存在临时层，卸载时保存到压缩包或放弃。",
       "offline": "将挂载的文件标记为脱机",
       "offlineHint": "避免资源管理器为生成缩略图而读取整个文件"
     },

@@ -125,24 +125,6 @@ pub fn saving_dir() -> Option<PathBuf> {
     omnizip_core::appdirs::cache_dir().map(|d| d.join("mount-saving"))
 }
 
-/// A mount to restore at start-up. The user's daemon keeps the list of its mounts in
-/// `mounts.json` in the data directory, written at every change.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SavedMount {
-    pub archive: String,
-    pub mount_point: String,
-    pub label: String,
-    /// Mounted with a writable layer (restored with an empty one).
-    #[serde(default)]
-    pub writable: bool,
-}
-
-/// Where the user's daemon saves its list.
-pub fn saved_list_path() -> Option<PathBuf> {
-    omnizip_core::appdirs::data_dir().map(|d| d.join("mounts.json"))
-}
-
 impl Response {
     pub fn failed(e: &Error) -> Self {
         Self::Failed {

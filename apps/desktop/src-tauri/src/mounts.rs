@@ -1,12 +1,12 @@
 //! Mounted archives (`docs/12-mount.md`). They live in `omnizip-mountd`, the user's mount
-//! daemon, which OmniZip starts on the first mount: they stay mounted after OmniZip exits,
-//! unless the settings unmount them on exit. "Mount as administrator" goes to the elevated
-//! daemon, started through the UAC prompt (§4).
+//! daemon, which OmniZip starts on the first mount: they stay mounted until they are unmounted
+//! or the user signs out, whether OmniZip runs or not. "Mount as administrator" goes to the
+//! elevated daemon, started through the UAC prompt (§4).
 //!
 //! This module is their client: it lists both daemons, routes unmounts to the right one, and
-//! turns their change notifications into `mounts://changed` events. The user's daemon saves its
-//! list for "restore on start". A writable mount's changes, kept at unmount, come back as a
-//! [`SavedLayer`] for a job to save into the archive (`ops::save_mount_work`).
+//! turns their change notifications into `mounts://changed` events. A writable mount's changes,
+//! kept at unmount, come back as a [`SavedLayer`] for a job to save into the archive
+//! (`ops::save_mount_work`).
 
 use std::{
     collections::HashSet,
@@ -15,7 +15,7 @@ use std::{
 };
 
 use omnizip_core::{Error, ErrorCode};
-use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount};
+use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response, SavedLayer};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -301,53 +301,6 @@ impl MountManager {
 
     pub fn is_empty(&self) -> bool {
         self.list().is_empty()
-    }
-
-    /// Unmounts everything (OmniZip quits and the settings say so), except writable mounts
-    /// with changes: they wait for the user to save or discard them.
-    pub fn unmount_all(&self) {
-        for level in [Level::User, Level::Admin] {
-            if daemons::running(level) {
-                let _ = daemons::call(level, &Request::UnmountAll { keep_changed: true });
-            }
-        }
-    }
-
-    /// Mounts the archives the user's daemon had at its last change, where possible at the same
-    /// mount point. Mounted ones are left alone; archives that need a password or no longer
-    /// exist are skipped.
-    pub fn restore(&self, app: &AppHandle) {
-        let Some(saved) = omnizip_mountd::saved_list_path()
-            .and_then(|f| std::fs::read_to_string(f).ok())
-            .and_then(|t| serde_json::from_str::<Vec<SavedMount>>(&t).ok())
-        else {
-            return;
-        };
-        for s in saved {
-            if !Path::new(&s.archive).is_file() {
-                continue;
-            }
-            let req = |mount_point| MountRequest {
-                path: s.archive.clone(),
-                archive_id: None,
-                mount_point,
-                label: Some(s.label.clone()),
-                warm: None,
-                password: None,
-                elevated: false,
-                writable: Some(s.writable),
-            };
-            let r = self
-                .mount(app, req(Some(s.mount_point.clone())))
-                .or_else(|e| match e.code() {
-                    // The mount point was taken meanwhile: take another drive letter.
-                    ErrorCode::AlreadyExists => self.mount(app, req(None)),
-                    _ => Err(e),
-                });
-            if let Err(e) = r {
-                tracing::warn!(archive = %s.archive, code = e.code().id(), "restoring a mount");
-            }
-        }
     }
 }
 

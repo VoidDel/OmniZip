@@ -615,12 +615,6 @@ export function SettingsView() {
               <span className="mono hint">{settings.mount.cache_gb} GB</span>
               <input type="range" min={1} max={32} value={settings.mount.cache_gb} aria-label={t('settings.mount.cache')} onChange={(e) => set((s) => (s.mount.cache_gb = Number(e.target.value)))} />
             </Row>
-            <Row label={t('settings.mount.unmountOnExit')} hint={settings.mount.unmount_on_exit ? undefined : t('settings.mount.unmountOnExitHint')}>
-              <Switch label={t('settings.mount.unmountOnExit')} checked={settings.mount.unmount_on_exit} onChange={(v) => set((s) => (s.mount.unmount_on_exit = v))} />
-            </Row>
-            <Row label={t('settings.mount.restore')}>
-              <Switch label={t('settings.mount.restore')} checked={settings.mount.restore_on_start} onChange={(v) => set((s) => (s.mount.restore_on_start = v))} />
-            </Row>
             <Row label={t('settings.mount.warm')}>
               <Switch label={t('settings.mount.warm')} checked={settings.mount.warm_solid} onChange={(v) => set((s) => (s.mount.warm_solid = v))} />
             </Row>

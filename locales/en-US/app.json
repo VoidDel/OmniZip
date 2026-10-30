@@ -526,12 +526,9 @@
       "unsupported": "Not available on this system yet",
       "pending": "Mounting on this system arrives in an upcoming release.",
       "cache": "Disk cache limit",
-      "unmountOnExit": "Unmount when OmniZip quits",
-      "unmountOnExitHint": "When off, the mount service (omnizip-mountd) keeps archives mounted after OmniZip quits; it exits by itself after 5 minutes without mounts.",
-      "restore": "Restore mounts at start-up",
       "warm": "Warm up solid archives in the background",
       "writable": "Writable mounts",
-      "writableHint": "New mounts accept writes into a temporary layer, saved into the archive or discarded when unmounting. Mounts with unsaved changes stay mounted when OmniZip quits.",
+      "writableHint": "New mounts accept writes into a temporary layer, saved into the archive or discarded when unmounting.",
       "offline": "Mark mounted files as offline",
       "offlineHint": "Stops Explorer from reading whole files for thumbnails"
     },

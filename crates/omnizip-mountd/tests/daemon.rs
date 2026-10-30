@@ -11,8 +11,7 @@ use std::{
 
 use omnizip_core::{CollectOptions, ErrorCode, FormatId, JobCtx, WriteOptions, source};
 use omnizip_mountd::{
-    Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount, client,
-    proto::saving_dir, save, saved_list_path,
+    Level, MountSpec, MountStatus, Request, Response, SavedLayer, client, proto::saving_dir, save,
 };
 
 #[test]
@@ -103,10 +102,6 @@ fn mounts_through_the_daemon_until_it_is_idle() {
         (mount.id, &mount.mount_point)
     );
     assert_eq!(mounts[0].cache_bytes, 7, "the file read is cached");
-    let saved: Vec<SavedMount> =
-        serde_json::from_str(&fs::read_to_string(saved_list_path().unwrap()).unwrap()).unwrap();
-    assert_eq!(saved.len(), 1);
-    assert_eq!(saved[0].mount_point, mount.mount_point.to_string_lossy());
 
     // Errors come back with their codes.
     let missing = MountSpec {

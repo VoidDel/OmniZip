@@ -1,7 +1,7 @@
 //! The daemon: hosts mounts and answers on its pipe (`docs/12-mount.md` §4).
 //!
 //! `omnizip-mountd` is the user's daemon, started by OmniZip when it first mounts. It mounts for
-//! any process of the user and keeps its list in `mounts.json` for "restore on start".
+//! any process of the user; the mounts stay until they are unmounted or the user signs out.
 //!
 //! `omnizip-mountd --elevated --handoff <pipe>` is started through the UAC prompt to mount as
 //! administrator: it reads the request from the pipe OmniZip created, then becomes the elevated
@@ -35,10 +35,7 @@ use omnizip_vfs::{ArchiveFs, Mount, MountBackend, MountError, MountOptions, Over
 use crate::{
     client,
     pipe::{self, Access},
-    proto::{
-        Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount, saved_list_path,
-        saving_dir,
-    },
+    proto::{Level, MountSpec, MountStatus, Request, Response, SavedLayer, saving_dir},
     save::can_save,
     volume::open_volume,
 };
@@ -360,34 +357,11 @@ impl Host {
         lock(&self.mounts).iter().map(Hosted::status).collect()
     }
 
-    /// Saves the list, tells the watchers, and starts the idle clock when no mount is left.
+    /// Tells the watchers, and starts the idle clock when no mount is left.
     fn changed(&self) {
         let empty = lock(&self.mounts).is_empty();
         *lock(&self.idle_since) = empty.then(Instant::now);
-        self.save();
         self.notify();
-    }
-
-    fn save(&self) {
-        if self.level != Level::User {
-            return;
-        }
-        let Some(f) = saved_list_path() else { return };
-        let saved: Vec<SavedMount> = lock(&self.mounts)
-            .iter()
-            .map(|h| SavedMount {
-                archive: h.archive.to_string_lossy().into_owned(),
-                mount_point: h.mount.mount_point().to_string_lossy().into_owned(),
-                label: h.label.clone(),
-                writable: h.overlay.is_some(),
-            })
-            .collect();
-        if let Some(d) = f.parent() {
-            let _ = std::fs::create_dir_all(d);
-        }
-        if let Ok(text) = serde_json::to_string_pretty(&saved) {
-            let _ = std::fs::write(&f, text);
-        }
     }
 
     fn notify(&self) {

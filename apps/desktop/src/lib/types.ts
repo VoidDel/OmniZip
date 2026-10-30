@@ -53,8 +53,6 @@ export interface Settings {
   security: { max_ratio: number; propagate_origin: boolean; symlinks: 'inside' | 'file' | 'skip' };
   mount: {
     cache_gb: number;
-    unmount_on_exit: boolean;
-    restore_on_start: boolean;
     warm_solid: boolean;
     offline_attribute: boolean;
     /** Mount with a temporary writable layer (the mount dialog's default). */

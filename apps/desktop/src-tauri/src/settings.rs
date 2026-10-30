@@ -215,8 +215,6 @@ impl Default for Security {
 #[serde(default)]
 pub struct Mount {
     pub cache_gb: u32,
-    pub unmount_on_exit: bool,
-    pub restore_on_start: bool,
     pub warm_solid: bool,
     pub offline_attribute: bool,
     /// Mount with a temporary writable layer (the mount dialog's default).
@@ -227,8 +225,6 @@ impl Default for Mount {
     fn default() -> Self {
         Self {
             cache_gb: 2,
-            unmount_on_exit: true,
-            restore_on_start: false,
             warm_solid: true,
             offline_attribute: false,
             writable: true,

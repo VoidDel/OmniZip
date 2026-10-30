@@ -526,12 +526,9 @@
       "unsupported": "此系統暫不支援",
       "pending": "此系統的掛載功能將在後續版本中提供。",
       "cache": "磁碟快取上限",
-      "unmountOnExit": "結束 OmniZip 時卸載",
-      "unmountOnExitHint": "關閉此項時，掛載由背景的掛載服務（omnizip-mountd）保持，結束 OmniZip 後仍可存取；沒有掛載 5 分鐘後它會自動結束。",
-      "restore": "啟動時恢復掛載",
       "warm": "背景預熱固實壓縮檔",
       "writable": "可寫入掛載",
-      "writableHint": "新的掛載接受寫入，變更保存在暫存層，卸載時儲存到壓縮檔或捨棄。有未儲存變更的掛載在結束 OmniZip 時不會卸載。",
+      "writableHint": "新的掛載接受寫入，變更保存在暫存層，卸載時儲存到壓縮檔或捨棄。",
       "offline": "將掛載的檔案標記為離線",
       "offlineHint": "避免檔案總管為產生縮圖而讀取整個檔案"
     },

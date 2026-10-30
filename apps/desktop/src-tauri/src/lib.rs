@@ -253,23 +253,16 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let sweeper = handle.clone();
-            // Mounts are restored, watched and unmounted on exit only by a process with the
-            // main window: a file-manager verb shown in a mini or dialog window ends the process
-            // when it is done, and must leave the mounts alone.
+            // Mounts are watched (for the sidebar) only by a process with the main window, not by
+            // one showing a file-manager verb in a mini or dialog window. They live in
+            // omnizip-mountd and stay when OmniZip exits.
             let main = !matches!(&invocation, Some(inv) if inv.verb.is_background() || inv.verb.is_dialog());
-            handle
-                .state::<AppState>()
-                .main_window
-                .store(main, std::sync::atomic::Ordering::SeqCst);
             std::thread::spawn(move || {
                 let state = sweeper.state::<AppState>();
                 dragout::sweep(&state);
                 clipboard::sweep_unused(&state);
                 if main {
                     state.mounts.watch_running(&sweeper);
-                    if state.settings().mount.restore_on_start {
-                        state.mounts.restore(&sweeper);
-                    }
                 }
             });
             match invocation {
@@ -353,18 +346,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building OmniZip")
-        .run(|app, event| match event {
-            // The mounts live in omnizip-mountd and stay unless the settings say otherwise.
-            tauri::RunEvent::Exit => {
-                let state = app.state::<AppState>();
-                if state.main_window.load(std::sync::atomic::Ordering::SeqCst)
-                    && state.settings().mount.unmount_on_exit
-                {
-                    state.mounts.unmount_all();
-                }
-            }
+        .run(|_app, _event| {
             #[cfg(target_os = "macos")]
-            tauri::RunEvent::Opened { urls } => open_urls(app, &urls),
-            _ => {}
+            if let tauri::RunEvent::Opened { urls } = _event {
+                open_urls(_app, &urls);
+            }
         });
 }

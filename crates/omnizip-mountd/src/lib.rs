@@ -14,7 +14,5 @@ pub mod daemon;
 #[cfg(windows)]
 pub mod pipe;
 
-pub use proto::{
-    Level, MountSpec, MountStatus, Request, Response, SavedLayer, SavedMount, saved_list_path,
-};
+pub use proto::{Level, MountSpec, MountStatus, Request, Response, SavedLayer};
 pub use volume::open_volume;
