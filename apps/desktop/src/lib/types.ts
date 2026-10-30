@@ -42,7 +42,13 @@ export interface Settings {
     view_mode: 'table' | 'grid';
   };
   language: { ui: string; size_unit: 'auto' | 'kb' | 'kib'; default_encoding: string };
-  formats: { default_format: string; default_level: Level; associations: Record<string, boolean> };
+  formats: {
+    default_format: string;
+    default_level: Level;
+    associations: Record<string, boolean>;
+    /** Store files whose content is compressed already (ZIP, 7z): the compress dialog's default. */
+    skip_compressed: boolean;
+  };
   shell: { style: 'cascade' | 'flat'; icons: boolean; items: Record<string, boolean> };
   security: { max_ratio: number; propagate_origin: boolean; symlinks: 'inside' | 'file' | 'skip' };
   mount: {
@@ -295,6 +301,8 @@ export interface CompressRequest {
   openAfter?: boolean;
   /** Save this new archive instead of collecting `paths`. */
   draft?: number | null;
+  /** Store files whose content is compressed already (photos, video, archives). */
+  skipCompressed?: boolean;
 }
 
 /** Archives on disk written again in another format, each to the path shown in the dialog. */

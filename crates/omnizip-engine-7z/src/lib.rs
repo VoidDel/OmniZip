@@ -462,6 +462,16 @@ fn content_methods(opts: &WriteOptions) -> Result<Vec<EncoderConfiguration>> {
     Ok(methods)
 }
 
+/// The method chain for files stored as they are: Copy, encrypted like the others.
+fn store_methods(opts: &WriteOptions) -> Vec<EncoderConfiguration> {
+    let mut methods: Vec<EncoderConfiguration> = Vec::new();
+    if let Some(pw) = &opts.password {
+        methods.push(AesEncoderOptions::new(Password::new(pw)).into());
+    }
+    methods.push(EncoderMethod::COPY.into());
+    methods
+}
+
 /// Methods 7z can write.
 pub const WRITE_METHODS: &[&str] = &["LZMA2", "LZMA", "BZip2", "Zstandard", "Copy"];
 
@@ -532,7 +542,19 @@ const SOLID_BLOCK_FILES: usize = 100_000;
 fn create(dest: &Path, sources: &[Source], opts: &WriteOptions, ctx: &JobCtx) -> Result<Report> {
     let out = Output::create(dest, opts.volume_size)?;
     let mut w = ArchiveWriter::new(out).map_err(|e| map_err(e, dest))?;
-    w.set_content_methods(content_methods(opts)?);
+    let methods = content_methods(opts)?;
+    // Files whose content is compressed already go into blocks of their own, stored as they are
+    // ("fast archiving"); the methods are set per block.
+    let copying = methods
+        .last()
+        .is_some_and(|m| m.method.id() == EncoderMethod::COPY.id());
+    let stored: Vec<bool> = sources
+        .iter()
+        .map(|s| {
+            opts.skip_compressed && !copying && omnizip_core::precompressed::is_precompressed(s)
+        })
+        .collect();
+    w.set_content_methods(methods.clone());
     w.set_encrypt_header(opts.password.is_some() && opts.encrypt_names);
     ctx.begin(
         Phase::Compressing,
@@ -581,45 +603,57 @@ fn create(dest: &Path, sources: &[Source], opts: &WriteOptions, ctx: &JobCtx) ->
             .map_err(|e| map_err(e, dest))?;
         report.dirs += 1;
     }
-    for s in sources {
-        ctx.check()?;
-        match &s.kind {
-            SourceKind::Dir => {}
-            SourceKind::Symlink { target } => {
-                w.push_archive_entry(entry_for(s), Some(target.as_bytes()))
-                    .map_err(|e| map_err(e, dest))?;
-                report.links += 1;
+    // The files to compress first, then those stored as they are.
+    for store in [false, true] {
+        if store {
+            if !stored.contains(&true) {
+                break;
             }
-            SourceKind::File if s.size == 0 => {
-                // 7z stores empty files as stream-less entries.
-                w.push_archive_entry(entry_for(s), None::<&[u8]>)
-                    .map_err(|e| map_err(e, dest))?;
-                report.files += 1;
-                ctx.file_done();
-            }
-            SourceKind::File if opts.solid => {
-                pending.push(s);
-                pending_bytes += s.size;
-                if pending_bytes >= SOLID_BLOCK_BYTES || pending.len() >= SOLID_BLOCK_FILES {
-                    flush(&mut w, &mut pending, &mut report)?;
-                    pending_bytes = 0;
+            w.set_content_methods(store_methods(opts));
+        }
+        for (s, _) in sources.iter().zip(&stored).filter(|(_, st)| **st == store) {
+            ctx.check()?;
+            match &s.kind {
+                SourceKind::Dir => {}
+                SourceKind::Symlink { target } => {
+                    w.push_archive_entry(entry_for(s), Some(target.as_bytes()))
+                        .map_err(|e| map_err(e, dest))?;
+                    report.links += 1;
+                }
+                SourceKind::File if s.size == 0 => {
+                    // 7z stores empty files as stream-less entries.
+                    w.push_archive_entry(entry_for(s), None::<&[u8]>)
+                        .map_err(|e| map_err(e, dest))?;
+                    report.files += 1;
+                    ctx.file_done();
+                }
+                SourceKind::File if opts.solid => {
+                    pending.push(s);
+                    pending_bytes += s.size;
+                    if pending_bytes >= SOLID_BLOCK_BYTES || pending.len() >= SOLID_BLOCK_FILES {
+                        flush(&mut w, &mut pending, &mut report)?;
+                        pending_bytes = 0;
+                    }
+                }
+                SourceKind::File => {
+                    let reader = LazySource {
+                        path: s.fs_path.clone(),
+                        file: None,
+                        ctx,
+                        finished: false,
+                    };
+                    w.push_archive_entry(entry_for(s), Some(reader))
+                        .map_err(|e| map_err(e, dest))?;
+                    report.files += 1;
+                    report.bytes += s.size;
                 }
             }
-            SourceKind::File => {
-                let reader = LazySource {
-                    path: s.fs_path.clone(),
-                    file: None,
-                    ctx,
-                    finished: false,
-                };
-                w.push_archive_entry(entry_for(s), Some(reader))
-                    .map_err(|e| map_err(e, dest))?;
-                report.files += 1;
-                report.bytes += s.size;
-            }
         }
+        flush(&mut w, &mut pending, &mut report)?;
+        pending_bytes = 0;
     }
-    flush(&mut w, &mut pending, &mut report)?;
+    // The header is encrypted with the AES settings found among these.
+    w.set_content_methods(methods);
     ctx.check()?;
     let out = w.finish().map_err(|e| Error::io(e, dest))?;
     report.outputs = out.commit()?;

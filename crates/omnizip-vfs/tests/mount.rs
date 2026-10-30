@@ -139,6 +139,9 @@ fn zip_volume_reads_like_a_disk() {
         WriteOptions {
             format: FormatId::Zip,
             level: Level::Fast,
+            // big.bin is random, which would be stored as it is (and read in place): compressed,
+            // it is decoded and spooled to the disk cache, which this test is about.
+            skip_compressed: false,
             ..Default::default()
         },
     );

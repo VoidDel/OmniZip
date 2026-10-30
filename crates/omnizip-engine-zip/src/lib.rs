@@ -396,6 +396,35 @@ fn zip_time(t: Option<std::time::SystemTime>) -> DateTime {
         .unwrap_or_default()
 }
 
+/// The method of each entry: the archive's, or Store for a file whose content is compressed
+/// already when the options skip those ("fast archiving", `omnizip_core::precompressed`).
+#[derive(Clone, Copy)]
+pub(crate) struct Methods {
+    method: CompressionMethod,
+    level: Option<i64>,
+    skip_compressed: bool,
+}
+
+impl Methods {
+    fn new(opts: &WriteOptions) -> Result<Self> {
+        let (method, level) = method_and_level(opts)?;
+        Ok(Self {
+            method,
+            level,
+            skip_compressed: opts.skip_compressed && method != CompressionMethod::Stored,
+        })
+    }
+
+    /// Looks at the file's name and, for a large file with another name, at its content.
+    fn of(&self, s: &Source) -> (CompressionMethod, Option<i64>) {
+        if self.skip_compressed && omnizip_core::precompressed::is_precompressed(s) {
+            (CompressionMethod::Stored, None)
+        } else {
+            (self.method, self.level)
+        }
+    }
+}
+
 /// Writes the sources. On several threads, entries are compressed in parallel (see
 /// [`parallel`]); `spill` holds temporary files for large ones. Encrypted entries can only be
 /// written by the archive writer, one after the other.
@@ -407,15 +436,16 @@ fn write_sources<W: io::Write + io::Seek>(
     ctx: &JobCtx,
     report: &mut Report,
 ) -> Result<()> {
-    let (method, level) = method_and_level(opts)?;
+    let methods = Methods::new(opts)?;
     let threads = opts.effective_threads() as usize;
     if threads < 2 || opts.password.is_some() {
         let pw = opts.password.as_deref();
-        return sources
-            .iter()
-            .try_for_each(|s| write_one(zw, s, method, level, pw, ctx, report));
+        return sources.iter().try_for_each(|s| {
+            let (method, level) = methods.of(s);
+            write_one(zw, s, method, level, pw, ctx, report)
+        });
     }
-    parallel::write_sources(zw, sources, method, level, threads, spill, ctx, report)
+    parallel::write_sources(zw, sources, methods, threads, spill, ctx, report)
 }
 
 /// Where temporary files for an archive at `dest` go: next to it.

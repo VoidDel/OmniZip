@@ -26,6 +26,7 @@ pub mod options;
 pub mod origin;
 pub mod path;
 pub mod policy;
+pub mod precompressed;
 pub mod registry;
 pub mod sink;
 pub mod source;

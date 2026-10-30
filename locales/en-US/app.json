@@ -159,6 +159,8 @@
     "method": "Method",
     "auto": "Automatic",
     "solid": "Solid compression",
+    "skipCompressed": "Skip files that are already compressed",
+    "skipCompressedHint": "Photos, videos, archives and the like are stored as they are: much faster, about the same size.",
     "comment": "Comment",
     "exclude": "Exclude (globs, one per line)",
     "deleteSource": "Move source files to the Recycle Bin when done",
@@ -460,7 +462,9 @@
       "defaultAppHint": "Windows asks you to confirm default apps in Settings.",
       "openDefaultApps": "Open system settings",
       "defaultFormat": "Default format for new archives",
-      "defaultLevel": "Default level"
+      "defaultLevel": "Default level",
+      "skipCompressed": "Skip files that are already compressed",
+      "skipCompressedHint": "Photos, videos, archives and other compressed files are stored as they are (ZIP, 7z): much faster, about the same size."
     },
     "shell": {
       "status": "Status",

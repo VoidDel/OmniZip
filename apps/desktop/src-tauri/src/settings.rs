@@ -131,6 +131,9 @@ pub struct Formats {
     pub default_level: String,
     /// Extensions associated with OmniZip (`zip` → true).
     pub associations: BTreeMap<String, bool>,
+    /// Store files whose content is compressed already instead of compressing them again
+    /// (ZIP and 7z; the compress dialog's default).
+    pub skip_compressed: bool,
 }
 
 impl Default for Formats {
@@ -143,6 +146,7 @@ impl Default for Formats {
             default_format: "zip".into(),
             default_level: "normal".into(),
             associations,
+            skip_compressed: true,
         }
     }
 }

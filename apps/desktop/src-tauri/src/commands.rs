@@ -803,7 +803,8 @@ pub fn job_convert(
     window: Option<String>,
 ) -> CmdResult<u32> {
     let locale = omnizip_i18n::detect_language(Some(&state.settings().language.ui)).to_owned();
-    let (title, work) = ops::convert_work(request, threads(&state), locale).map_err(err)?;
+    let skip = state.settings().formats.skip_compressed;
+    let (title, work) = ops::convert_work(request, threads(&state), skip, locale).map_err(err)?;
     Ok(state.jobs.spawn(
         &app,
         JobSpec {

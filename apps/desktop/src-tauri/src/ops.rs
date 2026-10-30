@@ -77,6 +77,9 @@ pub struct CompressRequest {
     /// Save this new archive (`crate::draft`) instead of collecting `paths`.
     #[serde(default)]
     pub draft: Option<u32>,
+    /// Store files whose content is compressed already (photos, video, archives).
+    #[serde(default = "yes")]
+    pub skip_compressed: bool,
 }
 
 /// Conversion request: archives on disk written again in another format
@@ -262,6 +265,7 @@ pub fn compress_work(
             encrypt_names: req.encrypt_names,
             volume_size: req.volume_size,
             comment: req.comment.clone().filter(|c| !c.is_empty()),
+            skip_compressed: req.skip_compressed,
         };
         let mut report = shared().create(&dest, &sources, &opts, ctx)?;
         if req.verify {
@@ -353,6 +357,7 @@ fn check_destinations(items: &[ConvertItem]) -> Result<(), Error> {
 pub fn convert_work(
     req: ConvertRequest,
     threads: u32,
+    skip_compressed: bool,
     locale: String,
 ) -> Result<(String, Work), Error> {
     check_destinations(&req.items)?;
@@ -378,6 +383,7 @@ pub fn convert_work(
                 format: req.format,
                 level: req.level,
                 threads,
+                skip_compressed,
                 ..Default::default()
             };
             let report = omnizip_formats::convert(shared(), &src, &dest, &oo, &wo, ctx)?;
@@ -415,7 +421,8 @@ pub fn update_work(
     let title = file_name(&a.path);
     let path = a.path.clone();
     let password = a.password.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let threads = app.state::<AppState>().settings().advanced.threads;
+    let settings = app.state::<AppState>().settings();
+    let (threads, skip_compressed) = (settings.advanced.threads, settings.formats.skip_compressed);
     let work: Work = Box::new(move |ctx: &JobCtx| {
         // Release our own read handle so the file can be replaced (Windows locks open files).
         {
@@ -425,6 +432,7 @@ pub fn update_work(
         let wo = WriteOptions {
             password: password.clone(),
             threads,
+            skip_compressed,
             ..Default::default()
         };
         let report = shared().update(&path, &ops, &wo, ctx)?;
@@ -743,7 +751,8 @@ fn transfer(
             },
             ctx,
         )?;
-        rewrite(dst, &[UpdateOp::Add { sources }], threads, ctx)?;
+        let skip = state.settings().formats.skip_compressed;
+        rewrite(dst, &[UpdateOp::Add { sources }], threads, skip, ctx)?;
     }
     if moving {
         if src.draft {
@@ -753,7 +762,7 @@ fn transfer(
             })?;
         } else {
             let paths = paths.to_vec();
-            rewrite(src, &[UpdateOp::Delete { paths }], threads, ctx)?;
+            rewrite(src, &[UpdateOp::Delete { paths }], threads, true, ctx)?;
         }
     }
     Ok(report)
@@ -803,8 +812,14 @@ pub fn export_options(state: &AppState, destination: PathBuf) -> ExtractOptions 
 }
 
 /// Applies `ops` to the archive file of `a` (its reader is closed so that the file can be
-/// replaced; the caller reopens it).
-fn rewrite(a: &OpenedArchive, ops: &[UpdateOp], threads: u32, ctx: &JobCtx) -> Result<(), Error> {
+/// replaced; the caller reopens it). `skip_compressed` applies to the files added.
+fn rewrite(
+    a: &OpenedArchive,
+    ops: &[UpdateOp],
+    threads: u32,
+    skip_compressed: bool,
+    ctx: &JobCtx,
+) -> Result<(), Error> {
     {
         let mut r = a.reader.lock().unwrap_or_else(|e| e.into_inner());
         *r = Box::new(Closed(a.info.clone()));
@@ -812,6 +827,7 @@ fn rewrite(a: &OpenedArchive, ops: &[UpdateOp], threads: u32, ctx: &JobCtx) -> R
     let wo = WriteOptions {
         password: a.password.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         threads,
+        skip_compressed,
         ..Default::default()
     };
     shared().update(&a.path, ops, &wo, ctx)?;

@@ -159,6 +159,8 @@
     "method": "方式",
     "auto": "自動",
     "solid": "ソリッド圧縮",
+    "skipCompressed": "圧縮済みのファイルは圧縮しない",
+    "skipCompressedHint": "写真・動画・アーカイブなどはそのまま格納します。サイズはほぼ同じで、ずっと速くなります。",
     "comment": "コメント",
     "exclude": "除外（ワイルドカード、1 行に 1 つ）",
     "deleteSource": "完了後に元ファイルをごみ箱へ移動",
@@ -460,7 +462,9 @@
       "defaultAppHint": "Windows では既定のアプリを設定で確認する必要があります。",
       "openDefaultApps": "システム設定を開く",
       "defaultFormat": "新規アーカイブの既定の形式",
-      "defaultLevel": "既定のレベル"
+      "defaultLevel": "既定のレベル",
+      "skipCompressed": "圧縮済みのファイルは圧縮しない",
+      "skipCompressedHint": "写真・動画・アーカイブなど圧縮済みのファイルはそのまま格納します（ZIP、7z）。サイズはほぼ同じで、ずっと速くなります。"
     },
     "shell": {
       "status": "状態",

@@ -49,6 +49,7 @@ arg-level = Compression level: store, fastest, fast, normal, better, best, ultra
 arg-method = Compression method (Deflate, LZMA2, BZip2, Zstandard, …)
 arg-solid = Solid compression (7z)
 arg-no-solid = Disable solid compression (7z)
+arg-compress-all = Also compress photos, video, archives and other files compressed already (by default ZIP and 7z store them as they are)
 arg-encrypt-headers = Also encrypt the file list (7z)
 arg-volume = Split into volumes of this size (e.g. 100m, 4g)
 arg-exclude-from = Read exclude globs from a file, one per line

@@ -275,3 +275,77 @@ fn empty_file_before_many_directories() {
         );
     }
 }
+
+/// Pseudo-random bytes (xorshift): content that is compressed already.
+fn noise(len: usize) -> Vec<u8> {
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x as u8
+        })
+        .collect()
+}
+
+#[test]
+fn compressed_files_are_stored_in_blocks_of_their_own() {
+    // Fast archiving: the photo and the random file go into a Copy block, the text into LZMA2;
+    // with a password the Copy block is encrypted too, and so is the header.
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("media");
+    fs::create_dir_all(&src).unwrap();
+    let photo = noise(300_000);
+    fs::write(src.join("photo.jpg"), &photo).unwrap();
+    fs::write(src.join("data.bin"), noise(2 << 20)).unwrap();
+    fs::write(src.join("notes.txt"), "text ".repeat(100_000)).unwrap();
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    let cases = [
+        (true, true, None),
+        (false, true, None),
+        (true, false, None),
+        (true, true, Some("secret")),
+    ];
+    for (solid, skip, password) in cases {
+        let dest = d
+            .path()
+            .join(format!("{solid}-{skip}-{}.7z", password.is_some()));
+        let o = WriteOptions {
+            solid,
+            skip_compressed: skip,
+            password: password.map(str::to_owned),
+            encrypt_names: password.is_some(),
+            ..opts7z()
+        };
+        SevenZEngine.create(&dest, &sources, &o, &ctx()).unwrap();
+        let c = password.map_or_else(ctx, pw_ctx);
+        let mut r = open_with(&dest, &c).unwrap();
+        let method = |r: &dyn ArchiveReader, name: &str| {
+            let e = r.entries().iter().find(|e| e.path.ends_with(name));
+            e.and_then(|e| e.method.clone()).unwrap_or_default()
+        };
+        let case = format!("solid={solid} skip={skip} password={password:?}");
+        // The reader names the methods of a block in capitals: "COPY", "AES256SHA256 COPY".
+        let copy = |r: &dyn ArchiveReader, name: &str| {
+            method(r, name).to_ascii_uppercase().contains("COPY")
+        };
+        assert_eq!(copy(r.as_ref(), "photo.jpg"), skip, "{case}");
+        assert_eq!(copy(r.as_ref(), "data.bin"), skip, "{case}");
+        assert!(
+            method(r.as_ref(), "notes.txt")
+                .to_ascii_uppercase()
+                .contains("LZMA2"),
+            "{case}"
+        );
+        let t = test_archive(r.as_mut(), Selection::all(), &c).unwrap();
+        assert!(t.warnings.is_empty(), "{case}: {:?}", t.warnings);
+        let id = r
+            .entries()
+            .iter()
+            .position(|e| e.path.ends_with("photo.jpg"))
+            .unwrap();
+        let (data, cut) = read_entry(r.as_mut(), id as u32, photo.len(), &c).unwrap();
+        assert!(!cut && data == photo, "{case}");
+    }
+}

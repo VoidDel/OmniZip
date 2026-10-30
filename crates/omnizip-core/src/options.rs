@@ -187,6 +187,10 @@ pub struct WriteOptions {
     /// Split the output into volumes of this many bytes (`name.7z.001`, …).
     pub volume_size: Option<u64>,
     pub comment: Option<String>,
+    /// Store files whose content is compressed already (photos, video, archives, …) instead of
+    /// compressing them again ("fast archiving", [`crate::precompressed`]). ZIP and 7z only:
+    /// the other formats compress one stream.
+    pub skip_compressed: bool,
 }
 
 impl Default for WriteOptions {
@@ -201,6 +205,7 @@ impl Default for WriteOptions {
             encrypt_names: false,
             volume_size: None,
             comment: None,
+            skip_compressed: true,
         }
     }
 }

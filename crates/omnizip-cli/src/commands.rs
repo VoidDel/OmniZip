@@ -381,6 +381,7 @@ fn create(a: CreateArgs, ui: &Ui) -> Result<i32> {
         encrypt_names: a.encrypt_headers,
         volume_size,
         comment: a.comment.clone(),
+        skip_compressed: !a.compress_all,
     };
     let reg = shared();
     let exists = dest.exists();

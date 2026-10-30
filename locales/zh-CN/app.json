@@ -159,6 +159,8 @@
     "method": "方法",
     "auto": "自动",
     "solid": "固实压缩",
+    "skipCompressed": "跳过已压缩的文件",
+    "skipCompressedHint": "照片、视频、压缩包等直接存储，不再重复压缩：快得多，大小几乎不变。",
     "comment": "注释",
     "exclude": "排除（通配符，每行一个）",
     "deleteSource": "完成后将源文件移到回收站",
@@ -460,7 +462,9 @@
       "defaultAppHint": "Windows 需要在系统设置中确认默认应用。",
       "openDefaultApps": "打开系统设置",
       "defaultFormat": "新建压缩包的默认格式",
-      "defaultLevel": "默认压缩级别"
+      "defaultLevel": "默认压缩级别",
+      "skipCompressed": "跳过已压缩的文件",
+      "skipCompressedHint": "照片、视频、压缩包等已压缩的文件直接存储（ZIP、7z），压缩快得多，大小几乎不变。"
     },
     "shell": {
       "status": "状态",

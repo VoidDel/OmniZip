@@ -1,6 +1,7 @@
 //! Entries compressed on several threads. Small files are compressed one per thread into
 //! memory and appended in order; a large file is deflated block by block on every thread
-//! ([`ParDeflate`]) into a one-entry archive in a temporary file, which is merged in.
+//! ([`ParDeflate`]) into a one-entry archive in a temporary file, which is merged in. A large
+//! file stored as it is (compressed already) goes straight through the archive writer.
 
 use std::{
     collections::HashMap,
@@ -20,7 +21,7 @@ use zip::{
     write::{PreparedZipFile, ZipFileBuilder},
 };
 
-use crate::{UTF8_FLAG, file_options, map_err, write_one, zip_time};
+use crate::{Methods, UTF8_FLAG, file_options, map_err, write_one, zip_time};
 
 /// Files at least this large are deflated block by block on every thread.
 const BIG_FILE: u64 = 16 << 20;
@@ -30,12 +31,10 @@ const AHEAD_BYTES: u64 = 256 << 20;
 /// slightly larger, and the header is written before the sizes are known.
 const ZIP64_FROM: u64 = 0xF000_0000;
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_sources<W: Write + Seek>(
     zw: &mut ZipWriter<W>,
     sources: &[Source],
-    method: CompressionMethod,
-    level: Option<i64>,
+    methods: Methods,
     threads: usize,
     spill: &Path,
     ctx: &JobCtx,
@@ -45,9 +44,10 @@ pub(crate) fn write_sources<W: Write + Seek>(
     let mut rest = sources;
     while !rest.is_empty() {
         let n = rest.iter().position(big).unwrap_or(rest.len());
-        write_small(zw, &rest[..n], method, level, threads, ctx, report)?;
+        write_small(zw, &rest[..n], methods, threads, ctx, report)?;
         rest = &rest[n..];
         if let Some((s, tail)) = rest.split_first() {
+            let (method, level) = methods.of(s);
             if method == CompressionMethod::Deflated {
                 let level = level.unwrap_or(6) as u32;
                 write_big_deflate(zw, s, level, threads, spill, ctx, report)?;
@@ -67,8 +67,7 @@ type Prepared = Result<(PreparedZipFile, u64)>;
 fn write_small<W: Write + Seek>(
     zw: &mut ZipWriter<W>,
     run: &[Source],
-    method: CompressionMethod,
-    level: Option<i64>,
+    methods: Methods,
     threads: usize,
     ctx: &JobCtx,
     report: &mut Report,
@@ -77,9 +76,10 @@ fn write_small<W: Write + Seek>(
         .filter(|&i| run[i].kind == SourceKind::File)
         .collect();
     if files.len() < 2 {
-        return run
-            .iter()
-            .try_for_each(|s| write_one(zw, s, method, level, None, ctx, report));
+        return run.iter().try_for_each(|s| {
+            let (method, level) = methods.of(s);
+            write_one(zw, s, method, level, None, ctx, report)
+        });
     }
     let (jobs, job_rx) = mpsc::channel::<usize>();
     let job_rx = Mutex::new(job_rx);
@@ -91,10 +91,7 @@ fn write_small<W: Write + Seek>(
                 loop {
                     let job = job_rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
                     let Ok(i) = job else { break };
-                    if done_tx
-                        .send((i, prepare(&run[i], method, level, ctx)))
-                        .is_err()
-                    {
+                    if done_tx.send((i, prepare(&run[i], methods, ctx))).is_err() {
                         break;
                     }
                 }
@@ -116,6 +113,7 @@ fn write_small<W: Write + Seek>(
                 next += 1;
             }
             if s.kind != SourceKind::File {
+                let (method, level) = methods.of(s);
                 write_one(zw, s, method, level, None, ctx, report)?;
                 continue;
             }
@@ -139,10 +137,12 @@ fn write_small<W: Write + Seek>(
     })
 }
 
-/// Compresses one file into memory (on a worker thread).
-fn prepare(s: &Source, method: CompressionMethod, level: Option<i64>, ctx: &JobCtx) -> Prepared {
+/// Compresses one file into memory (on a worker thread, which also looks at it to decide
+/// whether to store it as it is).
+fn prepare(s: &Source, methods: Methods, ctx: &JobCtx) -> Prepared {
     ctx.check()?;
     ctx.begin_file(&s.archive_path);
+    let (method, level) = methods.of(s);
     let name = s.archive_path.trim_end_matches('/');
     let mut b = ZipFileBuilder::new(name, file_options(s, method, level))
         .map_err(|e| map_err(e, &s.fs_path))?;

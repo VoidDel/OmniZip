@@ -252,6 +252,7 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const [customMb, setCustomMb] = useState(100);
   const [method, setMethod] = useState('');
   const [solid, setSolid] = useState(true);
+  const [skipCompressed, setSkipCompressed] = useState(settings.formats.skip_compressed);
   const [comment, setComment] = useState('');
   const [exclude, setExclude] = useState('');
   const [deleteSource, setDeleteSource] = useState(false);
@@ -293,6 +294,7 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
     volume === 'fat32' ? 4 * 1024 ** 3 - 1 : volume === 'dvd' ? 4_700_000_000 : volume === 'email' ? 25 * 1024 * 1024 : volume === 'custom' ? customMb * 1024 * 1024 : null;
   // Formats without a choice of method (and not 7z, which has solid mode) have no Method tab;
   // a new archive has nothing under Other but a ZIP comment.
+  const canSkip = (format === 'zip' || format === '7z') && LEVELS[level] !== 'store' && !/^(store|copy)$/i.test(method);
   const tabs: AdvTab[] = [
     'encrypt',
     'volume',
@@ -305,7 +307,7 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
   const changed: Record<AdvTab, boolean> = {
     encrypt: canEncrypt && !!password,
     volume: volume !== 'none',
-    method: !!method || (format === '7z' && !solid),
+    method: !!method || (format === '7z' && !solid) || (canSkip && skipCompressed !== settings.formats.skip_compressed),
     other: (format === 'zip' && !!comment) || (!draft && !!exclude.trim()),
   };
   const activeAdvanced = [
@@ -339,6 +341,7 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
         verify,
         openAfter,
         draft: d.draft ?? null,
+        skipCompressed: canSkip && skipCompressed,
       }, shell ?? undefined);
       if (d.draft !== undefined) useApp.getState().savingDraft(id, d.draft);
       if (shell) startedInShell(d.id, id);
@@ -484,6 +487,14 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
                 <label className="chk">
                   <input type="checkbox" checked={solid} onChange={(e) => setSolid(e.target.checked)} /> {t('compress.solid')}
                 </label>
+              )}
+              {canSkip && (
+                <div className="field">
+                  <label className="chk">
+                    <input type="checkbox" checked={skipCompressed} onChange={(e) => setSkipCompressed(e.target.checked)} /> {t('compress.skipCompressed')}
+                  </label>
+                  <span className="hint">{t('compress.skipCompressedHint')}</span>
+                </div>
               )}
             </div>
             <div {...panel('other')}>

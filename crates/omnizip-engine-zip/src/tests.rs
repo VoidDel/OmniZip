@@ -559,3 +559,53 @@ fn update_adds_large_files_on_several_threads() {
     assert_eq!(back, data);
     assert!(z.by_name("项目/说明.txt").is_ok(), "existing entries kept");
 }
+
+/// Pseudo-random bytes (xorshift): content that is compressed already.
+fn noise(len: usize) -> Vec<u8> {
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x as u8
+        })
+        .collect()
+}
+
+#[test]
+fn compressed_files_are_stored() {
+    // Fast archiving: a photo by its name, a large file with another name by its content; the
+    // large one also takes the path of large files on several threads.
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("media");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("photo.jpg"), noise(300_000)).unwrap();
+    fs::write(src.join("data.bin"), noise(17 << 20)).unwrap();
+    fs::write(src.join("notes.txt"), "text ".repeat(100_000)).unwrap();
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    for (threads, skip) in [(1, true), (4, true), (4, false)] {
+        let dest = d.path().join(format!("{threads}-{skip}.zip"));
+        let opts = WriteOptions {
+            threads,
+            skip_compressed: skip,
+            ..Default::default()
+        };
+        ZipEngine.create(&dest, &sources, &opts, &ctx()).unwrap();
+        let mut r = open(&dest);
+        let method = |r: &dyn ArchiveReader, name: &str| {
+            let e = r.entries().iter().find(|e| e.path.ends_with(name));
+            e.and_then(|e| e.method.clone()).unwrap_or_default()
+        };
+        let packed = if skip { "Store" } else { "Deflate" };
+        assert_eq!(method(r.as_ref(), "photo.jpg"), packed, "{threads} {skip}");
+        assert_eq!(method(r.as_ref(), "data.bin"), packed, "{threads} {skip}");
+        assert_eq!(
+            method(r.as_ref(), "notes.txt"),
+            "Deflate",
+            "{threads} {skip}"
+        );
+        let t = omnizip_core::test(r.as_mut(), Selection::all(), &ctx()).unwrap();
+        assert!(t.warnings.is_empty(), "{:?}", t.warnings);
+    }
+}

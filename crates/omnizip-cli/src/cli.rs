@@ -186,6 +186,8 @@ pub struct CreateArgs {
     pub solid: bool,
     #[arg(long)]
     pub no_solid: bool,
+    #[arg(long)]
+    pub compress_all: bool,
     #[command(flatten)]
     pub pw: PasswordArgs,
     #[arg(long)]

@@ -163,6 +163,7 @@ fn handle_invocation(app: &AppHandle, inv: Invocation, startup: bool) {
                 verify: false,
                 open_after: false,
                 draft: None,
+                skip_compressed: settings.formats.skip_compressed,
             };
             let (t, w) = ops::compress_work(req, None, settings.advanced.threads);
             ("compress", t, w)

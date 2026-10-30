@@ -536,6 +536,9 @@ export function SettingsView() {
                   options={(['store', 'fastest', 'fast', 'normal', 'better', 'best', 'ultra'] as const).map((l) => [l, t(`compress.levels.${l}`)] as [S['formats']['default_level'], string])}
                 />
               </Row>
+              <Row label={t('settings.formats.skipCompressed')} hint={t('settings.formats.skipCompressedHint')}>
+                <Switch label={t('settings.formats.skipCompressed')} checked={settings.formats.skip_compressed} onChange={(v) => set((s) => (s.formats.skip_compressed = v))} />
+              </Row>
               <Row label={t('settings.formats.defaultApp')} hint={t('settings.formats.defaultAppHint')}>
                 <button type="button" className="btn outline" onClick={() => void api.openDefaultApps()}>
                   <Icon name="external" />

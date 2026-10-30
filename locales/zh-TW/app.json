@@ -159,6 +159,8 @@
     "method": "方法",
     "auto": "自動",
     "solid": "固實壓縮",
+    "skipCompressed": "略過已壓縮的檔案",
+    "skipCompressedHint": "相片、影片、壓縮檔等直接儲存，不再重複壓縮：快得多，大小幾乎不變。",
     "comment": "註解",
     "exclude": "排除（萬用字元，每行一個）",
     "deleteSource": "完成後將來源檔案移到資源回收筒",
@@ -460,7 +462,9 @@
       "defaultAppHint": "Windows 需要在系統設定中確認預設應用程式。",
       "openDefaultApps": "開啟系統設定",
       "defaultFormat": "新增壓縮檔的預設格式",
-      "defaultLevel": "預設壓縮等級"
+      "defaultLevel": "預設壓縮等級",
+      "skipCompressed": "略過已壓縮的檔案",
+      "skipCompressedHint": "相片、影片、壓縮檔等已壓縮的檔案直接儲存（ZIP、7z），壓縮快得多，大小幾乎不變。"
     },
     "shell": {
       "status": "狀態",

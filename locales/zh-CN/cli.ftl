@@ -46,6 +46,7 @@ arg-level = 压缩级别：store、fastest、fast、normal、better、best、ult
 arg-method = 压缩方法（Deflate、LZMA2、BZip2、Zstandard 等）
 arg-solid = 固实压缩（7z）
 arg-no-solid = 关闭固实压缩（7z）
+arg-compress-all = 照片、视频、压缩包等已压缩的文件也重新压缩（默认 ZIP 与 7z 直接存储它们）
 arg-encrypt-headers = 同时加密文件名（7z）
 arg-volume = 按此大小分卷（如 100m、4g）
 arg-exclude-from = 从文件读取排除规则，每行一个

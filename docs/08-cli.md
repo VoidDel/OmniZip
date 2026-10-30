@@ -55,7 +55,8 @@ curl -s https://x/a.tar.zst | omnizip x - -o out   # 从 stdin
 
 ```bash
 omnizip a project.7z ./src --level 9 --solid --threads 8
-omnizip a photos.zip *.jpg --level 3
+omnizip a photos.zip *.jpg --level 3          # 已压缩的文件（照片、视频、压缩包）默认直接存储
+omnizip a media.7z ./media --compress-all    # 也重新压缩它们
 omnizip a backup.tar.zst ~/home --exclude-from .backupignore --follow-symlinks
 omnizip a secret.7z docs/ -p --encrypt-headers
 omnizip a big.7z data/ --volume 4g
