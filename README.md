@@ -60,12 +60,13 @@ pnpm i18n-check                  # 四种语言的键是否齐全
 cargo test --workspace           # 核心、引擎、CLI、挂载核心、Shell 扩展、桌面应用
 pnpm test                        # 前端单元测试
 cargo run -p omnizip-cli -- --help
-cargo build -p omnizip-mountd    # 挂载守护进程：开发模式下挂载需要它在桌面应用旁边（target/debug）
-pnpm dev                         # 开发模式运行桌面应用
+pnpm dev                         # 开发模式运行桌面应用（先构建挂载守护进程 omnizip-mountd 到 target/debug）
 pnpm bundle:windows              # NSIS 安装包（含 CLI、右键菜单 DLL 与 Win11 菜单包，需 Windows SDK）→ target/release/bundle/nsis/
 pwsh platform/windows/msix/pack.ps1 -Version 0.1.0   # 完整 MSIX（商店渠道，签名可选）
 pnpm build                       # 在 Mac 上：OmniZip.app 与 .dmg（未签名，含文件关联与文档图标）→ target/release/bundle/
 ```
+
+挂载守护进程在有挂载时一直运行，新构建（或更新安装后）的守护进程要等全部挂载卸载、旧进程退出（无挂载 5 分钟后）才会启用。
 
 模糊测试在 nightly 上运行：`cargo +nightly fuzz run zip`（目标见 `fuzz/fuzz_targets/`）；稳定版可运行其冒烟测试 `cargo test --manifest-path fuzz/Cargo.toml --lib`。
 
