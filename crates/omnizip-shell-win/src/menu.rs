@@ -182,7 +182,52 @@ fn is_mount_root(p: &Path) -> bool {
     ok.is_ok() && String::from_utf16_lossy(&name[..len]) == MOUNT_FS_NAME
 }
 
-#[cfg(not(windows))]
+/// Whether `p` is the folder of a volume OmniZip mounted: a mount point whose file system type
+/// is `fuse.omnizip` (`omnizip_mount_fuse::FS_TYPE`). Only the system's mount table is read, so
+/// the menu cannot hang on a volume that does not answer.
+#[cfg(target_os = "linux")]
+fn is_mount_root(p: &Path) -> bool {
+    const MOUNT_FS_TYPE: &str = "fuse.omnizip";
+    let Ok(table) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return false;
+    };
+    let s = p.to_string_lossy();
+    let want = match s.trim_end_matches('/') {
+        "" => "/",
+        t => t,
+    };
+    table.lines().any(|l| {
+        let f: Vec<&str> = l.split(' ').collect();
+        let Some(sep) = f.iter().position(|x| *x == "-") else {
+            return false;
+        };
+        f.get(sep + 1) == Some(&MOUNT_FS_TYPE) && f.get(4).is_some_and(|m| unescape(m) == want)
+    })
+}
+
+/// A path as `/proc/self/mountinfo` writes it, with space, tab, newline and backslash as octal
+/// escapes (`\040`).
+#[cfg(target_os = "linux")]
+fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\'
+            && i + 3 < b.len()
+            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+        {
+            out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
+            i += 4;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn is_mount_root(_: &Path) -> bool {
     false
 }
@@ -410,6 +455,19 @@ mod tests {
         let mixed = classify(&[p("photos.zip"), p("notes.txt")]);
         assert!(applies(Verb::Add, &mixed));
         assert!(!applies(Verb::ExtractHere, &mixed));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mount_table_paths_are_unescaped() {
+        assert_eq!(
+            unescape(r"/run/user/1000/omnizip/mnt/a\040b"),
+            "/run/user/1000/omnizip/mnt/a b"
+        );
+        assert_eq!(unescape(r"/x\134y\011"), "/x\\y\t");
+        assert_eq!(unescape(r"/相册\04"), r"/相册\04");
+        // Not mounted at all.
+        assert!(!is_mount_root(Path::new("/nonexistent/omnizip")));
     }
 
     #[test]
