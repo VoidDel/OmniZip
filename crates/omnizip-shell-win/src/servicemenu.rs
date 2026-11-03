@@ -126,13 +126,20 @@ fn value(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
-/// One argument of `Exec`, quoted as the Desktop Entry Specification asks: `"`, `` ` ``, `$`
-/// and `\` escaped inside the quotes, `%` doubled; then escaped as a string value.
+/// One argument of `Exec` as the Desktop Entry Specification asks: as it is when it has none
+/// of the reserved characters (some tools, `xdg-mime` among them, take the program's path
+/// literally and would not find it in quotes), otherwise quoted, with `"`, `` ` ``, `$` and `\`
+/// escaped inside; `%` doubled either way; then escaped as a string value.
 pub fn exec_arg(s: &str) -> String {
-    let mut q = String::from("\"");
+    const RESERVED: &str = " \t\n\"'\\><~|&;$*?#()`";
+    let quote = s.is_empty() || s.chars().any(|c| RESERVED.contains(c));
+    let mut q = String::new();
+    if quote {
+        q.push('"');
+    }
     for c in s.chars() {
         match c {
-            '"' | '`' | '$' | '\\' => {
+            '"' | '`' | '$' | '\\' if quote => {
                 q.push('\\');
                 q.push(c);
             }
@@ -140,7 +147,9 @@ pub fn exec_arg(s: &str) -> String {
             c => q.push(c),
         }
     }
-    q.push('"');
+    if quote {
+        q.push('"');
+    }
     value(&q)
 }
 
@@ -237,7 +246,7 @@ mod tests {
         assert!(one.contains("Name=挂载\n"));
         assert!(one.contains("Icon=drive-removable-media\n"));
         assert!(
-            one.contains("Exec=\"/opt/OmniZip/omnizip-desktop\" --shell mount %F\n"),
+            one.contains("Exec=/opt/OmniZip/omnizip-desktop --shell mount %F\n"),
             "{one}"
         );
         assert!(one.contains("MimeType=application/zip;"));
@@ -277,6 +286,11 @@ mod tests {
 
     #[test]
     fn exec_arguments_are_quoted() {
+        assert_eq!(
+            exec_arg("/opt/OmniZip/omnizip-desktop"),
+            "/opt/OmniZip/omnizip-desktop"
+        );
+        assert_eq!(exec_arg("/x/100%/y"), "/x/100%%/y");
         assert_eq!(exec_arg("/a b/c"), "\"/a b/c\"");
         assert_eq!(exec_arg("/x/100%/$y"), "\"/x/100%%/\\\\$y\"");
         assert_eq!(exec_arg(r#"/q"\"#), r#""/q\\"\\\\""#);
