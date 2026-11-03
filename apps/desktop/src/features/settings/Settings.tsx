@@ -6,7 +6,7 @@ import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { FileIcon, GitHubMark, Icon, Logo, type IconName } from '../../components/Icon';
-import { Segmented, Switch } from '../../components/ui';
+import { Segmented, Select as Choice, Switch } from '../../components/ui';
 import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
@@ -40,22 +40,18 @@ function Row({ label, hint, children, col }: { label: ReactNode; hint?: ReactNod
   );
 }
 
+/** `Select` for settings whose values may be numbers. */
 function Select<T extends string | number>({ value, options, onChange, label }: { value: T; options: [T, string][]; onChange: (v: T) => void; label: string }) {
   return (
-    <select
-      className="sel"
+    <Choice
       value={String(value)}
-      aria-label={label}
-      onChange={(e) => {
-        const raw = e.target.value;
+      label={label}
+      options={options.map(([v, l]): [string, string] => [String(v), l])}
+      onChange={(raw) => {
         const found = options.find(([v]) => String(v) === raw);
         if (found) onChange(found[0]);
       }}
-    >
-      {options.map(([v, l]) => (
-        <option key={String(v)} value={String(v)}>{l}</option>
-      ))}
-    </select>
+    />
   );
 }
 

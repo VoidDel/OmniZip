@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FileIcon, Icon } from '../../components/Icon';
-import { Modal, PasswordInput, Segmented, Tabs } from '../../components/ui';
+import { Modal, PasswordInput, Segmented, Select, Tabs } from '../../components/ui';
 import { errorText } from '../../i18n';
 import { api, asError } from '../../lib/api';
 import { archiveStem, basename, dirname, joinPath, shortLabel } from '../../lib/format';
@@ -139,19 +139,11 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
       <div className="fpair">
         <div className="field">
           <label htmlFor="ex-paths">{t('extract.paths')}</label>
-          <select id="ex-paths" className="sel" value={pathMode} onChange={(e) => setPathMode(e.target.value as 'smart' | 'full' | 'flat')}>
-            {(['smart', 'full', 'flat'] as const).map((m) => (
-              <option key={m} value={m}>{t(`extract.${m}`)}</option>
-            ))}
-          </select>
+          <Select id="ex-paths" value={pathMode} onChange={setPathMode} options={(['smart', 'full', 'flat'] as const).map((m) => [m, t(`extract.${m}`)])} />
         </div>
         <div className="field">
           <label htmlFor="ex-ow">{t('extract.overwrite')}</label>
-          <select id="ex-ow" className="sel" value={overwrite} onChange={(e) => setOverwrite(e.target.value as OverwriteMode)}>
-            {(['ask', 'skip', 'overwrite', 'overwrite-older', 'rename'] as OverwriteMode[]).map((m) => (
-              <option key={m} value={m}>{t(`extract.overwriteModes.${m}`)}</option>
-            ))}
-          </select>
+          <Select id="ex-ow" value={overwrite} onChange={setOverwrite} options={(['ask', 'skip', 'overwrite', 'overwrite-older', 'rename'] as OverwriteMode[]).map((m) => [m, t(`extract.overwriteModes.${m}`)])} />
         </div>
       </div>
       {/* The password stays out of the way: a job that needs one asks for it (docs/04-ui-design.md §4.7). */}
@@ -171,12 +163,7 @@ function ExtractDialog({ d }: { d: Extract<Dialog, { kind: 'extract' }> }) {
             )}
             <div className="field">
               <label htmlFor="ex-enc">{t('extract.encoding')}</label>
-              <select id="ex-enc" className="sel" value={encoding} onChange={(e) => setEncoding(e.target.value)}>
-                <option value="auto">{t('settings.language.encodingAuto')}</option>
-                {encodings.map((x) => (
-                  <option key={x} value={x}>{x}</option>
-                ))}
-              </select>
+              <Select id="ex-enc" value={encoding} onChange={setEncoding} options={[['auto', t('settings.language.encodingAuto')], ...encodings.map((x): [string, string] => [x, x])]} />
             </div>
           </div>
           <label className="chk">
@@ -403,19 +390,15 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
       <div className="fmt-level">
         <div className="field">
           <label htmlFor="cf-format">{t('compress.format')}</label>
-          <select
+          <Select
             id="cf-format"
-            className="sel"
             value={format}
-            onChange={(e) => {
-              setFormat(e.target.value as FormatId);
+            onChange={(f) => {
+              setFormat(f);
               setMethod('');
             }}
-          >
-            {WRITABLE.map((f) => (
-              <option key={f} value={f}>{f.toUpperCase()}</option>
-            ))}
-          </select>
+            options={WRITABLE.map((f) => [f, f.toUpperCase()])}
+          />
         </div>
         <LevelField level={level} onChange={setLevel} />
       </div>
@@ -460,11 +443,7 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
               <div className="frow">
                 <label htmlFor="cf-vol">{t('compress.volume')}</label>
                 <div className="inline">
-                  <select id="cf-vol" className="sel" value={volume} onChange={(e) => setVolume(e.target.value as typeof volume)}>
-                    {(['none', 'fat32', 'dvd', 'email', 'custom'] as const).map((v) => (
-                      <option key={v} value={v}>{t(`compress.volumes.${v}`)}</option>
-                    ))}
-                  </select>
+                  <Select id="cf-vol" value={volume} onChange={setVolume} options={(['none', 'fat32', 'dvd', 'email', 'custom'] as const).map((v) => [v, t(`compress.volumes.${v}`)])} />
                   {volume === 'custom' && (
                     <input className="inp" type="number" min={1} style={{ width: 100, flex: 'none' }} value={customMb} aria-label={t('compress.customSize')} onChange={(e) => setCustomMb(Math.max(1, Number(e.target.value)))} />
                   )}
@@ -475,12 +454,7 @@ function CompressDialog({ d }: { d: Extract<Dialog, { kind: 'compress' }> }) {
               {methods.length > 0 && (
                 <div className="frow">
                   <label htmlFor="cf-method">{t('compress.method')}</label>
-                  <select id="cf-method" className="sel" value={method} onChange={(e) => setMethod(e.target.value)}>
-                    <option value="">{t('compress.auto')}</option>
-                    {methods.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                  <Select id="cf-method" value={method} onChange={setMethod} options={[['', t('compress.auto')], ...methods.map((m): [string, string] => [m, m])]} />
                 </div>
               )}
               {format === '7z' && (
@@ -633,11 +607,7 @@ function ConvertDialog({ d }: { d: Extract<Dialog, { kind: 'convert' }> }) {
       <div className="fmt-level">
         <div className="field">
           <label htmlFor="cv-format">{t('convert.format')}</label>
-          <select id="cv-format" className="sel" value={format} onChange={(e) => setFormat(e.target.value as FormatId)}>
-            {CONVERT_TO.map((f) => (
-              <option key={f} value={f}>{f.toUpperCase()}</option>
-            ))}
-          </select>
+          <Select id="cv-format" value={format} onChange={setFormat} options={CONVERT_TO.map((f) => [f, f.toUpperCase()])} />
         </div>
         <LevelField level={level} onChange={setLevel} />
       </div>
@@ -1234,12 +1204,13 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
             onChange={setAs}
           />
           {as === 'letter' && windows && (
-            <select className="sel" style={{ flex: 'none', minWidth: 0, width: 150 }} value={letter} aria-label={t('mount.letter')} onChange={(e) => setLetter(e.target.value)}>
-              <option value="">{letters[0] ? t('mount.auto', { letter: letters[0] }) : t('mount.autoNone')}</option>
-              {letters.map((l) => (
-                <option key={l} value={l}>{l}</option>
-              ))}
-            </select>
+            <Select
+              style={{ flex: 'none', minWidth: 0, width: 150 }}
+              value={letter}
+              label={t('mount.letter')}
+              onChange={setLetter}
+              options={[['', letters[0] ? t('mount.auto', { letter: letters[0] }) : t('mount.autoNone')], ...letters.map((l): [string, string] => [l, l])]}
+            />
           )}
         </div>
       </div>

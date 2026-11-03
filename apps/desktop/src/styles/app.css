@@ -307,8 +307,15 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .status-warn { display: inline-flex; align-items: center; gap: 6px; font-size: .86rem; color: var(--warning); }
 /* WebView2 adds its own reveal button to password fields; PasswordInput has one already. */
 input[type="password"]::-ms-reveal, input[type="password"]::-ms-clear { display: none; }
-select.sel, input.inp { height: var(--ctrl-h); padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: var(--bg-surface); font-size: .9rem; min-width: 0; max-width: 100%; }
-select.sel:focus, input.inp:focus, textarea.inp:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-subtle); }
+.sel, input.inp { height: var(--ctrl-h); padding: 0 10px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: var(--bg-surface); font-size: .9rem; min-width: 0; max-width: 100%; }
+select.sel:focus, button.sel:focus-visible, button.sel[aria-expanded="true"], input.inp:focus, textarea.inp:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-subtle); }
+/* `Select` on Linux (components/ui.tsx), drawn by the page: WebKitGTK opens a select as a GTK menu that no style reaches. As wide as its longest option, like a select. */
+button.sel { display: inline-flex; align-items: center; text-align: start; color: var(--fg-primary); padding-right: 30px; cursor: default; background-image: linear-gradient(45deg, transparent 50%, var(--fg-secondary) 50%), linear-gradient(135deg, var(--fg-secondary) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+.sel-val { display: grid; flex: 1; min-width: 0; }
+.sel-val > span { grid-area: 1 / 1; visibility: hidden; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel-val > span.on { visibility: visible; }
+.sel-pop { min-width: 0; overflow-y: auto; }
+.sel-pop button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 textarea.inp { padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: var(--bg-surface); font-size: .9rem; resize: vertical; min-height: 64px; }
 input.inp.mono { font-family: var(--font-mono); font-size: .84rem; }
 .switch { width: 38px; height: 22px; border-radius: 11px; background: var(--bg-pressed); position: relative; transition: background var(--dur); flex: none; border: 0; }
@@ -391,9 +398,9 @@ input[type=range] { accent-color: var(--accent); width: 160px; }
 .path-tail { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .frow { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px 12px; }
 .fpair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
-.fpair select.sel { width: 100%; }
+.fpair .sel { width: 100%; }
 .frow > label { font-size: .9rem; color: var(--fg-secondary); }
-.frow > .seg, .frow > select.sel { justify-self: start; }
+.frow > .seg, .frow > .sel { justify-self: start; }
 .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .inline .inp, .inline .sel { flex: 1; min-width: 120px; }
 .chk { display: inline-flex; align-items: center; gap: 8px; font-size: .9rem; cursor: pointer; }
@@ -426,7 +433,7 @@ details.adv .tabpanel { grid-area: 1 / 1; display: flex; flex-direction: column;
 details.adv .tabpanel.off { visibility: hidden; }
 /* Format and compression level side by side; the slider is as tall as the select so they line up. */
 .fmt-level { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; align-items: start; }
-.fmt-level select.sel { width: 100%; }
+.fmt-level .sel { width: 100%; }
 .fmt-level input[type="range"] { width: 100%; height: var(--ctrl-h); margin: 0; }
 .levels { display: flex; justify-content: space-between; font-size: .72rem; color: var(--fg-muted); padding: 0 2px; }
 .est { display: flex; align-items: center; gap: 8px; font-size: .86rem; color: var(--fg-secondary); font-variant-numeric: tabular-nums; }
