@@ -48,13 +48,17 @@ fn mime_types(key: &str) -> &'static [&'static str] {
         ],
         "lz4" => &["application/x-lz4", "application/x-lz4-compressed-tar"],
         "lzma" => &["application/x-lzma"],
+        "br" => &[
+            "application/x-brotli",
+            "application/x-brotli-compressed-tar",
+        ],
         _ => &[],
     }
 }
 
 /// The keys `mime_types` knows.
 const KEYS: &[&str] = &[
-    "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "lz4", "lzma",
+    "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "lz4", "lzma", "br",
 ];
 
 fn env_dir(var: &str) -> Option<PathBuf> {

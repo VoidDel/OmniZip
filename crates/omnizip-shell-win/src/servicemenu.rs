@@ -33,6 +33,7 @@ pub const ARCHIVE_MIME_TYPES: &[&str] = &[
     "application/x-xz-compressed-tar",
     "application/x-zstd-compressed-tar",
     "application/x-lz4-compressed-tar",
+    "application/x-brotli-compressed-tar",
     "application/gzip",
     "application/x-gzip",
     "application/x-bzip",
@@ -42,6 +43,7 @@ pub const ARCHIVE_MIME_TYPES: &[&str] = &[
     "application/zstd",
     "application/x-zstd",
     "application/x-lz4",
+    "application/x-brotli",
 ];
 
 /// How many items a service menu wants.
