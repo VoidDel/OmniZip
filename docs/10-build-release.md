@@ -40,7 +40,7 @@ OmniZip/
 │  ├─ shell-menu.toml               # 右键菜单定义（单一真相）
 │  ├─ windows/{AppxManifest.xml,sparse/,wix/,nsis/,icons/,registry/}
 │  ├─ macos/{Info.plist.in,entitlements/,FinderSync/,FSKitExtension/,Services/,dmg/}
-│  └─ linux/{omnizip.desktop,mime/,servicemenus/,nautilus/,nemo/,thunar/,flatpak/,appimage/,deb/,rpm/}
+│  └─ linux/{omnizip-desktop.desktop,mime/,servicemenus/,nautilus/,nemo/,thunar/,flatpak/,appimage/,deb/,rpm/}
 ├─ locales/                         # 见 06
 ├─ themes/{builtin/,schema/}        # 见 05
 ├─ icons/                           # 应用图标、文件类型图标源 SVG

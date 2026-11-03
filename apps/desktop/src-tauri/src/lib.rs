@@ -2,6 +2,8 @@
 
 pub mod clipboard;
 pub mod commands;
+#[cfg(target_os = "linux")]
+pub mod desktop_entry;
 pub mod draft;
 pub mod dragout;
 pub mod integration;
@@ -272,6 +274,9 @@ pub fn run() {
             // omnizip-mountd and stay when OmniZip exits.
             let main = !matches!(&invocation, Some(inv) if inv.verb.is_background() || inv.verb.is_dialog());
             std::thread::spawn(move || {
+                // The taskbar icon on Wayland.
+                #[cfg(target_os = "linux")]
+                desktop_entry::ensure();
                 let state = sweeper.state::<AppState>();
                 dragout::sweep(&state);
                 clipboard::sweep_unused(&state);

@@ -128,7 +128,7 @@ fn value(s: &str) -> String {
 
 /// One argument of `Exec`, quoted as the Desktop Entry Specification asks: `"`, `` ` ``, `$`
 /// and `\` escaped inside the quotes, `%` doubled; then escaped as a string value.
-fn exec_arg(s: &str) -> String {
+pub fn exec_arg(s: &str) -> String {
     let mut q = String::from("\"");
     for c in s.chars() {
         match c {
