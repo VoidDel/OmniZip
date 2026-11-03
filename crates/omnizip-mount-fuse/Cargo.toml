@@ -1,0 +1,23 @@
+[package]
+name = "omnizip-mount-fuse"
+description = "OmniZip mount backend for Linux: archives as folders through FUSE3 (docs/12-mount.md)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+omnizip-vfs.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Talks to /dev/fuse itself and mounts through `fusermount3`: no libfuse needed to build or run.
+fuser = { version = "0.18", default-features = false }
+libc = "0.2"
+tracing.workspace = true
+
+[dev-dependencies]
+omnizip-core.workspace = true
+omnizip-formats.workspace = true
+tempfile.workspace = true

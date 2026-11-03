@@ -1432,6 +1432,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "fuser"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b82b6597d216503555ead6b358f341ef748869bf5c6fbae6a0cb9dd231baecfd"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "log",
+ "memchr",
+ "nix",
+ "num_enum",
+ "page_size",
+ "parking_lot",
+ "pkg-config",
+ "ref-cast",
+ "smallvec",
+ "zerocopy",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2716,6 +2736,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -3014,6 +3035,7 @@ dependencies = [
  "omnizip-core",
  "omnizip-formats",
  "omnizip-i18n",
+ "omnizip-mount-fuse",
  "omnizip-mount-winfsp",
  "omnizip-mountd",
  "omnizip-shell-win",
@@ -3105,6 +3127,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnizip-mount-fuse"
+version = "0.1.0"
+dependencies = [
+ "fuser",
+ "libc",
+ "omnizip-core",
+ "omnizip-formats",
+ "omnizip-vfs",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "omnizip-mount-winfsp"
 version = "0.1.0"
 dependencies = [
@@ -3121,9 +3156,11 @@ dependencies = [
 name = "omnizip-mountd"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "omnizip-core",
  "omnizip-formats",
  "omnizip-i18n",
+ "omnizip-mount-fuse",
  "omnizip-mount-winfsp",
  "omnizip-vfs",
  "serde",
@@ -3198,6 +3235,16 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "page_size"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -6062,6 +6109,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1afec51604565183aeb5c54c20aeab286120d4e4460f7f76e3e8bb8c0d99473"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.8.63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
