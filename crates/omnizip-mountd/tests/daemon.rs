@@ -1,6 +1,7 @@
-//! Runs the daemon binary under its own pipe names and directories, and mounts through it as
-//! OmniZip does. Skipped when WinFsp is not installed (CI runners).
-#![cfg(windows)]
+//! Runs the daemon binary under its own pipe or socket names and directories, and mounts
+//! through it as OmniZip does. Skipped when the mount driver (WinFsp, FUSE) is missing (CI
+//! runners).
+#![cfg(any(windows, target_os = "linux"))]
 
 use std::{
     fs,
@@ -17,7 +18,7 @@ use omnizip_mountd::{
 #[test]
 fn mounts_through_the_daemon_until_it_is_idle() {
     if !omnizip_vfs::probe(true).can_mount() {
-        eprintln!("WinFsp is not installed: skipped");
+        eprintln!("the mount driver is not installed: skipped");
         return;
     }
     let d = tempfile::tempdir().unwrap();
@@ -81,9 +82,9 @@ fn mounts_through_the_daemon_until_it_is_idle() {
     };
     rx.recv_timeout(Duration::from_secs(5))
         .expect("watchers hear of the mount");
-    let root = format!("{}\\", mount.mount_point.display());
+    let root = root(&mount);
     assert_eq!(
-        fs::read_to_string(Path::new(&root).join("docs").join("readme.txt")).unwrap(),
+        fs::read_to_string(root.join("docs").join("readme.txt")).unwrap(),
         "read me"
     );
     // The same archive again: the same mount.
@@ -122,7 +123,7 @@ fn mounts_through_the_daemon_until_it_is_idle() {
     .unwrap();
     rx.recv_timeout(Duration::from_secs(5))
         .expect("watchers hear of the unmount");
-    assert!(!Path::new(&root).exists());
+    assert!(!root.exists());
 
     writable_mounts(&zip);
 
@@ -146,8 +147,17 @@ fn mount_writable(zip: &Path) -> (MountStatus, PathBuf) {
         panic!("not mounted")
     };
     assert!(mount.writable && !mount.dirty && mount.saveable);
-    let root = PathBuf::from(format!("{}\\", mount.mount_point.display()));
+    let root = root(&mount);
     (mount, root)
+}
+
+/// The root of a mount: of the drive on Windows, the folder itself elsewhere.
+fn root(mount: &MountStatus) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("{}\\", mount.mount_point.display()))
+    } else {
+        mount.mount_point.clone()
+    }
 }
 
 fn status(id: u64) -> Option<MountStatus> {

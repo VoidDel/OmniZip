@@ -15,12 +15,16 @@
 //! `cache/mount-saving`, which no daemon clears, and the app removes it once saved. A layer left
 //! behind by a daemon that did not exit cleanly is cleared with the other cache files.
 //!
+//! On Linux there is only the user's daemon, on a Unix socket (`sock`), mounting through FUSE.
+//! It unmounts everything when it is asked to stop (`SIGTERM` as the session ends), and at start
+//! clears volumes a daemon that did not exit cleanly left behind.
+//!
 //! Either exits once it has had no mount for five minutes.
 
+#[cfg(windows)]
+use std::{fs::File, os::windows::io::OwnedHandle};
 use std::{
-    fs::File,
     io::{BufRead, BufReader, Write},
-    os::windows::io::OwnedHandle,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard,
@@ -32,9 +36,14 @@ use std::{
 use omnizip_core::{Error, ErrorCode, MountClass, appdirs};
 use omnizip_vfs::{ArchiveFs, Mount, MountBackend, MountError, MountOptions, OverlayFs, VirtualFs};
 
+#[cfg(target_os = "linux")]
+use crate::sock::{self, Conn};
+#[cfg(windows)]
 use crate::{
     client,
-    pipe::{self, Access},
+    pipe::{self, Access, Conn},
+};
+use crate::{
     proto::{Level, MountSpec, MountStatus, Request, Response, SavedLayer, saving_dir},
     save::can_save,
     volume::open_volume,
@@ -54,11 +63,32 @@ fn idle_limit() -> Duration {
 pub fn run(args: &[String]) -> i32 {
     match args {
         [] => user_daemon(),
+        #[cfg(windows)]
         [e, h, handoff_pipe] if e == "--elevated" && h == "--handoff" => handoff(handoff_pipe),
         _ => 2,
     }
 }
 
+#[cfg(target_os = "linux")]
+fn user_daemon() -> i32 {
+    let Ok(path) = sock::daemon_socket(Level::User) else {
+        return 1;
+    };
+    match sock::listen(&path) {
+        Ok(Some(listener)) => {
+            omnizip_mount_fuse::clear_stale();
+            serve(Host::new(Level::User), listener)
+        }
+        // Another daemon serves this user already.
+        Ok(None) => 0,
+        Err(e) => {
+            tracing::warn!("omnizip-mountd: {}: {e}", path.display());
+            1
+        }
+    }
+}
+
+#[cfg(windows)]
 fn user_daemon() -> i32 {
     let Ok(name) = pipe::daemon_pipe(Level::User) else {
         return 1;
@@ -70,6 +100,7 @@ fn user_daemon() -> i32 {
     serve(Host::new(Level::User), first, &name, Access::User)
 }
 
+#[cfg(windows)]
 fn handoff(handoff_pipe: &str) -> i32 {
     if !pipe::elevated() {
         return 1;
@@ -104,7 +135,7 @@ fn handoff(handoff_pipe: &str) -> i32 {
     }
 }
 
-fn reply(conn: &File, r: &Response) -> bool {
+fn reply(conn: &Conn, r: &Response) -> bool {
     let mut line = serde_json::to_string(r).unwrap_or_default();
     line.push('\n');
     (&*conn).write_all(line.as_bytes()).is_ok()
@@ -198,7 +229,7 @@ pub struct Host {
     level: Level,
     mounts: Mutex<Vec<Hosted>>,
     next: AtomicU64,
-    watchers: Mutex<Vec<File>>,
+    watchers: Mutex<Vec<Conn>>,
     /// Since when the daemon has had no mount.
     idle_since: Mutex<Option<Instant>>,
     cache_dir: Option<PathBuf>,
@@ -264,6 +295,7 @@ impl Host {
             .mount_point
             .clone()
             .filter(|p| !p.as_os_str().is_empty());
+        #[cfg(windows)]
         if self.level == Level::Admin
             && let Some(p) = point.as_deref().filter(|p| !is_drive(p))
         {
@@ -297,7 +329,11 @@ impl Host {
             Some(o) => o.clone(),
             None => fs.clone(),
         };
-        let mount = match omnizip_mount_winfsp::WinFsp.mount(volume, &opts) {
+        #[cfg(windows)]
+        let mounted = omnizip_mount_winfsp::WinFsp.mount(volume, &opts);
+        #[cfg(target_os = "linux")]
+        let mounted = omnizip_mount_fuse::Fuse.mount(volume, &opts);
+        let mount = match mounted {
             Ok(m) => m,
             Err(e) => {
                 if let Some(o) = &overlay {
@@ -379,19 +415,68 @@ impl Host {
     }
 }
 
-/// Accepts clients forever, one thread each; exits the process when idle.
-fn serve(host: Arc<Host>, first: OwnedHandle, name: &str, access: Access) -> ! {
-    {
-        let host = host.clone();
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(Duration::from_secs(1).min(idle_limit()));
-                if host.tick() {
-                    std::process::exit(0);
-                }
+/// Drops volumes gone on their own and exits the process when idle, on a thread of its own.
+fn watch_idle(host: &Arc<Host>) {
+    let host = host.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(1).min(idle_limit()));
+            if host.tick() {
+                std::process::exit(0);
             }
-        });
+        }
+    });
+}
+
+/// Unmounts everything and exits when the daemon is asked to stop. The signals are blocked
+/// before any other thread starts, so that only this one receives them.
+#[cfg(target_os = "linux")]
+fn stop_on_signals(host: &Arc<Host>) {
+    // SAFETY: an initialized set, changed and read by these calls only.
+    let set = unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+            libc::sigaddset(&mut set, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+        set
+    };
+    let host = host.clone();
+    std::thread::spawn(move || {
+        let mut sig = 0;
+        // SAFETY: a set of blocked signals.
+        if unsafe { libc::sigwait(&set, &mut sig) } == 0 {
+            tracing::info!(sig, "omnizip-mountd: stopping");
+            host.unmount(|_| true, false);
+            std::process::exit(0);
+        }
+    });
+}
+
+/// Accepts clients forever, one thread each; exits the process when idle or stopped.
+#[cfg(target_os = "linux")]
+fn serve(host: Arc<Host>, listener: sock::Listener) -> ! {
+    stop_on_signals(&host);
+    watch_idle(&host);
+    loop {
+        match listener.accept() {
+            Ok(conn) => {
+                let host = host.clone();
+                std::thread::spawn(move || connection(&host, conn));
+            }
+            Err(e) => {
+                tracing::warn!("omnizip-mountd: {e}");
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
     }
+}
+
+/// Accepts clients forever, one thread each; exits the process when idle.
+#[cfg(windows)]
+fn serve(host: Arc<Host>, first: OwnedHandle, name: &str, access: Access) -> ! {
+    watch_idle(&host);
     let mut next = first;
     loop {
         if pipe::accept(&next).is_ok() {
@@ -413,7 +498,7 @@ fn serve(host: Arc<Host>, first: OwnedHandle, name: &str, access: Access) -> ! {
 
 /// Serves one client: requests line by line, until it disconnects. A `Watch` connection is
 /// kept for notifications.
-fn connection(host: &Arc<Host>, conn: File) {
+fn connection(host: &Arc<Host>, conn: Conn) {
     let mut reader = BufReader::new(&conn);
     let mut line = String::new();
     loop {
@@ -430,7 +515,10 @@ fn connection(host: &Arc<Host>, conn: File) {
             }
             // The client's identity is known once it has written to the pipe.
             Ok(req @ Request::Mount { .. }) => {
+                #[cfg(windows)]
                 let may = host.level == Level::User || pipe::client_elevated(&conn);
+                #[cfg(target_os = "linux")]
+                let may = host.level == Level::User;
                 host.handle(req, may)
             }
             Ok(req) => host.handle(req, false),
@@ -445,7 +533,8 @@ fn connection(host: &Arc<Host>, conn: File) {
 fn mount_error(e: MountError) -> Error {
     match e {
         MountError::NotInstalled(what) => {
-            Error::new(ErrorCode::MissingDependency).detail(format!("WinFsp: {what}"))
+            let backend = if cfg!(windows) { "WinFsp" } else { "FUSE" };
+            Error::new(ErrorCode::MissingDependency).detail(format!("{backend}: {what}"))
         }
         MountError::InUse(p) => Error::new(ErrorCode::AlreadyExists).with("path", p.display()),
         MountError::NoDriveLetter => Error::new(ErrorCode::AlreadyExists).with("path", "D: – Z:"),
@@ -454,18 +543,25 @@ fn mount_error(e: MountError) -> Error {
 }
 
 /// `Z`, `Z:` or `Z:\`.
+#[cfg(windows)]
 fn is_drive(p: &Path) -> bool {
     let s = p.to_string_lossy();
     let b = s.trim_end_matches(['\\', '/']).as_bytes();
     (b.len() == 1 || b.len() == 2 && b[1] == b':') && b[0].is_ascii_alphabetic()
 }
 
+#[cfg(windows)]
 fn same_path(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
     norm(a) == norm(b)
 }
 
-#[cfg(test)]
+#[cfg(not(windows))]
+fn same_path(a: &Path, b: &Path) -> bool {
+    a == b
+}
+
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 

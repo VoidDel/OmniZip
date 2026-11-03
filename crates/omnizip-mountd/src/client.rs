@@ -1,27 +1,28 @@
 //! Talking to the daemons from OmniZip (or any client of the same user).
 
+#[cfg(windows)]
+use std::{fs::File, io, os::windows::io::AsRawHandle, sync::mpsc};
 use std::{
-    fs::File,
-    io::{self, BufRead, BufReader, Write},
-    os::windows::io::AsRawHandle,
+    io::{BufRead, BufReader, Write},
     path::Path,
-    sync::mpsc,
     time::{Duration, Instant},
 };
 
 use omnizip_core::{Error, ErrorCode};
+#[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{HANDLE, WAIT_TIMEOUT},
     System::Threading::{GetProcessId, WaitForSingleObject},
 };
 
-use crate::{
-    pipe::{self, Access},
-    proto::{Level, MountSpec, MountStatus, Request, Response},
-};
+#[cfg(windows)]
+use crate::pipe::{self, Access, Conn};
+use crate::proto::{Level, MountSpec, MountStatus, Request, Response};
+#[cfg(target_os = "linux")]
+use crate::sock::{self, Conn};
 
 /// Sends one request on a connection and reads its response; the daemon's error as `Err`.
-pub fn exchange(conn: &File, req: &Request) -> Result<Response, Error> {
+pub fn exchange(conn: &Conn, req: &Request) -> Result<Response, Error> {
     let mut line = serde_json::to_string(req).map_err(Error::internal)?;
     line.push('\n');
     (&*conn).write_all(line.as_bytes())?;
@@ -35,15 +36,23 @@ pub fn exchange(conn: &File, req: &Request) -> Result<Response, Error> {
         .into_result()
 }
 
-/// One request to a daemon. Fails with `NotFound` when that daemon does not run.
-pub fn call(level: Level, req: &Request) -> Result<Response, Error> {
+/// A connection to a daemon. Fails with `NotFound` when that daemon does not run.
+fn open(level: Level) -> Result<Conn, Error> {
+    #[cfg(windows)]
     let conn = pipe::connect(&pipe::daemon_pipe(level)?)?;
-    exchange(&conn, req)
+    #[cfg(target_os = "linux")]
+    let conn = sock::connect(&sock::daemon_socket(level)?)?;
+    Ok(conn)
 }
 
-/// Whether a daemon runs (answers on its pipe).
+/// One request to a daemon. Fails with `NotFound` when that daemon does not run.
+pub fn call(level: Level, req: &Request) -> Result<Response, Error> {
+    exchange(&open(level)?, req)
+}
+
+/// Whether a daemon runs (answers on its pipe or socket).
 pub fn running(level: Level) -> bool {
-    pipe::daemon_pipe(level).is_ok_and(|p| pipe::connect(&p).is_ok())
+    open(level).is_ok()
 }
 
 /// Starts the user's daemon (`exe`) unless it runs, and waits until it answers. It runs on its
@@ -52,7 +61,10 @@ pub fn ensure_user_daemon(exe: &Path) -> Result<(), Error> {
     if running(Level::User) {
         return Ok(());
     }
+    #[cfg(windows)]
     pipe::spawn_detached(exe).map_err(|e| Error::io(e, exe))?;
+    #[cfg(target_os = "linux")]
+    sock::spawn_detached(exe).map_err(|e| Error::io(e, exe))?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if running(Level::User) {
@@ -66,7 +78,7 @@ pub fn ensure_user_daemon(exe: &Path) -> Result<(), Error> {
 /// Calls `on_change` for every change of a daemon's mounts, until the daemon exits (or does
 /// not run).
 pub fn watch(level: Level, mut on_change: impl FnMut()) -> Result<(), Error> {
-    let conn = pipe::connect(&pipe::daemon_pipe(level)?)?;
+    let conn = open(level)?;
     let mut line = serde_json::to_string(&Request::Watch).map_err(Error::internal)?;
     line.push('\n');
     (&conn).write_all(line.as_bytes())?;
@@ -79,10 +91,17 @@ pub fn watch(level: Level, mut on_change: impl FnMut()) -> Result<(), Error> {
     Ok(())
 }
 
+/// Mounts through the elevated daemon, which exists on Windows only.
+#[cfg(not(windows))]
+pub fn mount_elevated(_exe: &Path, _spec: &MountSpec) -> Result<MountStatus, Error> {
+    Err(Error::new(ErrorCode::UnsupportedOperation).with("operation", "mount"))
+}
+
 /// Mounts through the elevated daemon. Asks for administrator rights (the UAC prompt) to start
 /// `exe --elevated --handoff <pipe>`, which hosts the mount itself or hands it to the elevated
 /// daemon running already. The spec, password included, travels over a pipe that only the
 /// started process can be on the other end of.
+#[cfg(windows)]
 pub fn mount_elevated(exe: &Path, spec: &MountSpec) -> Result<MountStatus, Error> {
     let name = format!(
         r"\\.\pipe\omnizip-mountd-handoff-{}-{:016x}",
@@ -137,6 +156,7 @@ pub fn mount_elevated(exe: &Path, spec: &MountSpec) -> Result<MountStatus, Error
 }
 
 /// Bits that differ between calls (not cryptographic: the pipe is checked anyway).
+#[cfg(windows)]
 fn random() -> u64 {
     use std::hash::{BuildHasher, RandomState};
     RandomState::new().hash_one(Instant::now())

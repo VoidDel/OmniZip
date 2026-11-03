@@ -34,6 +34,10 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+omnizip-mount-fuse.workspace = true
+libc = "0.2"
+
 [dev-dependencies]
 omnizip-core.workspace = true
 omnizip-formats.workspace = true

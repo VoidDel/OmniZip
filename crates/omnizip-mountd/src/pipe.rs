@@ -58,6 +58,9 @@ use crate::proto::Level;
 
 const ADMINISTRATORS: &str = "S-1-5-32-544";
 
+/// A connection to or from a daemon.
+pub type Conn = File;
+
 fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
     s.as_ref().encode_wide().chain([0]).collect()
 }
