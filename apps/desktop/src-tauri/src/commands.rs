@@ -1411,6 +1411,46 @@ pub fn open_default_apps() -> CmdResult<()> {
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| err(Error::internal(e)))
 }
 
+/// Which formats OmniZip opens by default, where it sets that itself (Linux,
+/// `docs/07-shell-integration.md` §5.1): by format key, as in the settings. `None` where the
+/// system decides (Windows, macOS); the switches are then the settings.
+#[tauri::command]
+pub async fn format_defaults() -> Option<BTreeMap<String, bool>> {
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(crate::defaults::status)
+            .await
+            .ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Makes OmniZip open the formats `keys`, or gives them back to the programs that opened them
+/// before (Linux); the formats' state afterwards.
+#[tauri::command]
+pub async fn format_set_default(keys: Vec<String>, on: bool) -> CmdResult<BTreeMap<String, bool>> {
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::defaults::set(&keys, on)?;
+            Ok(crate::defaults::status())
+        })
+        .await
+        .map_err(|e| err(Error::internal(e)))?
+        .map_err(err)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (keys, on);
+        Err(err(
+            Error::new(ErrorCode::UnsupportedOperation).with("operation", "default-app")
+        ))
+    }
+}
+
 /// Mount backend state (docs/12-mount.md §9): whether the driver is installed and whether
 /// this build can mount at all.
 #[tauri::command]

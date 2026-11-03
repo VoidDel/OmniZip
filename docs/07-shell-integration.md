@@ -115,6 +115,7 @@
 - `omnizip-desktop.desktop`（文件名须与窗口的 app id `omnizip-desktop` 相同，Wayland 才显示其图标）：`MimeType=application/zip;application/x-7z-compressed;application/vnd.rar;application/x-tar;application/gzip;application/x-bzip2;application/x-xz;application/zstd;application/x-lz4;application/x-cpio;application/x-iso9660-image;…`，`Exec=omnizip-desktop %U`，`Actions=NewArchive;ExtractHere;Mount;`。
 - `omnizip-mime.xml` 补充 shared-mime-info 中缺失的类型（如 `.tar.zst`、`.tzst`）。
 - 安装后执行 `update-desktop-database`、`update-mime-database`；设置页"设为默认"执行 `xdg-mime default omnizip-desktop.desktop <types>`。
+- **当前实现**（2026-11-03）：设置页"文件关联"在 Linux 上直接设定默认程序，不经系统确认（规范本就允许）：开关读的是系统的实际状态（按 XDG MIME Applications 规范的顺序读用户与系统的 `mimeapps.list`，桌面专用的 `kde-mimeapps.list` 等优先），打开时把 `omnizip-desktop.desktop` 放到该格式各 MIME 类型默认程序列表的最前面（用户的 `~/.config/mimeapps.list`；用户的桌面专用文件为该类型指定了默认程序时也改它，否则它会盖过通用文件），原有程序保留在后面，关闭时只移除 OmniZip、原来的默认程序随即恢复；改后执行 `kbuildsycoca6` 让 KDE 立即生效。顶部一行为"全部用 OmniZip 打开"或"OmniZip 已是默认程序"。按设置键分组（`.tar.gz` 与 `.gz` 同一开关，同一组 MIME 类型）；系统没有对应类型的格式（`.br`）没有开关。实现见 `apps/desktop/src-tauri/src/defaults.rs`。Windows 与 macOS 上开关仍只是设置：Windows 由用户在"设置 → 默认应用"确认（按钮打开该页），macOS 提示在访达"显示简介 → 打开方式 → 全部更改"（系统设置中没有默认压缩软件一页，原按钮已去掉；`NSWorkspace.setDefaultApplication` 尚未实现）。
 - 图标：hicolor 多尺寸 + `-symbolic` 版本。
 
 ### 5.2 文件管理器右键菜单
@@ -134,7 +135,7 @@
 
 **当前实现**（Dolphin，2026-11-03）：同一次注册还把 KDE 服务菜单写到 `$XDG_DATA_HOME/kio/servicemenus/omnizip-*.desktop`（可执行权限，否则 Dolphin 不加载），内容由 `omnizip_shell::servicemenu` 按同一套设置生成（界面语言、子菜单 `X-KDE-Submenu` 或平铺、关掉的项、图标开关；`X-KDE-Priority=TopLevel` 放在顶层而不是"动作"子菜单里），设置页改动菜单设置时重写。服务菜单是静态的，Dolphin 只能按 MIME 类型与所选个数筛选，因此按 `applies` 的规则分成四个文件：一个压缩包（打开、挂载）、一个或多个压缩包（解压到此处、解压到同名文件夹、解压到…、测试、转换）、两个以上压缩包（分别解压）、任意文件与文件夹（添加为 ZIP / 7z、添加到压缩包…；只选压缩包时也显示，因为排除压缩包会让"压缩包加普通文件"的选择也看不到）；标题不含所选名称（"添加为 ZIP 压缩包"而非"添加到‘photos.zip’"，`menu-*-any` / `menu-extract-smart-folder`）；只用于本机文件（`X-KDE-Protocols=file`），程序被删除后菜单随之消失（`TryExec`）。选中某项启动 `omnizip-desktop --shell <verb> <所选路径…>`。"弹出"需要判断文件夹是否为挂载点，服务菜单做不到，Dolphin 中不提供（在应用侧栏或托盘卸载）。其他文件管理器尚未接入。
 
-**桌面项与图标**（2026-11-03）：Wayland 下任务栏按窗口的 app id 找同名桌面项取图标（OmniZip 的 app id 为程序名 `omnizip-desktop`），窗口自己设置的图标只对 X11 有效。软件包安装 `platform/linux/omnizip-desktop.desktop` 与图标；不经软件包运行时（开发构建、AppImage、压缩包），应用启动时把桌面项（`Exec` 指向自身，AppImage 取 `$APPIMAGE`）与 hicolor 图标装到 `$XDG_DATA_HOME`，内容变化才重写（`apps/desktop/src-tauri/src/desktop_entry.rs`）；开发构建的桌面项不出现在应用菜单（`NoDisplay`）、不关联文件类型。桌面项的 `MimeType` 与 Dolphin 服务菜单共用 `servicemenu::ARCHIVE_MIME_TYPES`，单元测试保证一致。
+**桌面项与图标**（2026-11-03）：Wayland 下任务栏按窗口的 app id 找同名桌面项取图标（OmniZip 的 app id 为程序名 `omnizip-desktop`），窗口自己设置的图标只对 X11 有效。软件包安装 `platform/linux/omnizip-desktop.desktop` 与图标；不经软件包运行时（开发构建、AppImage、压缩包），应用启动时把桌面项（`Exec` 指向自身，AppImage 取 `$APPIMAGE`）与 hicolor 图标装到 `$XDG_DATA_HOME`，内容变化才重写（`apps/desktop/src-tauri/src/desktop_entry.rs`）；开发构建的桌面项不出现在应用菜单（`NoDisplay`），但同样声明压缩包类型，才能在设置页设为默认程序。桌面项的 `MimeType` 与 Dolphin 服务菜单共用 `servicemenu::ARCHIVE_MIME_TYPES`，单元测试保证一致。
 
 ### 5.3 打包形态对集成的影响
 

@@ -300,6 +300,8 @@ kbd { font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); 
 .set-row:first-child { border-top: 0; }
 .set-row .lab { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .set-row .lab small { color: var(--fg-secondary); font-size: .8rem; }
+/* A state under a row's description (the default program of archives). */
+.set-row .lab .lab-status { display: flex; margin-top: 6px; }
 .set-row .ctl { display: flex; align-items: center; gap: 8px; flex: none; max-width: 60%; justify-content: flex-end; flex-wrap: wrap; }
 .set-row.col { flex-direction: column; align-items: stretch; }
 .set-row.col .ctl { max-width: none; justify-content: flex-start; }

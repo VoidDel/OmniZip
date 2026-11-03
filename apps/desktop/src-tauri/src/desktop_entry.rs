@@ -5,8 +5,8 @@
 //! reaches X11 only. A package installs `platform/linux/omnizip-desktop.desktop` and the icons
 //! for everyone. A program run from elsewhere (a development build, an AppImage, a tarball)
 //! installs them for the user at start-up, pointing at itself, and points them at it again when
-//! it moves. A development build's entry stays out of the application menu and claims no file
-//! types.
+//! it moves. A development build's entry stays out of the application menu; it claims the
+//! archive types all the same, so that it can be made their default (`defaults`).
 
 use std::{
     io,
@@ -68,7 +68,7 @@ fn entry(exe: &Path, dev: bool) -> String {
     for line in ENTRY.lines() {
         if line.starts_with("Exec=") {
             out.push_str(&format!("Exec={} %F\n", exec_arg(&exe.to_string_lossy())));
-        } else if !(dev && line.starts_with("MimeType=")) {
+        } else {
             out.push_str(line);
             out.push('\n');
         }
@@ -152,9 +152,9 @@ mod tests {
         assert!(e.contains("\nIcon=omnizip-desktop\n"));
         assert!(e.contains("\nMimeType=application/zip;"));
         assert!(!e.contains("NoDisplay"));
-        // A development build: no menu item, no file types.
+        // A development build: no menu item, but the file types (it can be their default).
         let dev = entry(Path::new("/src/target/debug/omnizip-desktop"), true);
-        assert!(dev.ends_with("NoDisplay=true\n") && !dev.contains("MimeType="));
+        assert!(dev.ends_with("NoDisplay=true\n") && dev.contains("\nMimeType=application/zip;"));
     }
 
     #[test]

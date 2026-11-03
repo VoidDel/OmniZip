@@ -3,6 +3,8 @@
 pub mod clipboard;
 pub mod commands;
 #[cfg(target_os = "linux")]
+pub mod defaults;
+#[cfg(target_os = "linux")]
 pub mod desktop_entry;
 pub mod draft;
 pub mod dragout;
@@ -352,6 +354,8 @@ pub fn run() {
             commands::window_ready,
             commands::window_focus,
             commands::open_default_apps,
+            commands::format_defaults,
+            commands::format_set_default,
             commands::open_homepage,
             commands::shell_status,
             commands::shell_request,

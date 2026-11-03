@@ -115,6 +115,10 @@ export const api = {
   /** Focuses the window and its page (needed for transparent material windows). */
   focusWindow: () => invoke<void>('window_focus'),
   openDefaultApps: () => invoke<void>('open_default_apps'),
+  /** Linux: which formats OmniZip opens by default, by format key; `null` where the system decides. */
+  formatDefaults: () => invoke<Record<string, boolean> | null>('format_defaults'),
+  /** Linux: makes OmniZip open `keys`, or gives them back to the previous default; the new state. */
+  formatSetDefault: (keys: string[], on: boolean) => invoke<Record<string, boolean>>('format_set_default', { keys, on }),
   openHomepage: () => invoke<void>('open_homepage'),
   shellStatus: () => invoke<ShellStatus>('shell_status'),
   mountProbe: () => invoke<MountProbe>('mount_probe'),

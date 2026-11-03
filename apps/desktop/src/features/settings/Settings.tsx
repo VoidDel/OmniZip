@@ -10,7 +10,7 @@ import { Segmented, Select as Choice, Switch } from '../../components/ui';
 import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
-import type { MountProbe, Settings as S, ShellStatus, ThemeSummary } from '../../lib/types';
+import type { Bootstrap, MountProbe, Settings as S, ShellStatus, ThemeSummary } from '../../lib/types';
 import { type SettingsTab, mountRoot, useApp } from '../../store/app';
 
 /** Sections of the settings page: listed in the sidebar, and above the page in narrow windows. */
@@ -304,6 +304,109 @@ function MountList() {
   );
 }
 
+/**
+ * File types (docs/07-shell-integration.md §3.4, §4.2, §5.1). On Linux the switches are the
+ * system's default programs, read from it and set from here; elsewhere they are settings, and
+ * the system has the user confirm the default: Windows in its settings, macOS in Finder.
+ */
+function FormatsPanel({ settings, set, boot }: { settings: S; set: (f: (s: S) => void) => void; boot: Bootstrap }) {
+  const { t } = useTranslation();
+  const platform = document.documentElement.dataset.platform;
+  // Linux: which formats OmniZip opens now (null elsewhere).
+  const [defaults, setDefaults] = useState<Record<string, boolean> | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void api.formatDefaults().then(setDefaults);
+  }, []);
+  const rows = boot.formats.filter((f) => f.tier <= 2);
+  // `.tar.gz` and `.gz` share a key: one switch for both.
+  const keyOf = (f: Bootstrap['formats'][number]) => f.extensions[0].replace(/^\./, '').split('.').pop()!;
+  const settable = defaults ? [...new Set(rows.filter((f) => f.engine).map(keyOf))].filter((k) => k in defaults) : [];
+  const apply = async (keys: string[], on: boolean) => {
+    setBusy(true);
+    try {
+      setDefaults(await api.formatSetDefault(keys, on));
+      set((s) => {
+        for (const k of keys) s.formats.associations[k] = on;
+      });
+    } catch (e) {
+      useApp.getState().reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const hint = platform === 'linux' ? 'defaultAppHintLinux' : platform === 'mac' ? 'defaultAppHintMac' : 'defaultAppHint';
+  const allDefault = defaults !== null && settable.every((k) => defaults[k]);
+  return (
+    <>
+      <div className="set-group">
+        <Row
+          label={t('settings.formats.defaultApp')}
+          hint={
+            <>
+              {t(`settings.formats.${hint}`)}
+              {allDefault && (
+                <span className="status-ok lab-status"><Icon name="checkCircle" />{t('settings.formats.isDefault')}</span>
+              )}
+            </>
+          }
+        >
+          {platform === 'win' && (
+            <button type="button" className="btn outline" onClick={() => void api.openDefaultApps()}>
+              <Icon name="external" />
+              <span>{t('settings.formats.openDefaultApps')}</span>
+            </button>
+          )}
+          {defaults && !allDefault && (
+            <button type="button" className="btn outline" disabled={busy} onClick={() => void apply(settable, true)}>
+              {t('settings.formats.setDefaultAll')}
+            </button>
+          )}
+          {defaults && settable.some((k) => defaults[k]) && (
+            <button type="button" className="btn outline" disabled={busy} onClick={() => void apply(settable.filter((k) => defaults[k]), false)}>
+              {t('settings.formats.restoreDefaults')}
+            </button>
+          )}
+        </Row>
+      </div>
+      <div className="set-group">
+        <table className="fmt-table">
+          <thead>
+            <tr>
+              <th>{t('settings.formats.format')}</th>
+              <th>{t('settings.formats.support')}</th>
+              <th>{t('settings.formats.associate')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((f) => {
+              const ext = keyOf(f);
+              const rw = f.capabilities.includes('WRITE');
+              return (
+                <tr key={f.format}>
+                  <td><b>{f.label}</b> <span className="mono hint">{f.extensions.slice(0, 3).join(' ')}</span></td>
+                  <td className={f.engine ? '' : 'dimc'}>
+                    {f.engine ? (rw ? t('settings.formats.readWrite') : t('settings.formats.readOnly')) : t('settings.formats.notInBuild')}
+                  </td>
+                  <td>
+                    {f.engine &&
+                      (defaults ? (
+                        // A format the system has no type for (`.br`) cannot be given to OmniZip.
+                        ext in defaults && <Switch label={f.label} disabled={busy} checked={defaults[ext]} onChange={(v) => void apply([ext], v)} />
+                      ) : (
+                        <Switch label={f.label} checked={settings.formats.associations[ext] ?? false} onChange={(v) => set((s) => (s.formats.associations[ext] = v))} />
+                      ))}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 export function SettingsView() {
   const { t, i18n } = useTranslation();
   const fmt = useFmt();
@@ -513,50 +616,7 @@ export function SettingsView() {
         );
       }
       case 'formats':
-        return (
-          <>
-            <div className="set-group">
-              <Row label={t('settings.formats.defaultApp')} hint={t('settings.formats.defaultAppHint')}>
-                <button type="button" className="btn outline" onClick={() => void api.openDefaultApps()}>
-                  <Icon name="external" />
-                  <span>{t('settings.formats.openDefaultApps')}</span>
-                </button>
-              </Row>
-            </div>
-            <div className="set-group">
-              <table className="fmt-table">
-                <thead>
-                  <tr>
-                    <th>{t('settings.formats.format')}</th>
-                    <th>{t('settings.formats.support')}</th>
-                    <th>{t('settings.formats.associate')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {boot.formats
-                    .filter((f) => f.tier <= 2)
-                    .map((f) => {
-                      const ext = f.extensions[0].replace(/^\./, '').split('.').pop()!;
-                      const rw = f.capabilities.includes('WRITE');
-                      return (
-                        <tr key={f.format}>
-                          <td><b>{f.label}</b> <span className="mono hint">{f.extensions.slice(0, 3).join(' ')}</span></td>
-                          <td className={f.engine ? '' : 'dimc'}>
-                            {f.engine ? (rw ? t('settings.formats.readWrite') : t('settings.formats.readOnly')) : t('settings.formats.notInBuild')}
-                          </td>
-                          <td>
-                            {f.engine && (
-                              <Switch label={f.label} checked={settings.formats.associations[ext] ?? false} onChange={(v) => set((s) => (s.formats.associations[ext] = v))} />
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        );
+        return <FormatsPanel settings={settings} set={set} boot={boot} />;
       case 'shell': {
         // macOS has no context menu yet (docs/07-shell-integration.md §4): nothing to set up.
         if (document.documentElement.dataset.platform === 'mac') {
