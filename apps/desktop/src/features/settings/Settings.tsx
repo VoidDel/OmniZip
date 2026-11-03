@@ -126,8 +126,8 @@ function itemTitle(t: TFunction, k: MenuItem) {
 function MenuPreview({ shell }: { shell: S['shell'] }) {
   const { t } = useTranslation();
   const [target, setTarget] = useState<keyof typeof MENU_TARGETS>('archive');
-  // Nautilus shows no icons in its menus.
-  const icons = shell.icons && document.documentElement.dataset.platform !== 'linux';
+  // Dolphin shows the icons; Nautilus shows none in its menus.
+  const icons = shell.icons;
   const cascade = shell.style === 'cascade';
   const items = MENU_ITEMS.filter((k) => MENU_TARGETS[target].includes(k) && itemOn(shell, k));
   // The submenu opens level with its entry.
@@ -204,7 +204,7 @@ function ShellStatusRow() {
     : status.stale
       ? t('settings.shell.stale')
       : linux
-        ? t('settings.shell.nautilus')
+        ? t('settings.shell.linux')
         : t(status.win11 === 'on' ? 'settings.shell.win11On' : status.win11 === 'off' ? 'settings.shell.win11Off' : 'settings.shell.win11');
   const registered = status.registered && !status.stale;
   const unregister = (
@@ -586,11 +586,9 @@ export function SettingsView() {
                   ))}
                 </div>
               </Row>
-              {document.documentElement.dataset.platform !== 'linux' && (
-                <Row label={t('settings.shell.icons')}>
-                  <Switch label={t('settings.shell.icons')} checked={settings.shell.icons} onChange={(v) => set((s) => (s.shell.icons = v))} />
-                </Row>
-              )}
+              <Row label={t('settings.shell.icons')}>
+                <Switch label={t('settings.shell.icons')} checked={settings.shell.icons} onChange={(v) => set((s) => (s.shell.icons = v))} />
+              </Row>
               <Row col label={t('settings.shell.preview')}>
                 <MenuPreview shell={settings.shell} />
               </Row>

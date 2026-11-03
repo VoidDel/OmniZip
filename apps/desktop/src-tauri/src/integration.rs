@@ -68,7 +68,7 @@ pub fn unregister() -> omnizip_core::Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn refresh_classic() {}
 
 #[cfg(not(windows))]
@@ -80,28 +80,112 @@ pub fn trust_cert() -> omnizip_core::Result<()> {
 pub use win::{refresh_classic, register, status, trust_cert, unregister};
 
 #[cfg(target_os = "linux")]
-pub use linux::{register, status, unregister};
+pub use linux::{refresh_classic, register, status, unregister};
 
-/// Linux (§5.2): an extension for Nautilus (GNOME Files) through nautilus-python, installed for
-/// the user. It asks `omnizip shell-menu` (the CLI next to the app) for the items of a selection
-/// and starts this app with `--shell <verb>`.
+/// Linux (§5.2), installed for the user:
+///
+/// * Nautilus (GNOME Files): an extension through nautilus-python. It asks `omnizip
+///   shell-menu` (the CLI next to the app) for the items of a selection and starts this app
+///   with `--shell <verb>`.
+/// * Dolphin (KDE): service menus generated from the menu settings
+///   (`omnizip_shell::servicemenu`), written again when those change. They start this app with
+///   `--shell <verb>` and the selection.
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::path::{Path, PathBuf};
+    use std::{
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
+    };
 
     use omnizip_core::{Error, ErrorCode};
+    use omnizip_shell::{menu::MenuConfig, servicemenu};
 
     use super::{ShellStatus, Win11Menu};
 
     const EXTENSION: &str = include_str!("../../../../platform/linux/nautilus/omnizip.py");
 
-    /// `$XDG_DATA_HOME/nautilus-python/extensions/omnizip.py`.
-    fn extension_file() -> Option<PathBuf> {
-        let data = std::env::var_os("XDG_DATA_HOME")
+    /// `$XDG_DATA_HOME`, `~/.local/share` by default.
+    fn data_dir() -> Option<PathBuf> {
+        std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share")))?;
-        Some(data.join("nautilus-python/extensions/omnizip.py"))
+            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share")))
+    }
+
+    /// `$XDG_DATA_HOME/nautilus-python/extensions/omnizip.py`.
+    fn extension_file() -> Option<PathBuf> {
+        Some(data_dir()?.join("nautilus-python/extensions/omnizip.py"))
+    }
+
+    /// `$XDG_DATA_HOME/kio/servicemenus`, where Dolphin looks for the user's service menus.
+    fn service_menu_dir() -> Option<PathBuf> {
+        Some(data_dir()?.join("kio/servicemenus"))
+    }
+
+    /// The service menus OmniZip installed, by name.
+    fn installed_service_menus() -> Vec<(String, String)> {
+        let Some(entries) = service_menu_dir().and_then(|d| std::fs::read_dir(d).ok()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(String, String)> = entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if !name.starts_with(servicemenu::FILE_PREFIX) || !name.ends_with(".desktop") {
+                    return None;
+                }
+                Some((name, std::fs::read_to_string(e.path()).ok()?))
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The service menus for the current settings, by name.
+    fn wanted_service_menus(app: &Path) -> Vec<(String, String)> {
+        servicemenu::service_menus(&MenuConfig::load(), app)
+            .into_iter()
+            .map(|(name, text)| (name.to_owned(), text))
+            .collect()
+    }
+
+    /// Replaces the installed service menus with those for the current settings. Dolphin runs
+    /// only service menus that may be executed.
+    fn write_service_menus(app: &Path) -> Result<(), Error> {
+        let dir = service_menu_dir().ok_or_else(|| Error::internal("no home folder"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| Error::io(e, &dir))?;
+        remove_service_menus()?;
+        for (name, text) in wanted_service_menus(app) {
+            let file = dir.join(name);
+            std::fs::write(&file, text).map_err(|e| Error::io(e, &file))?;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| Error::io(e, &file))?;
+        }
+        Ok(())
+    }
+
+    fn remove_service_menus() -> Result<(), Error> {
+        let Some(dir) = service_menu_dir() else {
+            return Ok(());
+        };
+        for (name, _) in installed_service_menus() {
+            let file = dir.join(name);
+            std::fs::remove_file(&file).map_err(|e| Error::io(e, &file))?;
+        }
+        Ok(())
+    }
+
+    /// Writes the service menus again after the menu settings changed (items, layout, icons,
+    /// language), if they are installed.
+    pub fn refresh_classic() {
+        if installed_service_menus().is_empty() {
+            return;
+        }
+        if let Ok(app) = std::env::current_exe()
+            && let Err(e) = write_service_menus(&app)
+        {
+            tracing::warn!("service menus: {e}");
+        }
     }
 
     /// The CLI next to this executable, which the extension asks for the menu items.
@@ -120,14 +204,18 @@ mod linux {
 
     pub fn status() -> ShellStatus {
         let cli = cli();
+        let app = std::env::current_exe().ok();
         let installed = extension_file().and_then(|f| std::fs::read_to_string(f).ok());
-        let stale = match (&installed, &cli, std::env::current_exe()) {
-            (Some(text), Some(cli), Ok(app)) => *text != extension(cli, &app),
+        let menus = installed_service_menus();
+        let stale = match (&installed, &cli, &app) {
+            (Some(text), Some(cli), Some(app)) => *text != extension(cli, app),
             _ => false,
-        };
+        } || app
+            .as_deref()
+            .is_some_and(|app| !menus.is_empty() && menus != wanted_service_menus(app));
         ShellStatus {
             supported: true,
-            registered: installed.is_some(),
+            registered: installed.is_some() || !menus.is_empty(),
             dll: cli.map(|p| p.to_string_lossy().into_owned()),
             stale,
             win11: Win11Menu::None,
@@ -143,10 +231,12 @@ mod linux {
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir).map_err(|e| Error::io(e, dir))?;
         }
-        std::fs::write(&file, extension(&cli, &app)).map_err(|e| Error::io(e, &file))
+        std::fs::write(&file, extension(&cli, &app)).map_err(|e| Error::io(e, &file))?;
+        write_service_menus(&app)
     }
 
     pub fn unregister() -> Result<(), Error> {
+        remove_service_menus()?;
         match extension_file() {
             Some(f) if f.exists() => std::fs::remove_file(&f).map_err(|e| Error::io(e, &f)),
             _ => Ok(()),

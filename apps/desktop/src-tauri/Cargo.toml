@@ -71,3 +71,4 @@ omnizip-mount-winfsp.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 omnizip-mount-fuse.workspace = true
+omnizip-shell-win = { path = "../../../crates/omnizip-shell-win" }

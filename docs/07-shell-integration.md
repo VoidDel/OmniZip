@@ -130,7 +130,9 @@
 
 所有菜单项最终调用 `omnizip-desktop --shell <verb> …`，由构建脚本从 `shell-menu.toml` 生成。
 
-**当前实现**（Nautilus）：`platform/linux/nautilus/omnizip.py` 是 nautilus-python 扩展，只做一层外壳：右键时把所选路径交给 `omnizip shell-menu`（命令行的隐藏子命令，读标准输入、输出 JSON），由它按 Windows 菜单同一套规则（`omnizip_shell::menu`：哪些选择显示哪些项、按设置的界面语言生成标题、子菜单或平铺、设置里关掉的项）给出菜单项，设置改动无需重新注册；选中某项时把选择写入临时列表文件，启动 `omnizip-desktop --shell <verb> --cwd <目录> --files-from <列表>`。设置页"添加到右键菜单"或 `omnizip-desktop --register-shell` 把它装到 `$XDG_DATA_HOME/nautilus-python/extensions/`（填入本机两个程序的路径），需要 python3-nautilus，`nautilus -q` 后生效。"解压到‘名称’"中的路径分隔符由代码按平台补上（Linux 为 `/`）。其他文件管理器尚未接入。
+**当前实现**（Nautilus）：`platform/linux/nautilus/omnizip.py` 是 nautilus-python 扩展，只做一层外壳：右键时把所选路径交给 `omnizip shell-menu`（命令行的隐藏子命令，读标准输入、输出 JSON），由它按 Windows 菜单同一套规则（`omnizip_shell::menu`：哪些选择显示哪些项、按设置的界面语言生成标题、子菜单或平铺、设置里关掉的项）给出菜单项，设置改动无需重新注册；选中某项时把选择写入临时列表文件，启动 `omnizip-desktop --shell <verb> --cwd <目录> --files-from <列表>`。设置页"添加到右键菜单"或 `omnizip-desktop --register-shell` 把它装到 `$XDG_DATA_HOME/nautilus-python/extensions/`（填入本机两个程序的路径），需要 python3-nautilus，`nautilus -q` 后生效。"解压到‘名称’"中的路径分隔符由代码按平台补上（Linux 为 `/`）。
+
+**当前实现**（Dolphin，2026-11-03）：同一次注册还把 KDE 服务菜单写到 `$XDG_DATA_HOME/kio/servicemenus/omnizip-*.desktop`（可执行权限，否则 Dolphin 不加载），内容由 `omnizip_shell::servicemenu` 按同一套设置生成（界面语言、子菜单 `X-KDE-Submenu` 或平铺、关掉的项、图标开关；`X-KDE-Priority=TopLevel` 放在顶层而不是"动作"子菜单里），设置页改动菜单设置时重写。服务菜单是静态的，Dolphin 只能按 MIME 类型与所选个数筛选，因此按 `applies` 的规则分成四个文件：一个压缩包（打开、挂载）、一个或多个压缩包（解压到此处、解压到同名文件夹、解压到…、测试、转换）、两个以上压缩包（分别解压）、任意文件与文件夹（添加为 ZIP / 7z、添加到压缩包…；只选压缩包时也显示，因为排除压缩包会让"压缩包加普通文件"的选择也看不到）；标题不含所选名称（"添加为 ZIP 压缩包"而非"添加到‘photos.zip’"，`menu-*-any` / `menu-extract-smart-folder`）；只用于本机文件（`X-KDE-Protocols=file`），程序被删除后菜单随之消失（`TryExec`）。选中某项启动 `omnizip-desktop --shell <verb> <所选路径…>`。"弹出"需要判断文件夹是否为挂载点，服务菜单做不到，Dolphin 中不提供（在应用侧栏或托盘卸载）。其他文件管理器尚未接入。
 
 ### 5.3 打包形态对集成的影响
 
@@ -163,7 +165,7 @@ omnizip-desktop [--open <archive>]
 ## 7. 设置页"右键菜单与集成"
 
 - 平台检测与状态：已注册 / 未注册 / 需要重启资源管理器 / 需要启用 Finder 扩展 / 缺少 nautilus-python。
-- 菜单样式（级联 / 平铺）、显示项勾选（按菜单顺序）、图标开关（Linux 不显示：Nautilus 菜单没有图标）、实时预览：按"一个压缩包 / 多个压缩包 / 文件和文件夹"分别显示实际会出现的项（与 `applies` 相同），图标与菜单里的一致。
+- 菜单样式（级联 / 平铺）、显示项勾选（按菜单顺序）、图标开关（Dolphin 显示图标；Nautilus 菜单没有图标）、实时预览：按"一个压缩包 / 多个压缩包 / 文件和文件夹"分别显示实际会出现的项（与 `applies` 相同），图标与菜单里的一致。
 - "设为默认压缩软件"按钮 + 系统设置引导。
 - CLI：加入 PATH、安装 Shell 补全（见 08）。
 - "修复集成"一键重新注册。

@@ -508,7 +508,7 @@
       "reregister": "重新注册",
       "working": "正在注册…",
       "missingCli": "应用旁边没有 omnizip 命令行程序（开发构建需先编译 omnizip-cli）",
-      "nautilus": "Nautilus（GNOME 文件）右键菜单，需要安装 python3-nautilus；注册后执行 nautilus -q 重启文件管理器生效。",
+      "linux": "Nautilus（GNOME 文件）与 Dolphin（KDE）的右键菜单。Nautilus 需要安装 python3-nautilus，注册后执行 nautilus -q 重启文件管理器生效；Dolphin 新开窗口即可看到。",
       "styleHint": "启用 Windows 11 菜单后，右键菜单（含“显示更多选项”）始终是“OmniZip”子菜单；平铺只用于未启用时的经典菜单。"
     },
     "security": {
