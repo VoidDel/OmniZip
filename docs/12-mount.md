@@ -67,6 +67,7 @@ pub trait VirtualFs: Send + Sync {
 - **当前实施（2026-10-29，Windows）**：`crates/omnizip-mountd`，纯 Rust（不含 WebView），与桌面应用同目录安装。应用首次挂载时启动它：独立进程，不继承应用的句柄、尽量脱离应用所在的作业对象，因此 OmniZip 退出后挂载仍在；挂载一直保留到用户卸载或注销，与 OmniZip 是否在运行无关（"退出时卸载"与"启动时恢复"两项设置已于 2026-10-30 移除：挂载由守护进程托管后，前者只对带主窗口的进程起作用，从右键菜单挂载的不受它管，规则不一致；后者只在重启或注销后才有用，且要等再打开 OmniZip）。应用是它的客户端（`apps/desktop/src-tauri/src/mounts.rs`），启动时连上已在运行的守护进程，侧栏照常列出挂载。
   - IPC：命名管道 `\\.\pipe\omnizip-mountd-<用户 SID>`，每行一个 JSON 请求与响应：`mount` / `unmount` / `unmountAll` / `list` / `watch`（保持连接，列表一变即推送）。管道只允许当前用户（与 SYSTEM）连接；客户端连上后先核对管道属主是本用户或 Administrators，其他用户抢先创建同名管道也截不到密码。
   - 启动时清理上次异常退出遗留的缓存；没有挂载 5 分钟后自动退出。
+  - **Linux（2026-11-03）**：同一守护进程与协议，IPC 改为 Unix 套接字 `$XDG_RUNTIME_DIR/omnizip/mountd.sock`（目录仅本用户可进入，套接字 0600），两端都用 `SO_PEERCRED` 核对对方是同一用户；同目录的 `mountd.lock`（`flock`）保证每用户只有一个守护进程。应用以新会话（`setsid`）启动它，终端关闭不影响。收到 `SIGTERM` / `SIGINT` / `SIGHUP`（会话结束）时卸载全部挂载再退出；启动时卸载上次异常退出遗留、已断开（`ENOTCONN`）的卷。没有提权守护进程。
   - **以管理员身份挂载**（挂载对话框中的按钮，仅 Windows）：经 UAC 启动 `omnizip-mountd --elevated --handoff <管道>`。应用先在本进程校验密码（错了不必再弹一次 UAC），再经一次性管道把挂载请求（含密码）交给它：管道只允许本用户，且应用核对连上的正是自己启动的进程。它成为提权守护进程（管道名加 `-admin`，带中完整性标签，未提权的应用可以列出与卸载），或把请求转交给已在运行的那个。提权守护进程只接受提权客户端的挂载请求、只挂到盘符：用户的任何程序都不能借它以管理员身份解析压缩包，或把卷放到只有管理员可写的位置。提权挂载经挂载管理器创建全局盘符（§6），不写入恢复列表（启动时不弹 UAC）。
 
 ## 5. 按格式的随机访问策略
@@ -225,4 +226,15 @@ Defender 实时防护：文件在挂载盘上第一次被打开时同步扫描�
 
 **已完成（2026-10-30）：读写性能（§5、§10）**。原样存储的数据就地读取；单一压缩流与固实块一遍解码；大条目边解码边读；可写层按 OverlayFS 的做法直通上层文件（大小与修改时间记在节点上、同一文件的句柄共用一个打开的上层文件）；读取直接写入驱动的缓冲区（`VirtualFs::read_into`）；基准 `omnizip-mount-winfsp/examples/mountbench.rs`。
 
-**未开始**：`omnizip-mount-fuse`、macOS 后端（FSKit 实测待 M0 完成）、CLI `mount` / `unmount` / `mounts`、tar.gz 检查点索引（超出磁盘缓存上限的单流压缩包）、固实块内的边解码边读（目前首次访问先解完整个压缩包）、可写层的 OverlayFS 式目录改名重定向（目前改名目录先把整棵树复制进临时层）与仅改时间时只复制元数据、临时层的持久化（守护进程异常退出后恢复改动）、卸载时提示占用进程（Restart Manager）。
+**已完成（2026-11-03）：Linux 挂载（FUSE3）**。
+
+| 部分 | 内容 |
+|---|---|
+| `crates/omnizip-mount-fuse` | 经 `fuser`（纯 Rust，不链接 libfuse，构建无需任何系统库）直接读写 `/dev/fuse`，由 fuse3 软件包的 `fusermount3` 完成挂载。文件系统类型 `fuse.omnizip`，挂载源显示卷标；`nosuid,nodev,noatime,default_permissions`，只读卷另加 `ro`（各种写操作报 `EROFS`）。挂载点：未指定时为 `$XDG_RUNTIME_DIR/omnizip/mnt/<卷标>`（重名依次加 ` (2)`，卸载后删除）；指定时须为空文件夹或不存在（新建的卸载后删除，原有的保持为空文件夹）。内核以 inode 号寻址：inode = 节点号 + 1，节点号在挂载期间不变（可写层复制或移动时保留节点号）。属性与名称缓存 1 秒（与 WinFsp 的 `FileInfoTimeout` 相同），文件数据 `FOPEN_KEEP_CACHE`，列目录带属性（`READDIRPLUS`，列举整棵树快一倍），单次读写最大 1 MiB，每卷最多 8 个请求线程；回调内的 panic 只让该请求返回 `EIO`。可写卷实现新建、写入、截断、改修改时间、删除、改名（`RENAME_NOREPLACE`）、`fsync`；改权限与属主接受后不生效（与 Windows 相同，`cp -p` 不报错）；档内文件为 0444，可写卷为属主加写权限，否则内核按权限拒绝写入。卸载用 `fusermount3 -u -z` 立即摘除；仍有文件打开时 3 秒后经 `/sys/fs/fuse/connections/<n>/abort` 断开连接，这些文件随后报错（同 Windows 强制卸载）。被外部卸载（`fusermount3 -u`、文件管理器）时会话结束，`is_alive` 报告，守护进程随即移除该挂载 |
+| 守护进程与应用 | 见 §4 Linux；`probe()` 报告本构建含后端；挂载对话框的"挂载为"为"自动 / 文件夹"（无盘符、无"以管理员身份挂载"），FUSE 缺失时提示安装 fuse3，Flatpak 内提示改用 .deb / .rpm / AppImage |
+| 右键菜单 | Nautilus 中 OmniZip 挂载的文件夹（`/proc/self/mountinfo` 中类型为 `fuse.omnizip`）显示"弹出" |
+| 测试 | `omnizip-mount-fuse/tests/fuse.rs` 经真实 FUSE 挂载 ZIP（默认位置、重名）与固实 7z（空文件夹），用标准文件 API 校验目录（含 `.` / `..`）、内容、随机回读、区分大小写、各种写操作报 `EROFS`；可写层的新建、追加、编辑器式"写临时文件再改名"、移动目录、复制、截断、改时间、删除与改动清单；有文件打开时卸载；外部卸载。`omnizip-mountd/tests/daemon.rs` 两平台共用，在 Linux 上走通守护进程的挂载、通知、写入并保存、丢弃与空闲退出。无 FUSE 时跳过 |
+
+Linux 实测（2026-11-03，原型适配层与上述实现设置相同；12 线程、ext4、单线程读取，数据集与 §10 相近：小文件组 12,692 个文件 / 242 MB，大文件组 4 个文件 / 847 MB）：挂载 + 列出小文件组 0.03 + 0.17 s；小文件组首次读完 ZIP / 固实 7z / tar.gz / tar 为 2.65 / 1.06 / 0.80 / 0.48 s（解压约 1.0 s）；大文件组首次读完 ZIP Deflate 743 MB/s、Store 1.47 GB/s；392 MB Deflate 文件首字节 1 ms；经守护进程的 4 KiB 随机读 10–26 µs；10 万条目 ZIP 挂载 0.08 s，列出 1 万项目录 10 ms。**已知问题（两平台共有，在 `omnizip-vfs`）**：ZIP 每次解码一个条目都从第 0 项扫描到该项（`extract_to` 按选择过滤），读完全部条目为平方级；且解码持有唯一的读取器锁，独立条目也只能串行解码。10 万个小文件的 ZIP 读完需约 71 s（解压 6.5 s），多线程读取不见加快。
+
+**未开始**：macOS 后端（FSKit 实测待 M0 完成）、CLI `mount` / `unmount` / `mounts`、tar.gz 检查点索引（超出磁盘缓存上限的单流压缩包）、固实块内的边解码边读（目前首次访问先解完整个压缩包）、可写层的 OverlayFS 式目录改名重定向（目前改名目录先把整棵树复制进临时层）与仅改时间时只复制元数据、临时层的持久化（守护进程异常退出后恢复改动）、卸载时提示占用进程（Restart Manager）。

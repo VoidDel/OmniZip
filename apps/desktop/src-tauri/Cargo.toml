@@ -68,3 +68,6 @@ windows = { version = "0.62", features = [
 ] }
 omnizip-shell-win = { path = "../../../crates/omnizip-shell-win" }
 omnizip-mount-winfsp.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+omnizip-mount-fuse.workspace = true

@@ -1,7 +1,7 @@
 //! Mounted archives (`docs/12-mount.md`). They live in `omnizip-mountd`, the user's mount
 //! daemon, which OmniZip starts on the first mount: they stay mounted until they are unmounted
 //! or the user signs out, whether OmniZip runs or not. "Mount as administrator" goes to the
-//! elevated daemon, started through the UAC prompt (§4).
+//! elevated daemon, started through the UAC prompt (§4), which exists on Windows only.
 //!
 //! This module is their client: it lists both daemons, routes unmounts to the right one, and
 //! turns their change notifications into `mounts://changed` events. A writable mount's changes,
@@ -107,7 +107,11 @@ pub fn probe() -> omnizip_vfs::Probe {
     {
         omnizip_vfs::probe(omnizip_mount_winfsp::BUILT)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        omnizip_vfs::probe(omnizip_mount_fuse::BUILT)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         omnizip_vfs::probe(false)
     }
@@ -128,11 +132,11 @@ pub fn free_letters() -> Vec<String> {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use omnizip_mountd::client as daemons;
 
 /// No mount daemon on this platform yet: none runs, and none can be started.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 mod daemons {
     use std::path::Path;
 

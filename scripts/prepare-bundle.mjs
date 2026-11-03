@@ -1,7 +1,8 @@
 // Builds the binaries that ship next to the desktop app and puts them where the Tauri bundler
 // expects them (docs/10-build-release.md §3):
 //   * omnizip(.exe)        — CLI, bundled as an "external binary" (sidecar);
-//   * omnizip-mountd.exe   — the mount daemon (docs/12-mount.md §4), a sidecar too;
+//   * omnizip-mountd(.exe) — the mount daemon (docs/12-mount.md §4), a sidecar too (Windows
+//                            and Linux);
 //   * omnizip_shell.dll    — Windows context-menu extension, bundled as a resource;
 //   * omnizip_menu.msix    — its context-menu package (Windows 11 top-level menu), a resource
 //                            the installer registers (platform/windows/msix/pack.ps1 -Sparse);
@@ -28,18 +29,23 @@ const triple =
   process.env.TAURI_ENV_TARGET_TRIPLE ||
   execFileSync('rustc', ['-vV'], { encoding: 'utf8' }).match(/^host: (.+)$/m)[1].trim();
 const windows = triple.includes('windows');
+const linux = triple.includes('linux');
 const exe = windows ? '.exe' : '';
+// Platforms with a mount backend ship its daemon.
+const mountd = windows || linux;
 
-const packages = ['omnizip-cli', ...(windows ? ['omnizip-shell-win', 'omnizip-mountd'] : [])];
+const packages = ['omnizip-cli', ...(windows ? ['omnizip-shell-win'] : []), ...(mountd ? ['omnizip-mountd'] : [])];
 const args = ['build', '--release', '--target', triple, ...packages.flatMap((p) => ['-p', p])];
 console.log(`prepare-bundle: cargo ${args.join(' ')}`);
 execFileSync('cargo', args, { cwd: root, stdio: 'inherit' });
 
 const built = path.join(root, 'target', triple, 'release');
 copyFileSync(path.join(built, `omnizip${exe}`), path.join(out, `omnizip-${triple}${exe}`));
+if (mountd) {
+  copyFileSync(path.join(built, `omnizip-mountd${exe}`), path.join(out, `omnizip-mountd-${triple}${exe}`));
+}
 if (windows) {
   copyFileSync(path.join(built, 'omnizip_shell.dll'), path.join(out, 'omnizip_shell.dll'));
-  copyFileSync(path.join(built, 'omnizip-mountd.exe'), path.join(out, `omnizip-mountd-${triple}.exe`));
   for (const [from, to] of [['icons/filetypes', 'filetypes'], ['icons/menu', 'menu-icons']]) {
     mkdirSync(path.join(out, to), { recursive: true });
     for (const f of readdirSync(path.join(root, from)).filter((f) => f.endsWith('.ico'))) {
@@ -76,7 +82,11 @@ if (windows) {
   // The package's logos next to the app as well (the external location of the package).
   cpSync(path.join(root, 'target/msix', `sparse-${arch}`, 'Assets'), path.join(out, 'Assets'), { recursive: true });
 }
-for (const f of [`omnizip-${triple}${exe}`, ...(windows ? [`omnizip-mountd-${triple}.exe`, 'omnizip_shell.dll', 'omnizip_menu.msix'] : [])]) {
+for (const f of [
+  `omnizip-${triple}${exe}`,
+  ...(mountd ? [`omnizip-mountd-${triple}${exe}`] : []),
+  ...(windows ? ['omnizip_shell.dll', 'omnizip_menu.msix'] : []),
+]) {
   if (!existsSync(path.join(out, f))) throw new Error(`missing ${f}`);
   console.log(`prepare-bundle: ${f}`);
 }

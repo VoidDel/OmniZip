@@ -1153,10 +1153,10 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
         setPassword((p) => p ?? '');
         if (err.key === 'wrong-password') setError(t('pwd.wrong'));
       } else if (err.key === 'already-exists') {
-        setError(t('mount.errInUse', { point: err.params.path ?? '' }));
+        setError(t(windows ? 'mount.errInUse' : 'mount.errInUseFolder', { point: err.params.path ?? '' }));
         void api.freeLetters().then(setLetters);
       } else if (err.key === 'missing-dependency') {
-        setError(t('mount.noBackend'));
+        setError(t(windows ? 'mount.noBackend' : 'mount.noBackendFuse'));
       } else {
         const detail = err.params.detail;
         setError(detail ? `${errorText(t, err)} (${detail})` : errorText(t, err));
@@ -1227,12 +1227,13 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
             value={as}
             label={t('mount.as')}
             options={[
-              ['letter', t('mount.letter')],
+              // Elsewhere than on Windows, a new folder named after the label.
+              ['letter', windows ? t('mount.letter') : t('mount.autoNone')],
               ['folder', t('mount.folder')],
             ]}
             onChange={setAs}
           />
-          {as === 'letter' && (
+          {as === 'letter' && windows && (
             <select className="sel" style={{ flex: 'none', minWidth: 0, width: 150 }} value={letter} aria-label={t('mount.letter')} onChange={(e) => setLetter(e.target.value)}>
               <option value="">{letters[0] ? t('mount.auto', { letter: letters[0] }) : t('mount.autoNone')}</option>
               {letters.map((l) => (
@@ -1287,7 +1288,7 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
       {probe && !ready ? (
         <div className="note warn">
           <Icon name="alert" />
-          <span>{probe.built ? t('mount.noBackend') : t('mount.unsupported')}</span>
+          <span>{probe.built ? t(windows ? 'mount.noBackend' : 'mount.noBackendFuse') : t('mount.unsupported')}</span>
         </div>
       ) : (
         <div className={`note${solid ? ' warn' : ''}`}>

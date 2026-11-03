@@ -261,8 +261,15 @@ function MountBackendRow() {
       : probe.kind === 'win-fsp'
         ? t('settings.mount.missing')
         : t('settings.mount.missingDriver', { name });
+  // What to do about FUSE: install fuse3, or leave the Flatpak sandbox.
+  const fuseHint =
+    probe.kind === 'fuse' && probe.health === 'not-installed'
+      ? t('settings.mount.installFuse')
+      : probe.kind === 'fuse' && probe.detail === 'flatpak'
+        ? t('settings.mount.flatpak')
+        : null;
   return (
-    <Row label={t('settings.mount.backend')} hint={probe.built ? (probe.detail ?? undefined) : t('settings.mount.pending')}>
+    <Row label={t('settings.mount.backend')} hint={probe.built ? (fuseHint ?? probe.detail ?? undefined) : t('settings.mount.pending')}>
       <span className={ready ? 'status-ok' : 'status-warn'} title={probe.detail ?? undefined}>
         <Icon name={ready ? 'checkCircle' : 'alert'} />
         {label}
