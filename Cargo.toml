@@ -13,6 +13,7 @@ members = [
   "crates/omnizip-vfs",
   "crates/omnizip-mount-winfsp",
   "crates/omnizip-mount-fuse",
+  "crates/omnizip-mount-nfs",
   "crates/omnizip-mountd",
   "crates/omnizip-shell-win",
   "apps/desktop/src-tauri",
@@ -29,6 +30,7 @@ default-members = [
   "crates/omnizip-vfs",
   "crates/omnizip-mount-winfsp",
   "crates/omnizip-mount-fuse",
+  "crates/omnizip-mount-nfs",
   "crates/omnizip-mountd",
 ]
 
@@ -52,6 +54,7 @@ omnizip-i18n = { path = "crates/omnizip-i18n" }
 omnizip-vfs = { path = "crates/omnizip-vfs" }
 omnizip-mount-winfsp = { path = "crates/omnizip-mount-winfsp" }
 omnizip-mount-fuse = { path = "crates/omnizip-mount-fuse" }
+omnizip-mount-nfs = { path = "crates/omnizip-mount-nfs" }
 omnizip-mountd = { path = "crates/omnizip-mountd" }
 
 bitflags = { version = "2", features = ["serde"] }

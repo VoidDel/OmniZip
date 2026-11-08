@@ -1,8 +1,8 @@
 //! Platform backends (`docs/12-mount.md` §3) and their installation probe.
 //!
-//! A backend turns a [`VirtualFs`] into a drive letter, a `/Volumes` entry or a FUSE mount.
-//! The backends themselves need a driver or SDK (WinFsp, libfuse3, FSKit) and live in
-//! separate crates; this module holds what the UI, the CLI and the daemon share: the trait,
+//! A backend turns a [`VirtualFs`] into a drive letter, an NFS volume or a FUSE mount. The
+//! backends themselves need a driver or system tool (WinFsp, `fusermount3`, `mount_nfs`) and
+//! live in separate crates; this module holds what the UI, the CLI and the daemon share: the trait,
 //! mount options, default mount points and [`probe`], which reports whether the system side
 //! is installed.
 
@@ -46,7 +46,9 @@ impl BackendKind {
         if cfg!(windows) {
             BackendKind::WinFsp
         } else if cfg!(target_os = "macos") {
-            BackendKind::FsKit
+            // FSKit needs a signed app extension; until then a loopback NFS server
+            // (docs/12-mount.md §12).
+            BackendKind::NfsLoopback
         } else {
             BackendKind::Fuse
         }
@@ -150,11 +152,16 @@ fn probe_system() -> (BackendHealth, Option<String>) {
 
 #[cfg(target_os = "macos")]
 fn probe_system() -> (BackendHealth, Option<String>) {
-    // FSKit availability is decided by the M0 test (docs/12-mount.md §12).
-    (
-        BackendHealth::Unsupported,
-        Some("FSKit backend pending M0 evaluation".into()),
-    )
+    // The system's NFS client, part of every macOS.
+    let tool = Path::new("/sbin/mount_nfs");
+    if tool.is_file() {
+        (BackendHealth::Ready, Some(tool.display().to_string()))
+    } else {
+        (
+            BackendHealth::NotInstalled,
+            Some(tool.display().to_string()),
+        )
+    }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -270,7 +277,8 @@ pub fn default_mount_point(label: &str) -> Option<PathBuf> {
         pick_drive_letter(|c| Path::new(&format!("{c}:\\")).exists())
             .map(|c| PathBuf::from(format!("{c}:")))
     } else if cfg!(target_os = "macos") {
-        Some(Path::new("/Volumes").join(name))
+        // `/Volumes` is the system's: volumes of the NFS backend go to the user's folder.
+        omnizip_core::appdirs::data_dir().map(|d| d.join("Volumes").join(name))
     } else {
         let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
         Some(runtime.join("omnizip").join("mnt").join(name))
