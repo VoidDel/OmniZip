@@ -4,8 +4,9 @@
 //! new archive replaces the old one only once it is complete. RAR cannot be written.
 
 use std::{
-    fs,
+    fs, io,
     path::{Component, Path, PathBuf},
+    time::Duration,
 };
 
 use omnizip_core::{
@@ -27,6 +28,54 @@ fn can_write(format: FormatId) -> bool {
     let caps = shared().capabilities(format);
     caps.contains(Capabilities::UPDATE)
         || caps.contains(Capabilities::WRITE) && !caps.contains(Capabilities::SINGLE_FILE)
+}
+
+/// Moves the layer of a writable mount whose changes are kept at unmount to `dest` (in
+/// `cache/mount-saving`, which no daemon clears) and returns where the changes are now.
+///
+/// On Windows the move fails while another program has a file of the layer open, typically an
+/// antivirus scanning what was just written: it is retried for a moment, then the layer is
+/// copied. Should neither work, the changes are saved from where they are; they are never
+/// dropped.
+pub fn keep_layer(layer: &Path, dest: &Path) -> PathBuf {
+    if dest.parent().is_some_and(|p| fs::create_dir_all(p).is_ok()) {
+        for wait in [0, 100, 300, 600, 1000] {
+            std::thread::sleep(Duration::from_millis(wait));
+            if fs::rename(layer, dest).is_ok() {
+                return dest.to_owned();
+            }
+        }
+        if copy_tree(layer, dest).is_ok() {
+            let _ = fs::remove_dir_all(layer);
+            return dest.to_owned();
+        }
+        let _ = fs::remove_dir_all(dest);
+    }
+    tracing::warn!(
+        layer = %layer.display(),
+        "could not move the kept changes; they are saved from the layer"
+    );
+    layer.to_owned()
+}
+
+/// Copies a layer: directories and files only, anything else fails the copy.
+fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
+    fs::create_dir(to)?;
+    for e in fs::read_dir(from)? {
+        let e = e?;
+        let (kind, target) = (e.file_type()?, to.join(e.file_name()));
+        if kind.is_dir() {
+            copy_tree(&e.path(), &target)?;
+        } else if kind.is_file() {
+            fs::copy(e.path(), &target)?;
+        } else {
+            return Err(io::Error::other(format!(
+                "not a file: {}",
+                e.path().display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// `base` joined with a `/`-separated volume path, which must stay inside it.
@@ -185,5 +234,31 @@ mod tests {
         }
         // A drive prefix is a path only on Windows; elsewhere it is a file name.
         assert_eq!(inside(base, "C:x").is_err(), cfg!(windows));
+    }
+
+    #[test]
+    fn kept_changes_are_never_dropped() {
+        let d = tempfile::tempdir().unwrap();
+        let layer = d.path().join("layer-1");
+        fs::create_dir_all(layer.join("docs/empty")).unwrap();
+        fs::write(layer.join("docs/a.txt"), "changed").unwrap();
+
+        // Moved into the saving directory.
+        let dest = d.path().join("mount-saving").join("1-1");
+        assert_eq!(keep_layer(&layer, &dest), dest);
+        assert_eq!(fs::read(dest.join("docs/a.txt")).unwrap(), b"changed");
+        assert!(!layer.exists());
+
+        // Copied when it cannot move (the same tree as the move gives).
+        let copy = d.path().join("copy");
+        copy_tree(&dest, &copy).unwrap();
+        assert_eq!(fs::read(copy.join("docs/a.txt")).unwrap(), b"changed");
+        assert!(copy.join("docs/empty").is_dir());
+
+        // Nowhere to put it: saved from where it is, and still there.
+        let file = d.path().join("not-a-dir");
+        fs::write(&file, "").unwrap();
+        assert_eq!(keep_layer(&dest, &file.join("1-2")), dest);
+        assert_eq!(fs::read(dest.join("docs/a.txt")).unwrap(), b"changed");
     }
 }
