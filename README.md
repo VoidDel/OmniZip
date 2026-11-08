@@ -68,7 +68,7 @@ pnpm build                       # 在 Mac 上：OmniZip.app 与 .dmg（未签�
 
 挂载守护进程在有挂载时一直运行，新构建（或更新安装后）的守护进程要等全部挂载卸载、旧进程退出（无挂载 5 分钟后）才会启用。
 
-模糊测试在 nightly 上运行：`cargo +nightly fuzz run zip`（目标见 `fuzz/fuzz_targets/`）；稳定版可运行其冒烟测试 `cargo test --manifest-path fuzz/Cargo.toml --lib`。
+模糊测试在 nightly 上运行：`cargo +nightly fuzz run -a zip`（目标见 `fuzz/fuzz_targets/`，`-a` 打开溢出检查）；稳定版可运行其冒烟测试 `cargo test --manifest-path fuzz/Cargo.toml --lib`，其中回放 `fuzz/regressions/<目标>/` 下夜间模糊测试找到过的崩溃样本。
 
 ### Win11 一级右键菜单与测试证书
 
@@ -98,8 +98,10 @@ OmniZip/
 │  ├─ omnizip-formats/        # 引擎注册表、格式转换
 │  ├─ omnizip-i18n/           # Fluent 本地化（CLI、Shell、错误码）
 │  ├─ omnizip-cli/            # bin: omnizip
-│  ├─ omnizip-vfs/            # 挂载核心：VirtualFs、ArchiveFs、内容缓存、后端探测
+│  ├─ omnizip-vfs/            # 挂载核心：VirtualFs、ArchiveFs、内容缓存、可写层、后端探测
 │  ├─ omnizip-mount-winfsp/   # Windows 挂载后端（运行时加载 WinFsp）
+│  ├─ omnizip-mount-fuse/     # Linux 挂载后端（FUSE3）
+│  ├─ omnizip-mountd/         # bin: omnizip-mountd，挂载守护进程与客户端
 │  └─ omnizip-shell-win/      # cdylib: omnizip_shell.dll（IExplorerCommand）
 ├─ apps/desktop/              # Tauri 2 应用（src-tauri + React 前端）
 ├─ icons/                     # 应用图标源图（app-icon.svg）；filetypes/ 压缩文件类型图标（scripts/gen-filetype-icons.mjs 生成）
@@ -108,7 +110,7 @@ OmniZip/
 ├─ themes/                    # 12 套内置主题 JSON 与 Schema
 ├─ scripts/                   # i18n-check、gen-builtin-themes、prepare-bundle
 ├─ fixtures/                  # 测试用 RAR 样本
-├─ fuzz/                      # cargo-fuzz 目标（独立 workspace）
+├─ fuzz/                      # cargo-fuzz 目标（独立 workspace）；regressions/ 为找到过的崩溃样本
 ├─ prototype/                 # 交互原型
 ├─ docs/                      # 设计文档
 └─ .github/workflows/         # ci、release、nightly-fuzz
