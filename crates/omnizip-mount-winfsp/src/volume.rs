@@ -38,9 +38,14 @@ use windows_sys::Win32::{
 
 use crate::ffi::{self, *};
 
-/// Everyone may open anything; on a read-only volume, writes fail with "write protected" as on
-/// a CD.
-const SDDL: &str = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)";
+/// Who may open the volume's files: the user who mounted it (all of their processes, elevated
+/// or not, run as that user SID), SYSTEM and Administrators. Not everyone: a drive registered
+/// with the Mount Manager is seen by every session on the machine, and another user must not
+/// read an encrypted archive's content or plant files in a writable layer (docs/12-mount.md
+/// §7). On a read-only volume, writes fail with "write protected" as on a CD.
+fn sddl(user: &str) -> String {
+    format!("O:{user}G:{user}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{user})")
+}
 
 /// Longest name handed to WinFsp, in UTF-16 units.
 const MAX_NAME: usize = 255;
@@ -230,7 +235,8 @@ fn prepare_dir(p: &Path) -> Result<Option<PathBuf>, MountError> {
 }
 
 fn security_descriptor() -> Result<Vec<u8>, MountError> {
-    let sddl = wide(OsStr::new(SDDL));
+    let user = user_sid().map_err(|e| MountError::System(e.to_string()))?;
+    let sddl = wide(OsStr::new(&sddl(&user)));
     let mut sd: PSECURITY_DESCRIPTOR = ptr::null_mut();
     let mut size = 0u32;
     // SAFETY: valid SDDL; the result is freed with LocalFree below.
@@ -245,6 +251,56 @@ fn security_descriptor() -> Result<Vec<u8>, MountError> {
     // SAFETY: allocated by the conversion above.
     unsafe { LocalFree(sd) };
     Ok(bytes)
+}
+
+/// The SID of the user this process runs as, as a string (`S-1-5-21-…`).
+fn user_sid() -> io::Result<String> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::{
+            Authorization::ConvertSidToStringSidW, GetTokenInformation, TOKEN_QUERY, TOKEN_USER,
+            TokenUser,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    let mut token = ptr::null_mut();
+    // SAFETY: the pseudo-handle of this process; the token is closed below.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // TOKEN_USER holds a pointer: a u64 buffer keeps it aligned.
+    let mut buf = [0u64; 64];
+    let mut len = 0u32;
+    // SAFETY: a buffer of the size given.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenUser,
+            buf.as_mut_ptr().cast(),
+            size_of_val(&buf) as u32,
+            &mut len,
+        )
+    };
+    let err = io::Error::last_os_error();
+    // SAFETY: opened above.
+    unsafe { CloseHandle(token) };
+    if ok == 0 {
+        return Err(err);
+    }
+    // SAFETY: GetTokenInformation filled a TOKEN_USER, whose SID points into `buf`.
+    let sid = unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    let mut p: *mut u16 = ptr::null_mut();
+    // SAFETY: a valid SID; the string is freed with LocalFree below.
+    if unsafe { ConvertSidToStringSidW(sid, &mut p) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a NUL-terminated string allocated by the call above, freed once copied.
+    let s = unsafe {
+        let s = String::from_utf16_lossy(wstr(p));
+        LocalFree(p.cast());
+        s
+    };
+    Ok(s)
 }
 
 fn wide(s: &OsStr) -> Vec<u16> {
@@ -1256,5 +1312,16 @@ mod tests {
     #[test]
     fn free_letters_exclude_the_system_drive() {
         assert!(!free_drive_letters().contains(&'C'));
+    }
+
+    #[test]
+    fn only_the_user_system_and_administrators_get_in() {
+        let user = user_sid().unwrap();
+        assert!(user.starts_with("S-1-"), "{user}");
+        let s = sddl(&user);
+        assert!(!s.contains(";WD)"), "not everyone: {s}");
+        assert!(s.contains(&format!("(A;;FA;;;{user})")));
+        // Windows accepts it.
+        assert!(!security_descriptor().unwrap().is_empty());
     }
 }
