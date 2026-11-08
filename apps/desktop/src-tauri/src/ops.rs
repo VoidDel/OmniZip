@@ -3,7 +3,7 @@
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use omnizip_core::{
@@ -455,7 +455,60 @@ pub fn convert_work(
     Ok((title, work))
 }
 
-/// In-place update of an open archive; on success the archive is reopened and the UI is told
+/// Rewrites the archive file at `path` through `write`, one rewrite of a file at a time
+/// ([`crate::state::ArchiveLocks`]): each starts from what the previous one wrote. Meanwhile the
+/// browser's readers of the file are closed (Windows cannot replace an open file); they are
+/// opened again before the next rewrite may start, so that it finds and closes the new ones.
+/// Returns `write`'s result and the ids of the archives reopened, for `archive://changed`.
+fn rewrite_locked<T>(
+    app: &AppHandle,
+    path: &Path,
+    ctx: &JobCtx,
+    write: impl FnOnce() -> Result<T, Error>,
+) -> (Result<T, Error>, Vec<u32>) {
+    let state = app.state::<AppState>();
+    let run = state.archive_locks.run(path, ctx, || {
+        let opened: Vec<Arc<OpenedArchive>> = state
+            .archives
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .filter(|a| !a.draft && crate::mounts::same_path(&a.path, path))
+            .cloned()
+            .collect();
+        for a in &opened {
+            *a.reader.lock().unwrap_or_else(|e| e.into_inner()) = Box::new(Closed(a.info.clone()));
+        }
+        let result = write();
+        let mut reopened = Vec::new();
+        for a in &opened {
+            if let Ok(fresh) = reopen(a) {
+                let mut archives = state.archives.lock().unwrap_or_else(|e| e.into_inner());
+                // Still open in the browser (closing it meanwhile is not undone).
+                if let Some(slot) = archives.get_mut(&a.id) {
+                    *slot = Arc::new(fresh);
+                    reopened.push(a.id);
+                }
+            }
+        }
+        (result, reopened)
+    });
+    run.unwrap_or_else(|e| (Err(e), Vec::new()))
+}
+
+/// Tells the UI about the archives [`rewrite_locked`] reopened, once the job has ended.
+fn announce_reopened() -> (Arc<Mutex<Vec<u32>>>, Finish) {
+    let ids = Arc::new(Mutex::new(Vec::new()));
+    let reopened = ids.clone();
+    let finish: Finish = Box::new(move |app: &AppHandle, _| {
+        for id in std::mem::take(&mut *reopened.lock().unwrap_or_else(|e| e.into_inner())) {
+            let _ = app.emit("archive://changed", id);
+        }
+    });
+    (ids, finish)
+}
+
+/// In-place update of an open archive; afterwards the archive is reopened and the UI is told
 /// through `archive://changed`.
 pub fn update_work(
     app: &AppHandle,
@@ -467,35 +520,20 @@ pub fn update_work(
     let password = a.password.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let settings = app.state::<AppState>().settings();
     let (threads, skip_compressed) = (settings.advanced.threads, settings.formats.skip_compressed);
+    let (reopened, finish) = announce_reopened();
+    let app = app.clone();
     let work: Work = Box::new(move |ctx: &JobCtx| {
-        // Release our own read handle so the file can be replaced (Windows locks open files).
-        {
-            let mut r = a.reader.lock().unwrap_or_else(|e| e.into_inner());
-            *r = Box::new(Closed(a.info.clone()));
-        }
         let wo = WriteOptions {
             password: password.clone(),
             threads,
             skip_compressed,
             ..Default::default()
         };
-        let report = shared().update(&path, &ops, &wo, ctx)?;
+        let (result, ids) =
+            rewrite_locked(&app, &path, ctx, || shared().update(&path, &ops, &wo, ctx));
+        *reopened.lock().unwrap_or_else(|e| e.into_inner()) = ids;
+        let report = result?;
         Ok((report, Some(path.to_string_lossy().into_owned())))
-    });
-    let finish: Finish = Box::new(|app: &AppHandle, info| {
-        if let Some(id) = info.archive_id {
-            let state = app.state::<AppState>();
-            if let Some(old) = state.archive(id)
-                && let Ok(fresh) = reopen(&old)
-            {
-                state
-                    .archives
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(id, Arc::new(fresh));
-                let _ = app.emit("archive://changed", id);
-            }
-        }
     });
     (title, work, finish)
 }
@@ -508,38 +546,16 @@ pub fn save_mount_work(
     saved: omnizip_mountd::SavedLayer,
 ) -> (String, Work, Finish) {
     let title = file_name(&saved.archive);
-    let state = app.state::<AppState>();
-    let threads = state.settings().advanced.threads;
-    let opened: Vec<Arc<OpenedArchive>> = state
-        .archives
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .values()
-        .filter(|a| !a.draft && crate::mounts::same_path(&a.path, &saved.archive))
-        .cloned()
-        .collect();
-    let ids: Vec<u32> = opened.iter().map(|a| a.id).collect();
+    let threads = app.state::<AppState>().settings().advanced.threads;
+    let (reopened, finish) = announce_reopened();
+    let app = app.clone();
     let work: Work = Box::new(move |ctx: &JobCtx| {
-        for a in &opened {
-            *a.reader.lock().unwrap_or_else(|e| e.into_inner()) = Box::new(Closed(a.info.clone()));
-        }
-        let report = omnizip_mountd::save::save(&saved, threads, ctx)?;
+        let (result, ids) = rewrite_locked(&app, &saved.archive, ctx, || {
+            omnizip_mountd::save::save(&saved, threads, ctx)
+        });
+        *reopened.lock().unwrap_or_else(|e| e.into_inner()) = ids;
+        let report = result?;
         Ok((report, Some(saved.archive.to_string_lossy().into_owned())))
-    });
-    let finish: Finish = Box::new(move |app: &AppHandle, _| {
-        let state = app.state::<AppState>();
-        for id in ids {
-            if let Some(old) = state.archive(id)
-                && let Ok(fresh) = reopen(&old)
-            {
-                state
-                    .archives
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(id, Arc::new(fresh));
-                let _ = app.emit("archive://changed", id);
-            }
-        }
     });
     (title, work, finish)
 }
