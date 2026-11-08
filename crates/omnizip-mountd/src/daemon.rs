@@ -10,11 +10,15 @@
 //! letters: a program of the user must not get archives parsed with administrator rights, nor
 //! volumes placed where only administrators may write.
 //!
-//! A writable mount puts a layer over the archive (`cache/mount*/layer-<id>`). At unmount its
+//! A writable mount puts a layer over the archive (`cache/mount/layer-<id>`). At unmount its
 //! changes are discarded, or kept for the app to save: the layer then moves to
 //! `cache/mount-saving`, which no daemon clears, and the app removes it once saved (when it
 //! cannot move, it is copied, or as a last resort saved from where it is). A layer left behind
 //! by a daemon that did not exit cleanly is cleared with the other cache files.
+//!
+//! The elevated daemon keeps its spool files and layers in a folder of its own that only
+//! administrators may change (`admin_dir`), never in the user's profile, and hands kept changes
+//! over to the user for the app to save.
 //!
 //! On Linux there is only the user's daemon, on a Unix socket (`sock`), mounting through FUSE.
 //! It unmounts everything when it is asked to stop (`SIGTERM` as the session ends), and at start
@@ -142,6 +146,25 @@ fn reply(conn: &Conn, r: &Response) -> bool {
     (&*conn).write_all(line.as_bytes()).is_ok()
 }
 
+/// The elevated daemon's spool files and layers: in its own folder, which only administrators
+/// may change (`admin_dir`), never in the user's profile. Without one, spooling stays in
+/// memory and writable mounts are refused.
+fn admin_cache_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        match pipe::user_sid().and_then(crate::admin_dir::user_dir) {
+            Ok(d) => Some(d.join("cache")),
+            Err(e) => {
+                tracing::warn!("omnizip-mountd: no folder of its own: {e}");
+                None
+            }
+        }
+    }
+    // Only Windows has an elevated daemon.
+    #[cfg(not(windows))]
+    None
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -163,7 +186,7 @@ struct Hosted {
 impl Hosted {
     /// Unmounts, waiting for file system calls in progress, and keeps the changes of a writable
     /// mount for saving (`keep`, when there are any) or discards them.
-    fn finish(self, keep: bool) -> Option<SavedLayer> {
+    fn finish(self, keep: bool, host: &Host) -> Option<SavedLayer> {
         let Hosted {
             id,
             archive,
@@ -180,10 +203,18 @@ impl Hosted {
         let changes = overlay.changes();
         drop(overlay);
         if keep && !changes.is_empty() {
-            let layer = match saving_dir() {
+            let layer = match host.saving_dir() {
                 Some(d) => keep_layer(&layer, &d.join(format!("{}-{id}", std::process::id()))),
                 None => layer,
             };
+            // The elevated daemon's folder is closed to the user, whose app saves the changes.
+            #[cfg(windows)]
+            if host.level == Level::Admin
+                && let Err(e) =
+                    pipe::user_sid().and_then(|u| crate::admin_dir::hand_over(&layer, u))
+            {
+                tracing::warn!(layer = %layer.display(), "cannot hand the changes over: {e}");
+            }
             return Some(SavedLayer {
                 archive,
                 layer,
@@ -231,12 +262,10 @@ pub struct Host {
 
 impl Host {
     pub fn new(level: Level) -> Arc<Self> {
-        let cache_dir = appdirs::cache_dir().map(|d| {
-            d.join(match level {
-                Level::User => "mount",
-                Level::Admin => "mount-admin",
-            })
-        });
+        let cache_dir = match level {
+            Level::User => appdirs::cache_dir().map(|d| d.join("mount")),
+            Level::Admin => admin_cache_dir(),
+        };
         // Spool files of a daemon that did not exit cleanly.
         if let Some(d) = &cache_dir
             && let Ok(entries) = std::fs::read_dir(d)
@@ -298,11 +327,17 @@ impl Host {
         let (fs, label) = open_volume(&spec, self.cache_dir.clone())?;
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let overlay = if spec.writable {
-            let layer = self
-                .cache_dir
-                .clone()
-                .unwrap_or_else(std::env::temp_dir)
-                .join(format!("layer-{id}"));
+            let base = match (&self.cache_dir, self.level) {
+                (Some(d), _) => d.clone(),
+                (None, Level::User) => std::env::temp_dir(),
+                // Never in a folder the user may change (`admin_dir`).
+                (None, Level::Admin) => {
+                    return Err(Error::new(ErrorCode::PermissionDenied)
+                        .with("path", spec.archive.display())
+                        .detail("the elevated daemon has no folder of its own for changes"));
+                }
+            };
+            let layer = base.join(format!("layer-{id}"));
             let _ = std::fs::remove_dir_all(&layer);
             let o = OverlayFs::new(fs.clone(), layer.clone()).map_err(|e| {
                 Error::new(ErrorCode::Io)
@@ -378,9 +413,21 @@ impl Host {
         if gone.is_empty() {
             return Vec::new();
         }
-        let saved = gone.into_iter().filter_map(|h| h.finish(keep)).collect();
+        let saved = gone
+            .into_iter()
+            .filter_map(|h| h.finish(keep, self))
+            .collect();
         self.changed();
         saved
+    }
+
+    /// Where kept layers wait to be saved: `cache/mount-saving` for the user's daemon, next to
+    /// its cache in its own folder for the elevated one. No daemon clears either at start-up.
+    fn saving_dir(&self) -> Option<PathBuf> {
+        match self.level {
+            Level::User => saving_dir(),
+            Level::Admin => Some(self.cache_dir.as_deref()?.parent()?.join("saving")),
+        }
     }
 
     fn list(&self) -> Vec<MountStatus> {
