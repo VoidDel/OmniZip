@@ -1,6 +1,6 @@
 //! Runs the daemon binary under its own pipe or socket names and directories, and mounts
-//! through it as OmniZip does. Skipped when the mount driver (WinFsp, FUSE) is missing (CI
-//! runners).
+//! through it as OmniZip does. Skipped when the mount driver (WinFsp, FUSE) is missing, unless
+//! `OMNIZIP_REQUIRE_MOUNT=1` (CI).
 #![cfg(any(windows, target_os = "linux"))]
 
 use std::{
@@ -18,6 +18,11 @@ use omnizip_mountd::{
 #[test]
 fn mounts_through_the_daemon_until_it_is_idle() {
     if !omnizip_vfs::probe(true).can_mount() {
+        // CI installs the driver and sets this: the test must not pass by skipping there.
+        assert!(
+            std::env::var("OMNIZIP_REQUIRE_MOUNT").as_deref() != Ok("1"),
+            "the mount driver is not installed (OMNIZIP_REQUIRE_MOUNT=1)"
+        );
         eprintln!("the mount driver is not installed: skipped");
         return;
     }

@@ -1,5 +1,6 @@
 //! Mounts real archives through WinFsp and reads them with the ordinary file APIs, as Explorer
-//! and other programs do. Skipped when WinFsp is not installed (CI runners).
+//! and other programs do. Skipped when WinFsp is not installed, unless
+//! `OMNIZIP_REQUIRE_MOUNT=1` (CI).
 #![cfg(windows)]
 
 use std::{
@@ -16,6 +17,11 @@ use omnizip_vfs::{ArchiveFs, FsOptions, Mount, MountBackend, MountError, MountOp
 fn ready() -> bool {
     let ok = omnizip_vfs::probe(true).can_mount();
     if !ok {
+        // CI installs the driver and sets this: the tests must not pass by skipping there.
+        assert!(
+            std::env::var("OMNIZIP_REQUIRE_MOUNT").as_deref() != Ok("1"),
+            "WinFsp is not installed (OMNIZIP_REQUIRE_MOUNT=1)"
+        );
         eprintln!("WinFsp is not installed: skipped");
     }
     ok

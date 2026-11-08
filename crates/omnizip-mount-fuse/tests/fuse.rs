@@ -1,5 +1,6 @@
 //! Mounts real archives through FUSE and reads them with the ordinary file APIs, as file
-//! managers and other programs do. Skipped when FUSE is not available (CI runners, containers).
+//! managers and other programs do. Skipped when FUSE is not available (containers), unless
+//! `OMNIZIP_REQUIRE_MOUNT=1` (CI).
 #![cfg(target_os = "linux")]
 
 use std::{
@@ -17,6 +18,11 @@ use omnizip_vfs::{ArchiveFs, FsOptions, MountBackend, MountError, MountOptions, 
 fn ready() -> bool {
     let ok = omnizip_vfs::probe(true).can_mount();
     if !ok {
+        // CI installs the driver and sets this: the tests must not pass by skipping there.
+        assert!(
+            std::env::var("OMNIZIP_REQUIRE_MOUNT").as_deref() != Ok("1"),
+            "FUSE is not available (OMNIZIP_REQUIRE_MOUNT=1)"
+        );
         eprintln!("FUSE is not available: skipped");
     }
     ok
