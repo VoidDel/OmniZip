@@ -148,8 +148,9 @@ impl TreeIndex {
             };
             if let Some(p) = nodes[id].parent {
                 let p = &mut nodes[p as usize];
-                p.size += size;
-                p.packed += packed;
+                // Declared by the archive: saturate rather than wrap (or panic).
+                p.size = p.size.saturating_add(size);
+                p.packed = p.packed.saturating_add(packed);
                 p.files += files;
                 p.encrypted |= enc;
                 if p.entry.is_none() {
@@ -415,6 +416,18 @@ mod tests {
         assert_eq!(t.root().packed, 50 + 25 + 5);
         assert_eq!(t.path(t.find("src/lib/a.rs").unwrap()), "src/lib/a.rs");
         assert_eq!(t.find("nope"), None);
+    }
+
+    /// Declared sizes are the archive's word: totals saturate instead of wrapping to a small
+    /// number (which would pass the bomb check) or panicking.
+    #[test]
+    fn huge_declared_sizes_saturate() {
+        let entries = [file(0, "a/x", u64::MAX), file(1, "a/y", 1 << 40)];
+        let t = TreeIndex::build(&entries);
+        assert_eq!(t.root().size, u64::MAX);
+        let (bytes, files) = crate::archive::selection_totals(&entries, &crate::Selection::all());
+        assert_eq!((bytes, files), (u64::MAX, 2));
+        assert!(crate::SecurityPolicy::default().is_high_ratio(bytes, 1 << 20));
     }
 
     #[test]
