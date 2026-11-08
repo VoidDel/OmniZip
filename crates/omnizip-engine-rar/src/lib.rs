@@ -5,6 +5,8 @@
 //! compression code (`docs/01-overview.md` §8). The C++ library will move into the sandboxed
 //! worker process in v2 (`docs/09-security.md` §2).
 
+mod kdf;
+
 use std::path::{Path, PathBuf};
 
 use omnizip_core::{
@@ -89,6 +91,14 @@ impl RarReader {
     }
 
     fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Self> {
+        if let Some(n) = kdf::max_lg2(path).filter(|&n| n > kdf::MAX_LG2) {
+            return Err(Error::new(ErrorCode::UnsupportedMethod)
+                .with("path", path.display())
+                .detail(format!(
+                    "trying a password takes 2^{n} key derivation rounds (at most 2^{} accepted)",
+                    kdf::MAX_LG2
+                )));
+        }
         let display_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -551,6 +561,26 @@ mod tests {
         // The password from opening is reused.
         extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap();
         assert!(fs::read_dir(d.path()).unwrap().count() >= 1);
+    }
+
+    /// Headers encrypted with 2^24 key derivation rounds (the nightly fuzzer's timeouts, #3 #7
+    /// #13): refused at once, not derived.
+    #[test]
+    fn costly_key_derivation_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("kdf.rar");
+        let mut bytes = b"Rar!\x1a\x07\x01\x00".to_vec();
+        // CRC, size 33, archive encryption header: version 0, check value present, 2^24.
+        bytes.extend([0, 0, 0, 0, 33, 4, 0, 0, 1, 24]);
+        bytes.extend([0; 16 + 12]);
+        fs::write(&p, bytes).unwrap();
+        let started = std::time::Instant::now();
+        let err = RarEngine
+            .open(&p, FormatId::Rar, &OpenOptions::default(), &pw("password"))
+            .err()
+            .unwrap();
+        assert_eq!(err.code(), ErrorCode::UnsupportedMethod);
+        assert!(started.elapsed().as_secs() < 1);
     }
 
     #[test]
