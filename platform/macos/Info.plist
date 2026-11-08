@@ -11,9 +11,21 @@
   UTImportedTypeDeclarations: the formats without a type declared by every supported macOS
   (12 and later), under the identifiers other archive tools use. Where the system declares the
   type too, its declaration wins.
+
+  CFBundleLocalizations: the languages of OmniZip's interface (locales/). Without them macOS takes
+  the app for English-only and draws its own parts of the app in English whatever the system
+  language: open and save panels, the application menu, text-field context menus. The same list is
+  in apps/desktop/src-tauri/Info.plist, which development builds embed.
 -->
 <plist version="1.0">
 <dict>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+		<string>ja</string>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

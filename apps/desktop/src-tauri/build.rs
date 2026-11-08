@@ -2,6 +2,8 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     embed_test_cert();
+    // Development builds on macOS embed it (the interface languages): rebuild when it changes.
+    println!("cargo:rerun-if-changed=Info.plist");
     tauri_build::build()
 }
 
