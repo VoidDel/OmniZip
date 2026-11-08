@@ -1,6 +1,7 @@
 //! Job bodies shared by UI commands and file-manager launches.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -230,6 +231,46 @@ fn selection_for(a: &OpenedArchive, nodes: &[u32], relative_to: Option<u32>) -> 
     Selection::of(ids, &rel)
 }
 
+/// What "delete source" moves to the trash after compressing `paths` into `sources`: each path
+/// whose whole content went into the archive, or else, inside a folder, the parts that did.
+/// Files the filters left out, the new archive when it was written inside a source folder, and
+/// anything that appeared meanwhile stay, with the folders holding them. Links are listed, not
+/// followed (the sources were collected without following them).
+fn packed_paths(paths: &[PathBuf], sources: &[omnizip_core::Source]) -> Vec<PathBuf> {
+    fn all_packed(path: &Path, packed: &HashSet<&Path>) -> bool {
+        if !packed.contains(path) {
+            return false;
+        }
+        match std::fs::symlink_metadata(path) {
+            Ok(m) if m.is_dir() => std::fs::read_dir(path).is_ok_and(|entries| {
+                entries
+                    .into_iter()
+                    .all(|e| e.is_ok_and(|e| all_packed(&e.path(), packed)))
+            }),
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+    fn visit(path: &Path, packed: &HashSet<&Path>, out: &mut Vec<PathBuf>) {
+        if !packed.contains(path) {
+            return;
+        }
+        if all_packed(path, packed) {
+            out.push(path.to_owned());
+        } else if let Ok(entries) = std::fs::read_dir(path) {
+            for e in entries.flatten() {
+                visit(&e.path(), packed, out);
+            }
+        }
+    }
+    let packed: HashSet<&Path> = sources.iter().map(|s| s.fs_path.as_path()).collect();
+    let mut out = Vec::new();
+    for p in paths {
+        visit(p, &packed, &mut out);
+    }
+    out
+}
+
 /// Builds the compression work.
 /// `sources` are the items of a new archive being saved; otherwise `req.paths` are collected.
 pub fn compress_work(
@@ -285,8 +326,11 @@ pub fn compress_work(
             }
             report.warnings.extend(t.warnings);
         }
-        if req.delete_source {
-            for p in &req.paths {
+        // As for extract and convert, a source with warnings (files that could not be read)
+        // is kept.
+        if req.delete_source && report.warnings.is_empty() {
+            let paths: Vec<PathBuf> = req.paths.iter().map(PathBuf::from).collect();
+            for p in packed_paths(&paths, &sources) {
                 let _ = trash::delete(p);
             }
         }
@@ -881,6 +925,42 @@ mod tests {
 
     fn node(t: &TreeIndex, path: &str) -> omnizip_core::NodeId {
         t.find(path).unwrap()
+    }
+
+    #[test]
+    fn delete_source_keeps_what_was_left_out() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("src");
+        std::fs::create_dir_all(src.join("docs/tmp")).unwrap();
+        std::fs::create_dir_all(src.join("all/in")).unwrap();
+        std::fs::write(src.join("docs/a.txt"), "a").unwrap();
+        std::fs::write(src.join("docs/tmp/x.log"), "x").unwrap();
+        std::fs::write(src.join("all/in/b.txt"), "b").unwrap();
+        std::fs::write(src.join("top.txt"), "t").unwrap();
+        // The new archive, written inside the folder being compressed.
+        std::fs::write(src.join("src.zip"), "").unwrap();
+        let ctx = JobCtx::default();
+        let opts = CollectOptions {
+            exclude: vec!["**/*.log".into()],
+            never: vec![src.join("src.zip")],
+            ..Default::default()
+        };
+        let sources = source::collect(std::slice::from_ref(&src), &opts, &ctx).unwrap();
+        let mut gone = packed_paths(std::slice::from_ref(&src), &sources);
+        gone.sort();
+        // Neither the excluded log (nor its folder), nor the new archive, nor `src` itself.
+        assert_eq!(
+            gone,
+            [src.join("all"), src.join("docs/a.txt"), src.join("top.txt")]
+        );
+
+        // Everything went in: the folder goes as one.
+        let all = [src.join("all")];
+        let sources = source::collect(&all, &CollectOptions::default(), &ctx).unwrap();
+        assert_eq!(packed_paths(&all, &sources), all);
+        // A file that appeared after the sources were collected stays.
+        std::fs::write(src.join("all/new.txt"), "n").unwrap();
+        assert_eq!(packed_paths(&all, &sources), [src.join("all/in")]);
     }
 
     #[test]
