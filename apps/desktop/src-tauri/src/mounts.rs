@@ -111,7 +111,11 @@ pub fn probe() -> omnizip_vfs::Probe {
     {
         omnizip_vfs::probe(omnizip_mount_fuse::BUILT)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        omnizip_vfs::probe(omnizip_mount_nfs::BUILT)
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         omnizip_vfs::probe(false)
     }
@@ -132,11 +136,11 @@ pub fn free_letters() -> Vec<String> {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use omnizip_mountd::client as daemons;
 
 /// No mount daemon on this platform yet: none runs, and none can be started.
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 mod daemons {
     use std::path::Path;
 

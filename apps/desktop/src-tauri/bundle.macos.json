@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && node ../../scripts/prepare-bundle.mjs"
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/omnizip-mountd"
+    ]
+  }
+}
