@@ -152,6 +152,14 @@ impl MountBackend for WinFsp {
         {
             mount.restore_dir = prepare_dir(p)?;
         }
+        // A letter in use is refused. As administrator the fallback below would otherwise
+        // define a drive of this logon session over a global one (another mount, a share),
+        // hiding it instead of failing.
+        if let Some(p) = &requested
+            && letter_in_use(p)
+        {
+            return Err(MountError::InUse(p.clone()));
+        }
         // A drive goes through the Mount Manager (`\\.\X:`) when WinFsp may register it there:
         // as administrator, or with WinFsp's MountUseMountmgrFromFSD setting. Only then does
         // Windows know the volume's DOS path, which `GetFinalPathNameByHandle` reports and
@@ -216,6 +224,17 @@ fn normalize_point(p: &Path) -> PathBuf {
 fn is_drive(p: &Path) -> bool {
     let b = p.as_os_str().as_encoded_bytes();
     b.len() == 2 && b[1] == b':'
+}
+
+/// Whether `p` is a drive letter that this session sees in use (a disk, a share, a mount).
+fn letter_in_use(p: &Path) -> bool {
+    let b = p.as_os_str().as_encoded_bytes();
+    if !is_drive(p) || !b[0].is_ascii_alphabetic() {
+        return false;
+    }
+    // SAFETY: no arguments.
+    let used = unsafe { GetLogicalDrives() };
+    used & (1 << (b[0].to_ascii_uppercase() - b'A')) != 0
 }
 
 /// WinFsp creates a directory mount point itself and needs the directory not to exist: an
@@ -1312,6 +1331,16 @@ mod tests {
     #[test]
     fn free_letters_exclude_the_system_drive() {
         assert!(!free_drive_letters().contains(&'C'));
+    }
+
+    #[test]
+    fn letters_in_use() {
+        assert!(letter_in_use(Path::new("C:")));
+        if let Some(&free) = free_drive_letters().first() {
+            assert!(!letter_in_use(Path::new(&format!("{free}:"))));
+        }
+        assert!(!letter_in_use(Path::new("1:")));
+        assert!(!letter_in_use(Path::new("C:\\mnt")));
     }
 
     #[test]
