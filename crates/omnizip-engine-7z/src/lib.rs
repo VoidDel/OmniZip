@@ -207,7 +207,7 @@ impl SevenZReader {
             block_packed.push(
                 pack_sizes
                     .get(start..end)
-                    .map_or(0, |s| s.iter().sum::<u64>()),
+                    .map_or(0, |s| s.iter().copied().fold(0, u64::saturating_add)),
             );
             block_methods.push(names.join(" "));
             block_encrypted.push(enc);

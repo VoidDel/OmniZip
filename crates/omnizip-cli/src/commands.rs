@@ -519,8 +519,11 @@ fn list(a: ListArgs, ui: &Ui) -> Result<i32> {
     let dir_count = (1..dirs.len() as u32)
         .filter(|&i| dirs.node(i).is_some_and(|n| n.is_dir))
         .count();
-    let total: u64 = owned.iter().map(|e| e.size).sum();
-    let packed: u64 = owned.iter().filter_map(|e| e.packed_size).sum();
+    let total = owned.iter().map(|e| e.size).fold(0, u64::saturating_add);
+    let packed = owned
+        .iter()
+        .filter_map(|e| e.packed_size)
+        .fold(0, u64::saturating_add);
     let packed = if packed == 0 {
         reader.info().archive_size
     } else {
@@ -687,7 +690,11 @@ fn info(a: InfoArgs, ui: &Ui) -> Result<i32> {
     let i = reader.info();
     let files = reader.entries().iter().filter(|e| !e.is_dir()).count();
     let dirs = reader.entries().iter().filter(|e| e.is_dir()).count();
-    let size: u64 = reader.entries().iter().map(|e| e.size).sum();
+    let size = reader
+        .entries()
+        .iter()
+        .map(|e| e.size)
+        .fold(0, u64::saturating_add);
     if ui.json {
         ui.emit(&json!({"info": i, "files": files, "dirs": dirs, "size": size}));
         return Ok(0);

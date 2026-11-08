@@ -177,12 +177,13 @@ pub fn extraction_root(
     }
 }
 
-/// Declared bytes and files of the selection.
+/// Declared bytes and files of the selection. Declared sizes come from the archive, so the sum
+/// saturates: a wrapped total would pass the bomb check.
 pub fn selection_totals(entries: &[Entry], selection: &Selection) -> (u64, u64) {
     entries
         .iter()
         .filter(|e| selection.contains(e.id) && !e.is_dir())
-        .fold((0, 0), |(b, f), e| (b + e.size, f + 1))
+        .fold((0, 0), |(b, f), e| (b.saturating_add(e.size), f + 1))
 }
 
 /// Extracts entries to disk: smart folder, bomb pre-check, then the engine pass.
