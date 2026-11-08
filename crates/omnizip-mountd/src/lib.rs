@@ -8,6 +8,8 @@ pub mod proto;
 pub mod save;
 pub mod volume;
 
+#[cfg(windows)]
+mod admin_dir;
 #[cfg(any(windows, target_os = "linux"))]
 pub mod client;
 #[cfg(any(windows, target_os = "linux"))]
