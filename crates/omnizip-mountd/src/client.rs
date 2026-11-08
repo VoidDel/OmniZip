@@ -39,7 +39,13 @@ pub fn exchange(conn: &Conn, req: &Request) -> Result<Response, Error> {
 /// A connection to a daemon. Fails with `NotFound` when that daemon does not run.
 fn open(level: Level) -> Result<Conn, Error> {
     #[cfg(windows)]
-    let conn = pipe::connect(&pipe::daemon_pipe(level)?)?;
+    let conn = {
+        let server = match level {
+            Level::User => pipe::Server::User,
+            Level::Admin => pipe::Server::Elevated,
+        };
+        pipe::connect(&pipe::daemon_pipe(level)?, server)?
+    };
     #[cfg(target_os = "linux")]
     let conn = sock::connect(&sock::daemon_socket(level)?)?;
     Ok(conn)
@@ -103,12 +109,8 @@ pub fn mount_elevated(_exe: &Path, _spec: &MountSpec) -> Result<MountStatus, Err
 /// started process can be on the other end of.
 #[cfg(windows)]
 pub fn mount_elevated(exe: &Path, spec: &MountSpec) -> Result<MountStatus, Error> {
-    let name = format!(
-        r"\\.\pipe\omnizip-mountd-handoff-{}-{:016x}",
-        std::process::id(),
-        random()
-    );
-    let server = pipe::server(&name, true, Access::User)?;
+    let name = pipe::handoff_pipe(std::process::id(), random());
+    let server = pipe::server(&name, true, Access::Handoff)?;
     let process = pipe::launch_elevated(exe, &format!("--elevated --handoff \"{name}\"")).map_err(
         |e| match e.kind() {
             io::ErrorKind::Interrupted => Error::cancelled(),
@@ -137,7 +139,7 @@ pub fn mount_elevated(exe: &Path, spec: &MountSpec) -> Result<MountStatus, Error
                 let alive = unsafe { WaitForSingleObject(process.as_raw_handle() as HANDLE, 0) }
                     == WAIT_TIMEOUT;
                 if !alive || Instant::now() > deadline {
-                    let _unblock = pipe::connect(&name);
+                    let _unblock = pipe::connect(&name, pipe::Server::Process(std::process::id()));
                     let _ = rx.recv();
                     return Err(Error::internal("omnizip-mountd --elevated did not connect"));
                 }

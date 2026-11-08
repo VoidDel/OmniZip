@@ -110,7 +110,12 @@ fn handoff(handoff_pipe: &str) -> i32 {
     if !pipe::elevated() {
         return 1;
     }
-    let Ok(conn) = pipe::connect(handoff_pipe) else {
+    // Only the app that started this process may hand the mount over: the pipe's name says
+    // which process that is, and the user's other programs cannot add instances to it.
+    let Some(app) = pipe::handoff_server(handoff_pipe) else {
+        return 1;
+    };
+    let Ok(conn) = pipe::connect(handoff_pipe, pipe::Server::Process(app)) else {
         return 1;
     };
     let mut line = String::new();
