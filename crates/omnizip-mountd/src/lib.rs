@@ -10,13 +10,13 @@ pub mod volume;
 
 #[cfg(windows)]
 mod admin_dir;
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod client;
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod daemon;
 #[cfg(windows)]
 pub mod pipe;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod sock;
 
 pub use proto::{Level, MountSpec, MountStatus, Request, Response, SavedLayer};

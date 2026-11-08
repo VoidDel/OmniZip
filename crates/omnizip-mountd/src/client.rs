@@ -18,7 +18,7 @@ use windows_sys::Win32::{
 #[cfg(windows)]
 use crate::pipe::{self, Access, Conn};
 use crate::proto::{Level, MountSpec, MountStatus, Request, Response};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::sock::{self, Conn};
 
 /// Sends one request on a connection and reads its response; the daemon's error as `Err`.
@@ -46,7 +46,7 @@ fn open(level: Level) -> Result<Conn, Error> {
         };
         pipe::connect(&pipe::daemon_pipe(level)?, server)?
     };
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let conn = sock::connect(&sock::daemon_socket(level)?)?;
     Ok(conn)
 }
@@ -69,7 +69,7 @@ pub fn ensure_user_daemon(exe: &Path) -> Result<(), Error> {
     }
     #[cfg(windows)]
     pipe::spawn_detached(exe).map_err(|e| Error::io(e, exe))?;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     sock::spawn_detached(exe).map_err(|e| Error::io(e, exe))?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {

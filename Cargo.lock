@@ -3204,6 +3204,7 @@ dependencies = [
  "omnizip-formats",
  "omnizip-i18n",
  "omnizip-mount-fuse",
+ "omnizip-mount-nfs",
  "omnizip-mount-winfsp",
  "omnizip-vfs",
  "serde",

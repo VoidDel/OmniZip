@@ -20,7 +20,8 @@
 //! administrators may change (`admin_dir`), never in the user's profile, and hands kept changes
 //! over to the user for the app to save.
 //!
-//! On Linux there is only the user's daemon, on a Unix socket (`sock`), mounting through FUSE.
+//! On Linux and macOS there is only the user's daemon, on a Unix socket (`sock`), mounting
+//! through FUSE or the loopback NFS server.
 //! It unmounts everything when it is asked to stop (`SIGTERM` as the session ends), and at start
 //! clears volumes a daemon that did not exit cleanly left behind.
 //!
@@ -41,7 +42,7 @@ use std::{
 use omnizip_core::{Error, ErrorCode, MountClass, appdirs};
 use omnizip_vfs::{ArchiveFs, Mount, MountBackend, MountError, MountOptions, OverlayFs, VirtualFs};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::sock::{self, Conn};
 #[cfg(windows)]
 use crate::{
@@ -74,14 +75,14 @@ pub fn run(args: &[String]) -> i32 {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn user_daemon() -> i32 {
     let Ok(path) = sock::daemon_socket(Level::User) else {
         return 1;
     };
     match sock::listen(&path) {
         Ok(Some(listener)) => {
-            omnizip_mount_fuse::clear_stale();
+            clear_stale();
             serve(Host::new(Level::User), listener)
         }
         // Another daemon serves this user already.
@@ -149,6 +150,18 @@ fn reply(conn: &Conn, r: &Response) -> bool {
     let mut line = serde_json::to_string(r).unwrap_or_default();
     line.push('\n');
     (&*conn).write_all(line.as_bytes()).is_ok()
+}
+
+/// Volumes a daemon of this user that did not exit cleanly left mounted (their file systems
+/// lived in it): unmounted, their folders removed.
+#[cfg(target_os = "linux")]
+fn clear_stale() {
+    omnizip_mount_fuse::clear_stale();
+}
+
+#[cfg(target_os = "macos")]
+fn clear_stale() {
+    omnizip_mount_nfs::clear_stale();
 }
 
 /// The elevated daemon's spool files and layers: in its own folder, which only administrators
@@ -367,6 +380,8 @@ impl Host {
         let mounted = omnizip_mount_winfsp::WinFsp.mount(volume, &opts);
         #[cfg(target_os = "linux")]
         let mounted = omnizip_mount_fuse::Fuse.mount(volume, &opts);
+        #[cfg(target_os = "macos")]
+        let mounted = omnizip_mount_nfs::Nfs.mount(volume, &opts);
         let mount = match mounted {
             Ok(m) => m,
             Err(e) => {
@@ -476,7 +491,7 @@ fn watch_idle(host: &Arc<Host>) {
 
 /// Unmounts everything and exits when the daemon is asked to stop. The signals are blocked
 /// before any other thread starts, so that only this one receives them.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn stop_on_signals(host: &Arc<Host>) {
     // SAFETY: an initialized set, changed and read by these calls only.
     let set = unsafe {
@@ -501,7 +516,7 @@ fn stop_on_signals(host: &Arc<Host>) {
 }
 
 /// Accepts clients forever, one thread each; exits the process when idle or stopped.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn serve(host: Arc<Host>, listener: sock::Listener) -> ! {
     stop_on_signals(&host);
     watch_idle(&host);
@@ -563,7 +578,7 @@ fn connection(host: &Arc<Host>, conn: Conn) {
             Ok(req @ Request::Mount { .. }) => {
                 #[cfg(windows)]
                 let may = host.level == Level::User || pipe::client_elevated(&conn);
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 let may = host.level == Level::User;
                 host.handle(req, may)
             }
@@ -579,7 +594,13 @@ fn connection(host: &Arc<Host>, conn: Conn) {
 fn mount_error(e: MountError) -> Error {
     match e {
         MountError::NotInstalled(what) => {
-            let backend = if cfg!(windows) { "WinFsp" } else { "FUSE" };
+            let backend = if cfg!(windows) {
+                "WinFsp"
+            } else if cfg!(target_os = "macos") {
+                "NFS"
+            } else {
+                "FUSE"
+            };
             Error::new(ErrorCode::MissingDependency).detail(format!("{backend}: {what}"))
         }
         MountError::InUse(p) => Error::new(ErrorCode::AlreadyExists).with("path", p.display()),
