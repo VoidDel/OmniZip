@@ -12,8 +12,9 @@
 //!
 //! A writable mount puts a layer over the archive (`cache/mount*/layer-<id>`). At unmount its
 //! changes are discarded, or kept for the app to save: the layer then moves to
-//! `cache/mount-saving`, which no daemon clears, and the app removes it once saved. A layer left
-//! behind by a daemon that did not exit cleanly is cleared with the other cache files.
+//! `cache/mount-saving`, which no daemon clears, and the app removes it once saved (when it
+//! cannot move, it is copied, or as a last resort saved from where it is). A layer left behind
+//! by a daemon that did not exit cleanly is cleared with the other cache files.
 //!
 //! On Linux there is only the user's daemon, on a Unix socket (`sock`), mounting through FUSE.
 //! It unmounts everything when it is asked to stop (`SIGTERM` as the session ends), and at start
@@ -45,7 +46,7 @@ use crate::{
 };
 use crate::{
     proto::{Level, MountSpec, MountStatus, Request, Response, SavedLayer, saving_dir},
-    save::can_save,
+    save::{can_save, keep_layer},
     volume::open_volume,
 };
 
@@ -179,24 +180,17 @@ impl Hosted {
         let changes = overlay.changes();
         drop(overlay);
         if keep && !changes.is_empty() {
-            let kept = saving_dir().and_then(|d| {
-                let dest = d.join(format!("{}-{id}", std::process::id()));
-                std::fs::create_dir_all(&d).ok()?;
-                std::fs::rename(&layer, &dest).ok()?;
-                Some(dest)
+            let layer = match saving_dir() {
+                Some(d) => keep_layer(&layer, &d.join(format!("{}-{id}", std::process::id()))),
+                None => layer,
+            };
+            return Some(SavedLayer {
+                archive,
+                layer,
+                changes,
+                password,
+                encoding,
             });
-            match kept {
-                Some(layer) => {
-                    return Some(SavedLayer {
-                        archive,
-                        layer,
-                        changes,
-                        password,
-                        encoding,
-                    });
-                }
-                None => tracing::warn!(layer = %layer.display(), "could not keep the changes"),
-            }
         }
         let _ = std::fs::remove_dir_all(&layer);
         None
