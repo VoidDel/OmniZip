@@ -2,9 +2,30 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     embed_test_cert();
-    // Development builds on macOS embed it (the interface languages): rebuild when it changes.
-    println!("cargo:rerun-if-changed=Info.plist");
+    mark_localizations();
     tauri_build::build()
+}
+
+/// The interface languages (locales/), as macOS names them.
+const LANGUAGES: [&str; 4] = ["en", "zh-Hans", "zh-Hant", "ja"];
+
+/// Development builds on macOS run without an app bundle: the system takes the folder of the
+/// executable for one and its `<language>.lproj` folders for the languages the app has. Without
+/// any, it draws its own parts of the app (the open and save panels, the application menu) in
+/// English whatever the system language. So empty ones go next to the executable. Bundles
+/// declare the languages in their Info.plist instead (platform/macos/Info.plist).
+fn mark_localizations() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        return;
+    }
+    // OUT_DIR is <target>/[<triple>/]<profile>/build/<package>-<hash>/out.
+    let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let Some(bin_dir) = out.ancestors().nth(3) else {
+        return;
+    };
+    for lang in LANGUAGES {
+        let _ = fs::create_dir_all(bin_dir.join(format!("{lang}.lproj")));
+    }
 }
 
 /// Builds in the project's test certificate (platform/windows/msix/omnizip-test.cer, or
