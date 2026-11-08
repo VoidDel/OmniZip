@@ -10,7 +10,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
     time::SystemTime,
 };
@@ -206,6 +206,13 @@ impl FsSink {
             top_dir: None,
             top_mixed: false,
         })
+    }
+
+    /// The user already accepted a high ratio (the check on declared sizes before extracting):
+    /// do not ask again while writing.
+    pub fn high_ratio_confirmed(mut self) -> Self {
+        self.bomb_confirmed = true;
+        self
     }
 
     /// Overrides the file-system rules (tests).
@@ -493,7 +500,14 @@ impl FsSink {
                 if self.buf.is_empty() {
                     self.buf = vec![0; 1 << 20];
                 }
-                let n = copy_with_buffer(reader, &mut file, &mut self.buf, ctx, limit)?;
+                let mut guard = RatioGuard {
+                    file: &mut file,
+                    unpacked: self.total_written,
+                    archive_size: self.archive_size,
+                    confirmed: &mut self.bomb_confirmed,
+                    ctx,
+                };
+                let n = copy_with_buffer(reader, &mut guard, &mut self.buf, ctx, limit)?;
                 finish_file(&file, entry, &self.opts);
                 Ok(n)
             }
@@ -945,6 +959,42 @@ impl ExtractSink for CaptureSink {
     }
 }
 
+/// The file being written, behind the streaming bomb check. An entry of unknown size (a lone
+/// .gz / .zst / .xz) has no declared size to cap it, and a check once the file is whole comes
+/// after the disk is full; so the check runs before each write, with the bytes of earlier files.
+struct RatioGuard<'a> {
+    file: &'a mut File,
+    /// Bytes this extraction has written, earlier files included.
+    unpacked: u64,
+    archive_size: u64,
+    confirmed: &'a mut bool,
+    ctx: &'a JobCtx,
+}
+
+impl Write for RatioGuard<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let after = self.unpacked.saturating_add(buf.len() as u64);
+        let policy = &self.ctx.policy;
+        if !*self.confirmed && policy.is_high_ratio(after, self.archive_size) {
+            let ratio = after / self.archive_size.max(1);
+            if !self.ctx.interaction.confirm(&Confirm::HighRatio {
+                ratio,
+                unpacked: after,
+            }) {
+                return Err(policy.bomb_error(after, self.archive_size).into());
+            }
+            *self.confirmed = true;
+        }
+        let n = self.file.write(buf)?;
+        self.unpacked += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
 /// Reads `reader` to its end, discarding the data (engines call this for skipped entries).
 pub fn drain(reader: &mut dyn Read) -> io::Result<u64> {
     io::copy(reader, &mut io::sink())
@@ -1271,6 +1321,67 @@ mod tests {
         let mut r = data.as_slice();
         let err = s.entry(&e, EntryData::Stream(&mut r), &ctx).unwrap_err();
         assert_eq!(err.code(), ErrorCode::CompressionBomb);
+    }
+
+    /// Counts the prompts and answers them.
+    struct Answer {
+        yes: bool,
+        asked: std::sync::atomic::AtomicU32,
+    }
+
+    impl crate::job::Interaction for Answer {
+        fn confirm(&self, _c: &Confirm) -> bool {
+            self.asked
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.yes
+        }
+    }
+
+    /// An entry of unknown size is stopped at the threshold, before the rest is decoded and
+    /// written, not once it is whole.
+    #[test]
+    fn streaming_ratio_check_stops_unknown_sizes_early() {
+        let run = |yes: bool| {
+            let d = tempfile::tempdir().unwrap();
+            let answer = Arc::new(Answer {
+                yes,
+                asked: 0.into(),
+            });
+            let ctx = JobCtx::new(Arc::new(NullProgress), answer.clone()).with_policy(
+                crate::SecurityPolicy {
+                    ratio_min_bytes: 4 << 20,
+                    max_ratio: 10,
+                    ..Default::default()
+                },
+            );
+            let mut s = FsSink::new(
+                d.path().to_owned(),
+                ExtractOptions::default(),
+                Selection::all(),
+                None,
+                1000,
+            )
+            .unwrap();
+            let mut e = file_entry(0, "bomb.bin", b"");
+            e.size_known = false;
+            let mut r = io::repeat(0).take(256 << 20);
+            let result = s.entry(&e, EntryData::Stream(&mut r), &ctx);
+            let decoded = (256 << 20) - r.limit();
+            let asked = answer.asked.load(std::sync::atomic::Ordering::Relaxed);
+            (result, decoded, asked, d.path().join("bomb.bin").exists())
+        };
+
+        let (result, decoded, asked, exists) = run(false);
+        assert_eq!(result.unwrap_err().code(), ErrorCode::CompressionBomb);
+        assert!(decoded <= 6 << 20, "stopped after {decoded} bytes");
+        assert_eq!(asked, 1);
+        assert!(!exists, "the partial file is removed");
+
+        let (result, decoded, asked, exists) = run(true);
+        result.unwrap();
+        assert_eq!(decoded, 256 << 20);
+        assert_eq!(asked, 1, "asked once");
+        assert!(exists);
     }
 
     #[test]

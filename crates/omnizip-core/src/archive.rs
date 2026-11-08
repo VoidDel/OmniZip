@@ -197,7 +197,8 @@ pub fn extract(
     let (bytes, files) = selection_totals(reader.entries(), &selection);
     let archive_size = reader.info().archive_size;
     ctx.policy.check_entries(reader.entries().len() as u64)?;
-    if ctx.policy.is_high_ratio(bytes, archive_size) {
+    let confirmed = ctx.policy.is_high_ratio(bytes, archive_size);
+    if confirmed {
         let ratio = bytes / archive_size.max(1);
         if !ctx.interaction.confirm(&Confirm::HighRatio {
             ratio,
@@ -214,6 +215,9 @@ pub fn extract(
         Some(&archive_path),
         archive_size,
     )?;
+    if confirmed {
+        sink = sink.high_ratio_confirmed();
+    }
     ctx.begin(Phase::Extracting, bytes, files);
     reader.extract_to(&mut sink, ctx)?;
     let report = sink.finish(ctx)?;
