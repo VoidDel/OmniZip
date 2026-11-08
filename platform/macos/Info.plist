@@ -14,8 +14,9 @@
 
   CFBundleLocalizations: the languages of OmniZip's interface (locales/). Without them macOS takes
   the app for English-only and draws its own parts of the app in English whatever the system
-  language: open and save panels, the application menu, text-field context menus. The same list is
-  in apps/desktop/src-tauri/Info.plist, which development builds embed.
+  language: open and save panels, the application menu, text-field context menus. Development
+  builds, which have no bundle, get empty <language>.lproj folders next to the executable instead
+  (apps/desktop/src-tauri/build.rs), with the same list.
 -->
 <plist version="1.0">
 <dict>
