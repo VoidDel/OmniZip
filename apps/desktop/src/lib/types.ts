@@ -1,4 +1,4 @@
-// Types mirroring the Rust IPC payloads (apps/desktop/src-tauri/src/commands.rs).
+// Types mirroring the Rust IPC payloads (apps/desktop/src-tauri/src/commands/).
 
 export type FormatId =
   | 'zip' | '7z' | 'rar' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz' | 'tar.zst' | 'tar.lz4' | 'tar.br'
