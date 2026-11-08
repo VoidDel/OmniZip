@@ -255,10 +255,11 @@ mod smoke {
     #[test]
     fn past_crashes_stay_fixed() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("regressions");
-        let drivers: [(&str, fn(&[u8])); 4] = [
+        let drivers: [(&str, fn(&[u8])); 5] = [
             ("sanitize", sanitize_props),
             ("encoding", encoding_props),
             ("detect", |d| open_and_test(d, None)),
+            ("rar", |d| open_and_test(d, Some(FormatId::Rar))),
             ("mount", mount_and_walk),
         ];
         let mut replayed = 0;
