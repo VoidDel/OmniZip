@@ -540,3 +540,102 @@ impl Interaction for JobInteraction {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A job as `spawn` registers it, without a thread or a window.
+    fn job(m: &JobManager, id: u32, state: JobState) -> Arc<Job> {
+        let j = Arc::new(Job {
+            info: Mutex::new(JobInfo {
+                id,
+                kind: "extract".into(),
+                title: format!("job {id}"),
+                state,
+                progress: Progress::default(),
+                speed: 0.0,
+                eta: None,
+                started: 0,
+                finished: None,
+                report: None,
+                error: None,
+                output: None,
+                window: None,
+                archive_id: None,
+            }),
+            cancel: CancelToken::new(),
+            paused: AtomicBool::new(false),
+            pending: Mutex::new(HashMap::new()),
+            open_prompts: Mutex::new(Vec::new()),
+            next_prompt: AtomicU32::new(1),
+        });
+        m.jobs.lock().unwrap().insert(id, j.clone());
+        j
+    }
+
+    /// A prompt as `JobInteraction::ask` leaves it while waiting.
+    fn prompt(j: &Job, prompt_id: u32) -> mpsc::Receiver<PromptAnswer> {
+        let (tx, rx) = mpsc::channel();
+        j.pending.lock().unwrap().insert(prompt_id, tx);
+        j.open_prompts.lock().unwrap().push(PromptEvent {
+            job_id: j.snapshot().id,
+            window: None,
+            prompt_id,
+            kind: "confirm",
+            data: serde_json::Value::Null,
+        });
+        rx
+    }
+
+    #[test]
+    fn an_answer_reaches_its_prompt_only() {
+        let m = JobManager::default();
+        let j = job(&m, 1, JobState::Running);
+        let (first, second) = (prompt(&j, 1), prompt(&j, 2));
+        m.answer(1, 2, PromptAnswer::Confirm { yes: true });
+        assert!(matches!(
+            second.try_recv(),
+            Ok(PromptAnswer::Confirm { yes: true })
+        ));
+        assert!(first.try_recv().is_err(), "still waiting");
+        let open: Vec<u32> = m.open_prompts().iter().map(|p| p.prompt_id).collect();
+        assert_eq!(open, [1]);
+        // Answers to unknown jobs or prompts are dropped.
+        m.answer(9, 1, PromptAnswer::Confirm { yes: true });
+        m.answer(1, 7, PromptAnswer::Confirm { yes: true });
+        assert!(first.try_recv().is_err());
+    }
+
+    #[test]
+    fn cancelling_releases_prompts_and_pause() {
+        let m = JobManager::default();
+        let j = job(&m, 1, JobState::Paused);
+        j.paused.store(true, Ordering::Relaxed);
+        let waiting = prompt(&j, 1);
+        m.cancel(1);
+        assert!(j.cancel.is_cancelled());
+        assert!(!j.paused.load(Ordering::Relaxed));
+        // The prompt's channel is closed: `ask` stops waiting.
+        assert!(matches!(
+            waiting.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(m.open_prompts().is_empty());
+    }
+
+    #[test]
+    fn listing_clearing_and_busy() {
+        let m = JobManager::default();
+        job(&m, 1, JobState::Done);
+        job(&m, 2, JobState::Failed);
+        assert!(!m.busy());
+        job(&m, 3, JobState::Paused);
+        assert!(m.busy());
+        let ids: Vec<u32> = m.list().iter().map(|j| j.id).collect();
+        assert_eq!(ids, [3, 2, 1], "newest first");
+        m.clear_finished();
+        let ids: Vec<u32> = m.list().iter().map(|j| j.id).collect();
+        assert_eq!(ids, [3], "running and paused jobs stay");
+    }
+}
