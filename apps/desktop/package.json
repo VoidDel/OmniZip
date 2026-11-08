@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "lint": "tsc -b --noEmit",
     "test": "vitest run",
-    "bundle:windows": "tauri build --bundles nsis --config src-tauri/bundle.windows.json"
+    "bundle:windows": "tauri build --bundles nsis --config src-tauri/bundle.windows.json",
+    "bundle:macos": "tauri build --config src-tauri/bundle.macos.json"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.23",

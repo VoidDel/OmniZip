@@ -81,6 +81,13 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
   const ready = !!probe && probe.built && probe.health === 'ready';
   const solid = target.mountClass === 'C';
   const windows = useApp((s) => s.boot?.system.platform === 'win');
+  /** What is missing to mount: WinFsp, fuse3, or (on macOS) the system's NFS client. */
+  const missing = () =>
+    probe?.kind === 'win-fsp' || (!probe && windows)
+      ? t('mount.noBackend')
+      : probe?.kind === 'nfs-loopback'
+        ? t('settings.mount.missingDriver', { name: 'mount_nfs' })
+        : t('mount.noBackendFuse');
 
   /** Opens the volume; a dialog window closes once the file manager has it. */
   const reveal = async (m: MountInfo) => {
@@ -138,7 +145,7 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
         setError(t(windows ? 'mount.errInUse' : 'mount.errInUseFolder', { point: err.params.path ?? '' }));
         void api.freeLetters().then(setLetters);
       } else if (err.key === 'missing-dependency') {
-        setError(t(windows ? 'mount.noBackend' : 'mount.noBackendFuse'));
+        setError(missing());
       } else {
         const detail = err.params.detail;
         setError(detail ? `${errorText(t, err)} (${detail})` : errorText(t, err));
@@ -271,7 +278,7 @@ function MountForm({ d, target }: { d: Extract<Dialog, { kind: 'mount' }>; targe
       {probe && !ready ? (
         <div className="note warn">
           <Icon name="alert" />
-          <span>{probe.built ? t(windows ? 'mount.noBackend' : 'mount.noBackendFuse') : t('mount.unsupported')}</span>
+          <span>{probe.built ? missing() : t('mount.unsupported')}</span>
         </div>
       ) : (
         <div className={`note${solid ? ' warn' : ''}`}>

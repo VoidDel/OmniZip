@@ -1,8 +1,8 @@
 // Builds the binaries that ship next to the desktop app and puts them where the Tauri bundler
 // expects them (docs/10-build-release.md §3):
 //   * omnizip(.exe)        — CLI, bundled as an "external binary" (sidecar);
-//   * omnizip-mountd(.exe) — the mount daemon (docs/12-mount.md §4), a sidecar too (Windows
-//                            and Linux);
+//   * omnizip-mountd(.exe) — the mount daemon (docs/12-mount.md §4), a sidecar too (Windows,
+//                            Linux and macOS);
 //   * omnizip_shell.dll    — Windows context-menu extension, bundled as a resource;
 //   * omnizip_menu.msix    — its context-menu package (Windows 11 top-level menu), a resource
 //                            the installer registers (platform/windows/msix/pack.ps1 -Sparse);
@@ -14,7 +14,8 @@
 //   * Assets/*.png         — the logos of the context-menu package, also next to the app: a
 //                            dialog started from the Windows 11 menu runs with the package's
 //                            identity, and its taskbar button shows the package logo.
-// Called by `beforeBuildCommand` in apps/desktop/src-tauri/bundle.windows.json (`pnpm bundle:windows`).
+// Called by `beforeBuildCommand` in apps/desktop/src-tauri/bundle.windows.json (`pnpm bundle:windows`)
+// and bundle.macos.json (`pnpm bundle:macos`, which ships the daemon only).
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -30,9 +31,10 @@ const triple =
   execFileSync('rustc', ['-vV'], { encoding: 'utf8' }).match(/^host: (.+)$/m)[1].trim();
 const windows = triple.includes('windows');
 const linux = triple.includes('linux');
+const mac = triple.includes('apple-darwin');
 const exe = windows ? '.exe' : '';
 // Platforms with a mount backend ship its daemon.
-const mountd = windows || linux;
+const mountd = windows || linux || mac;
 
 const packages = ['omnizip-cli', ...(windows ? ['omnizip-shell-win'] : []), ...(mountd ? ['omnizip-mountd'] : [])];
 const args = ['build', '--release', '--target', triple, ...packages.flatMap((p) => ['-p', p])];
