@@ -7,6 +7,17 @@ use omnizip_core::{Codec, Level, deflate::ParDeflate};
 /// A boxed decoder.
 pub type Decoder<'a> = Box<dyn Read + Send + 'a>;
 
+/// Memory one xz / lzma decoder may use. The dictionary size comes from the stream header and
+/// liblzma allocates it up front, so without a cap a few bytes ask for gigabytes (as early as
+/// format detection). A 1.5 GiB dictionary, where docs/09-security.md §4 stops trusting one,
+/// plus the decoder state; `xz -9e` needs 65 MiB.
+const XZ_MEMORY_LIMIT: u64 = (1536 + 64) << 20;
+
+/// Largest zstd window accepted: 1 GiB (`--long=30`), the largest within the same budget.
+/// `zstd --long` and `--ultra -22` write 128 MiB windows; a frame that declares a larger one
+/// than this is refused instead of allocated.
+const ZSTD_WINDOW_LOG_MAX: u32 = 30;
+
 /// Wraps `input` in the decoder for `codec`. Multi-member / multi-frame streams are read fully.
 pub fn decoder<'a, R: Read + Send + 'a>(codec: Codec, input: R) -> io::Result<Decoder<'a>> {
     let input = io::BufReader::with_capacity(256 * 1024, input);
@@ -15,14 +26,13 @@ pub fn decoder<'a, R: Read + Send + 'a>(codec: Codec, input: R) -> io::Result<De
         Codec::Bzip2 => Box::new(bzip2::bufread::MultiBzDecoder::new(input)),
         Codec::Xz => Box::new(XzMt::new(input)?),
         Codec::Lzma => {
-            let stream =
-                liblzma::stream::Stream::new_lzma_decoder(u64::MAX).map_err(io::Error::other)?;
+            let stream = liblzma::stream::Stream::new_lzma_decoder(XZ_MEMORY_LIMIT)
+                .map_err(io::Error::other)?;
             Box::new(liblzma::bufread::XzDecoder::new_stream(input, stream))
         }
         Codec::Zstd => {
             let mut d = zstd::stream::read::Decoder::with_buffer(input)?;
-            // Archives made with --long need a large window.
-            d.window_log_max(31)?;
+            d.window_log_max(ZSTD_WINDOW_LOG_MAX)?;
             Box::new(d)
         }
         Codec::Lz4 => Box::new(lz4_flex::frame::FrameDecoder::new(input)),
@@ -55,7 +65,8 @@ impl<R> XzMt<R> {
             .threads(threads)
             // Above this, fewer threads (down to one); never a failure.
             .memlimit_threading(1 << 30)
-            .memlimit_stop(u64::MAX)
+            // Above this, an error: one thread would still need more.
+            .memlimit_stop(XZ_MEMORY_LIMIT)
             .decoder()
             .map_err(io::Error::other)
     }
@@ -400,6 +411,63 @@ mod tests {
         let mut bad = packed.clone();
         bad[packed.len() / 2] ^= 0x55;
         assert!(unxz(&bad).is_err());
+    }
+
+    fn crc32(data: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in data {
+            c ^= u32::from(b);
+            for _ in 0..8 {
+                c = if c & 1 == 1 {
+                    (c >> 1) ^ 0xEDB8_8320
+                } else {
+                    c >> 1
+                };
+            }
+        }
+        !c
+    }
+
+    /// Headers that ask for more memory than a decoder may use are refused, not allocated
+    /// (the nightly fuzzers' 2 GiB allocations, #12 / #14).
+    #[test]
+    fn oversized_dictionaries_are_refused() {
+        let decode = |codec, data: &[u8]| {
+            let mut out = Vec::new();
+            decoder(codec, data)?.read_to_end(&mut out).map(|_| out)
+        };
+        let mem_limit = |r: io::Result<Vec<u8>>| {
+            let e = r.unwrap_err();
+            matches!(
+                e.get_ref()
+                    .and_then(|i| i.downcast_ref::<liblzma::stream::Error>()),
+                Some(liblzma::stream::Error::MemLimit)
+            )
+        };
+
+        // zstd: frame header, window descriptor, an empty last raw block.
+        let zstd = |window: u8| [0x28, 0xB5, 0x2F, 0xFD, 0x00, window, 0x01, 0x00, 0x00];
+        // 128 MiB, as `zstd --long` writes.
+        assert_eq!(decode(Codec::Zstd, &zstd(0x88)).unwrap(), b"");
+        // 2 GiB.
+        let e = decode(Codec::Zstd, &zstd(0xA8)).unwrap_err();
+        assert!(e.to_string().contains("memory"), "{e}");
+
+        // .lzma: properties, a 4 GiB dictionary, uncompressed size 0.
+        let mut lzma = vec![0x5D, 0xFF, 0xFF, 0xFF, 0xFF];
+        lzma.extend([0; 8 + 16]);
+        assert!(mem_limit(decode(Codec::Lzma, &lzma)));
+
+        // .xz: stream header, then a block header whose LZMA2 filter asks for a 4 GiB dictionary.
+        let flags = [0x00, 0x01];
+        let mut xz = vec![0xFD, b'7', b'z', b'X', b'Z', 0x00];
+        xz.extend(flags);
+        xz.extend(crc32(&flags).to_le_bytes());
+        let block = [0x02, 0x00, 0x21, 0x01, 40, 0x00, 0x00, 0x00];
+        xz.extend(block);
+        xz.extend(crc32(&block).to_le_bytes());
+        xz.extend([0; 16]);
+        assert!(mem_limit(decode(Codec::Xz, &xz)));
     }
 
     #[test]
