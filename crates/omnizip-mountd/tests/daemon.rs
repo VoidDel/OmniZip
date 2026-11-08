@@ -1,7 +1,7 @@
 //! Runs the daemon binary under its own pipe or socket names and directories, and mounts
-//! through it as OmniZip does. Skipped when the mount driver (WinFsp, FUSE) is missing, unless
+//! through it as OmniZip does. Skipped when the mount driver (WinFsp, FUSE, mount_nfs) is missing, unless
 //! `OMNIZIP_REQUIRE_MOUNT=1` (CI).
-#![cfg(any(windows, target_os = "linux"))]
+#![cfg(any(windows, target_os = "linux", target_os = "macos"))]
 
 use std::{
     fs,

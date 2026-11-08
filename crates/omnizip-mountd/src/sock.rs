@@ -1,9 +1,10 @@
-//! Unix sockets between OmniZip and its daemon on Linux, and who may use them.
+//! Unix sockets between OmniZip and its daemon on Linux and macOS, and who may use them.
 //!
-//! The socket lives in `$XDG_RUNTIME_DIR/omnizip`, which only the user may enter. Both ends
-//! also check who is at the other one (`SO_PEERCRED`): the daemon serves only processes of its
-//! own user, and a client talks only to a daemon of its own user. One daemon per user: whoever
-//! holds the lock next to the socket. There is no elevated daemon on Linux.
+//! The socket lives in `$XDG_RUNTIME_DIR/omnizip` (on macOS, which has none, in the user's
+//! temporary directory), which only the user may enter. Both ends also check who is at the
+//! other one (`SO_PEERCRED`, `getpeereid`): the daemon serves only processes of its own user,
+//! and a client talks only to a daemon of its own user. One daemon per user: whoever holds the
+//! lock next to the socket. There is no elevated daemon on Linux and macOS.
 
 use std::{
     fs::File,
@@ -52,6 +53,18 @@ pub fn daemon_socket(level: Level) -> io::Result<PathBuf> {
 }
 
 /// The user id of the process at the other end.
+#[cfg(target_os = "macos")]
+fn peer_uid(s: &UnixStream) -> io::Result<u32> {
+    let (mut uid, mut gid) = (0, 0);
+    // SAFETY: a connected socket and two integers to fill.
+    if unsafe { libc::getpeereid(s.as_raw_fd(), &mut uid, &mut gid) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(uid)
+}
+
+/// The user id of the process at the other end.
+#[cfg(target_os = "linux")]
 fn peer_uid(s: &UnixStream) -> io::Result<u32> {
     let mut cred = libc::ucred {
         pid: 0,
