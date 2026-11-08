@@ -95,8 +95,8 @@ jobs:
       - name: Rust tests (core, engines, CLI, mount core, shell, desktop)
         run: cargo test --workspace
         env:
-          # Without the driver the mount tests fail rather than pass by skipping (macOS has no
-          # mount backend yet, so they are not built there).
+          # Without the driver (WinFsp, fuse3, the system's mount_nfs) the mount tests fail
+          # rather than pass by skipping.
           OMNIZIP_REQUIRE_MOUNT: "1"
       - name: Frontend tests
         run: pnpm test
