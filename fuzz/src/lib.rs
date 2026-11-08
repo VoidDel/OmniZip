@@ -250,6 +250,30 @@ mod smoke {
         }
     }
 
+    /// Inputs the nightly campaign crashed on, kept in `regressions/<target>/` and replayed
+    /// through that target's driver.
+    #[test]
+    fn past_crashes_stay_fixed() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("regressions");
+        let drivers: [(&str, fn(&[u8])); 4] = [
+            ("sanitize", sanitize_props),
+            ("encoding", encoding_props),
+            ("detect", |d| open_and_test(d, None)),
+            ("mount", mount_and_walk),
+        ];
+        let mut replayed = 0;
+        for (target, run) in drivers {
+            let Ok(dir) = fs::read_dir(root.join(target)) else {
+                continue;
+            };
+            for e in dir.flatten() {
+                run(&fs::read(e.path()).unwrap());
+                replayed += 1;
+            }
+        }
+        assert!(replayed > 0, "no inputs under {}", root.display());
+    }
+
     #[test]
     fn hostile_names_keep_their_properties() {
         let mut rng = Rng(42);

@@ -147,6 +147,11 @@ pub fn sanitize(name: &str, os: TargetOs, mode: UnsafePathMode) -> Result<Saniti
     if components.is_empty() {
         return Err(reject(PathIssue::Empty));
     }
+    // Repairs can lengthen names (a `_` prefix, NFC): the result must pass the limit as well.
+    let chars: usize = components.iter().map(|c| c.chars().count() + 1).sum();
+    if chars - 1 > MAX_PATH_CHARS {
+        return Err(reject(PathIssue::TooLong));
+    }
     repaired.sort_by_key(|i| *i as u8);
     repaired.dedup();
     Ok(SanitizedPath {
@@ -211,6 +216,9 @@ fn clean_component(raw: &str, os: TargetOs) -> (String, Vec<PathIssue>) {
     if s.chars().any(is_zero_width) {
         issues.push(PathIssue::InvalidCharacters);
         s.retain(|c| !is_zero_width(c));
+        // A removed character may have kept a combining mark from its base: normalize again,
+        // or sanitizing the result would change it once more.
+        s = s.nfc().collect();
     }
     let bad_char = |c: char| {
         c.is_control()
@@ -224,26 +232,39 @@ fn clean_component(raw: &str, os: TargetOs) -> (String, Vec<PathIssue>) {
             .map(|c| if bad_char(c) { '_' } else { c })
             .collect();
     }
+    // Truncate before the Windows rules: a cut can end in a space or a dot, which Windows then
+    // drops (two entries landing on one file), and sanitizing the result would cut again.
+    if s.len() > MAX_COMPONENT_BYTES {
+        issues.push(PathIssue::TooLong);
+        s = truncate_keep_extension(&s, MAX_COMPONENT_BYTES);
+    }
     if os == TargetOs::Windows {
-        let trimmed = s.trim_end_matches(['.', ' ']);
-        if trimmed.len() != s.len() {
+        if trim_windows_end(&mut s) {
             issues.push(PathIssue::InvalidCharacters);
-            s = trimmed.to_owned();
         }
         if is_windows_reserved(&s) {
             issues.push(PathIssue::ReservedName);
             s.insert(0, '_');
+            // The prefix can push a 255-byte name over; the leading `_` keeps it unreserved.
+            if s.len() > MAX_COMPONENT_BYTES {
+                s = truncate_keep_extension(&s, MAX_COMPONENT_BYTES);
+                trim_windows_end(&mut s);
+            }
         }
     }
     if s.is_empty() || s == "." || s == ".." {
         issues.push(PathIssue::InvalidCharacters);
         s = "_".to_owned();
     }
-    if s.len() > MAX_COMPONENT_BYTES {
-        issues.push(PathIssue::TooLong);
-        s = truncate_keep_extension(&s, MAX_COMPONENT_BYTES);
-    }
     (s, issues)
+}
+
+/// Drops the trailing dots and spaces Windows would drop itself. Returns whether any were.
+fn trim_windows_end(s: &mut String) -> bool {
+    let keep = s.trim_end_matches(['.', ' ']).len();
+    let trimmed = keep != s.len();
+    s.truncate(keep);
+    trimmed
 }
 
 /// Truncates a file name to `max` bytes on a char boundary, preserving a short extension.
@@ -373,6 +394,33 @@ mod tests {
         assert!(s.len() <= MAX_COMPONENT_BYTES);
         assert!(s.ends_with(".txt"));
         assert!(sanitize(&"a/".repeat(20_000), TargetOs::Unix, UnsafePathMode::Reject).is_err());
+    }
+
+    /// Sanitizing a sanitized name changes nothing (the nightly fuzzer's #1 #4 #6 #9 #11).
+    #[test]
+    fn repairs_are_final() {
+        let again = |name: &str, os| {
+            let once = ok(name, os);
+            assert_eq!(ok(&once, os), once, "{name:?}");
+            once
+        };
+        // The cut lands in a run of spaces: Windows would drop them, so they go now.
+        let s = again(
+            &format!("{}{}x", "a".repeat(250), " ".repeat(20)),
+            TargetOs::Windows,
+        );
+        assert_eq!(s, "a".repeat(250));
+        // On Unix the spaces are legal and stay.
+        let s = again(
+            &format!("{}{}x", "a".repeat(250), " ".repeat(20)),
+            TargetOs::Unix,
+        );
+        assert_eq!(s.len(), MAX_COMPONENT_BYTES);
+        // A reserved 255-byte name: the `_` prefix is kept within the limit.
+        let s = again(&format!("CON.{}", "b".repeat(251)), TargetOs::Windows);
+        assert!(s.starts_with("_CON.") && s.len() == MAX_COMPONENT_BYTES);
+        // A removed zero-width character no longer separates e from its combining accent.
+        assert_eq!(again("e\u{200B}\u{0301}", TargetOs::Unix), "\u{00e9}");
     }
 
     #[test]
