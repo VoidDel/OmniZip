@@ -2,9 +2,12 @@
 //!
 //! Every pipe is open to the current user (and SYSTEM) only. The elevated daemon's pipe also
 //! carries a medium integrity label, so that the app, which is not elevated, may write to it.
-//! A client checks who owns the pipe it reached (the user, or the Administrators group for an
-//! elevated server) before sending anything: another user cannot stand in for a daemon by
-//! creating its pipe first.
+//!
+//! The user's programs that are not elevated must not be able to stand in for an elevated
+//! server, nor for the app at the other end of the pipe that hands a mount over to it: they may
+//! connect to those pipes, but not create instances of them ([`Access`]). A client checks the
+//! server it reached before sending anything ([`Server`]): another user, or a program of the
+//! user's that is not elevated, cannot stand in for a daemon by creating its pipe first.
 
 use std::{
     ffi::{OsStr, c_void},
@@ -40,12 +43,13 @@ use windows_sys::Win32::{
         Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize},
         Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId,
-            ImpersonateNamedPipeClient, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, WaitNamedPipeW,
+            GetNamedPipeServerProcessId, ImpersonateNamedPipeClient, PIPE_READMODE_BYTE,
+            PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+            WaitNamedPipeW,
         },
         Threading::{
-            CreateProcessW, GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
-            PROCESS_INFORMATION, STARTUPINFOW,
+            CreateProcessW, GetCurrentProcess, GetCurrentThread, OpenProcess, OpenProcessToken,
+            OpenThreadToken, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW,
         },
     },
     UI::{
@@ -77,25 +81,31 @@ pub fn user_sid() -> io::Result<&'static str> {
         return Err(io::Error::last_os_error());
     }
     let token = Handle(token);
-    let mut buf = vec![0u8; 256];
+    let s = token_user(token.0)?;
+    Ok(SID.get_or_init(|| s))
+}
+
+/// The user SID of a token opened with TOKEN_QUERY, as a string.
+fn token_user(token: HANDLE) -> io::Result<String> {
+    // TOKEN_USER holds a pointer: a u64 buffer keeps it aligned.
+    let mut buf = [0u64; 64];
     let mut len = 0u32;
-    // SAFETY: a buffer of the length given.
+    // SAFETY: a buffer of the size given.
     if unsafe {
         GetTokenInformation(
-            token.0,
+            token,
             TokenUser,
             buf.as_mut_ptr().cast(),
-            buf.len() as u32,
+            size_of_val(&buf) as u32,
             &mut len,
         )
     } == 0
     {
         return Err(io::Error::last_os_error());
     }
-    // SAFETY: GetTokenInformation filled a TOKEN_USER.
+    // SAFETY: GetTokenInformation filled a TOKEN_USER, whose SID points into `buf`.
     let sid = unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
-    let s = sid_string(sid)?;
-    Ok(SID.get_or_init(|| s))
+    sid_string(sid)
 }
 
 fn sid_string(sid: PSID) -> io::Result<String> {
@@ -133,19 +143,31 @@ pub fn daemon_pipe(level: Level) -> io::Result<String> {
 /// Who may connect to a pipe this process creates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// The current user, at its own integrity level or above.
+    /// The current user, at its own integrity level or above (the user's daemon).
     User,
-    /// The current user from a lower integrity level too (the elevated daemon's pipe).
+    /// The current user from a lower integrity level too, to connect only: new instances are
+    /// for Administrators (the elevated daemon's pipe).
     UserFromBelow,
+    /// The current user, to connect only (the pipe handing a mount over to the elevated
+    /// daemon: this process alone serves it).
+    Handoff,
 }
+
+/// What a client may do on a pipe it may not add instances to: read, write data and set the
+/// pipe's mode; GENERIC_WRITE would include FILE_CREATE_PIPE_INSTANCE (FILE_APPEND_DATA).
+const CONNECT_ONLY: u32 = 0x0012_019B;
 
 /// Creates one instance of a pipe server; `first` fails when the pipe exists already (another
 /// daemon owns it).
 pub fn server(name: &str, first: bool, access: Access) -> io::Result<OwnedHandle> {
-    let mut sddl = format!("D:P(A;;GA;;;{})(A;;GA;;;SY)", user_sid()?);
-    if access == Access::UserFromBelow {
-        sddl.push_str("S:(ML;;NW;;;ME)");
-    }
+    let user = user_sid()?;
+    let sddl = match access {
+        Access::User => format!("D:P(A;;GA;;;{user})(A;;GA;;;SY)"),
+        Access::UserFromBelow => {
+            format!("D:P(A;;{CONNECT_ONLY:#x};;;{user})(A;;GA;;;BA)(A;;GA;;;SY)S:(ML;;NW;;;ME)")
+        }
+        Access::Handoff => format!("D:P(A;;{CONNECT_ONLY:#x};;;{user})(A;;GA;;;SY)"),
+    };
     let sddl = wide(&sddl);
     let mut sd: PSECURITY_DESCRIPTOR = ptr::null_mut();
     // SAFETY: valid SDDL; the descriptor is freed below.
@@ -208,16 +230,42 @@ pub fn accept(server: &OwnedHandle) -> io::Result<()> {
     }
 }
 
-/// Connects to a pipe and checks who owns it (the user, or Administrators for an elevated
-/// server). The server may identify, not impersonate, this process.
-pub fn connect(name: &str) -> io::Result<File> {
+/// The server a client expects at the other end of a pipe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Server {
+    /// The user's daemon: the pipe belongs to the user (or to Administrators when the user's
+    /// programs run elevated).
+    User,
+    /// The elevated daemon. An elevated client checks that the server is an elevated process
+    /// of the user; a client that is not elevated cannot see that, and checks that the pipe
+    /// belongs to Administrators, which only an elevated process can make it.
+    Elevated,
+    /// A given process: the app, at the other end of the pipe handing a mount over.
+    Process(u32),
+}
+
+/// `\\.\pipe\omnizip-mountd-handoff-<pid>-<random>`: the pipe on which the app `pid` hands a
+/// mount over to the elevated daemon; the name tells the elevated side whom to expect.
+pub fn handoff_pipe(pid: u32, random: u64) -> String {
+    format!(r"\\.\pipe\omnizip-mountd-handoff-{pid}-{random:016x}")
+}
+
+/// The app's process id in a [`handoff_pipe`] name.
+pub fn handoff_server(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(r"\\.\pipe\omnizip-mountd-handoff-")?;
+    rest.split('-').next()?.parse().ok()
+}
+
+/// Connects to a pipe and checks that `server` is at the other end. The server may identify,
+/// not impersonate, this process.
+pub fn connect(name: &str, server: Server) -> io::Result<File> {
     let name_w = wide(name);
     let file = loop {
         // SAFETY: a NUL-terminated name; the handle is owned below.
         let h = unsafe {
             CreateFileW(
                 name_w.as_ptr(),
-                0x8000_0000 | 0x4000_0000, // GENERIC_READ | GENERIC_WRITE
+                CONNECT_ONLY,
                 0,
                 ptr::null(),
                 OPEN_EXISTING,
@@ -239,14 +287,66 @@ pub fn connect(name: &str) -> io::Result<File> {
             return Err(io::Error::last_os_error());
         }
     };
-    let owner = owner_of(&file)?;
-    if owner != user_sid()? && owner != ADMINISTRATORS {
-        return Err(io::Error::new(
+    let refuse = |who: String| {
+        Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            format!("{name} belongs to {owner}"),
-        ));
+            format!("{name}: {who}"),
+        ))
+    };
+    match server {
+        Server::User => {
+            let owner = owner_of(&file)?;
+            if owner != user_sid()? && owner != ADMINISTRATORS {
+                return refuse(format!("belongs to {owner}"));
+            }
+        }
+        Server::Elevated if elevated() => {
+            let pid = server_process(&file)?;
+            let (user, is_elevated) = process_identity(pid)?;
+            if user != user_sid()? || !is_elevated {
+                return refuse(format!("served by process {pid} of {user}, not elevated"));
+            }
+        }
+        Server::Elevated => {
+            let owner = owner_of(&file)?;
+            if owner != ADMINISTRATORS {
+                return refuse(format!("belongs to {owner}"));
+            }
+        }
+        Server::Process(expected) => {
+            let pid = server_process(&file)?;
+            if pid != expected {
+                return refuse(format!("served by process {pid}"));
+            }
+        }
     }
     Ok(file)
+}
+
+/// The process at the server end of a client's pipe.
+fn server_process(pipe: &File) -> io::Result<u32> {
+    let mut pid = 0;
+    // SAFETY: a connected pipe client handle.
+    if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut pid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(pid)
+}
+
+/// The user a process runs as, and whether it is elevated.
+fn process_identity(pid: u32) -> io::Result<(String, bool)> {
+    // SAFETY: plain arguments; the handle is closed by `Handle`.
+    let process = Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) });
+    if process.0.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut token: HANDLE = ptr::null_mut();
+    // SAFETY: a process handle with query rights; the token is closed by `Handle`.
+    if unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut token) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let token = Handle(token);
+    Ok((token_user(token.0)?, token_elevated(token.0)))
 }
 
 fn owner_of(h: &impl AsRawHandle) -> io::Result<String> {
@@ -425,5 +525,38 @@ impl Drop for Handle {
             // SAFETY: a handle this process opened.
             unsafe { CloseHandle(self.0) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handoff_pipes_name_their_server() {
+        let name = handoff_pipe(4242, 0xabc);
+        assert_eq!(handoff_server(&name), Some(4242));
+        assert_eq!(handoff_server(r"\\.\pipe\omnizip-mountd-S-1-5-21-1"), None);
+    }
+
+    /// Only the process that made a handoff pipe serves it, and a client checks that it does.
+    #[test]
+    fn handoff_pipes_have_one_server() {
+        let me = std::process::id();
+        let name = handoff_pipe(me, u64::from(me) << 20 | 7);
+        let first = server(&name, true, Access::Handoff).unwrap();
+        // Not even this user may add an instance to stand in for the app.
+        assert!(server(&name, false, Access::Handoff).is_err());
+        let waiting = std::thread::spawn(move || accept(&first).map(|()| first));
+        assert!(connect(&name, Server::Process(me + 1)).is_err());
+        let _ = waiting.join().unwrap();
+
+        let name = handoff_pipe(me, u64::from(me) << 20 | 8);
+        let first = server(&name, true, Access::Handoff).unwrap();
+        let waiting = std::thread::spawn(move || accept(&first).map(|()| first));
+        let client = connect(&name, Server::Process(me)).unwrap();
+        let first = File::from(waiting.join().unwrap().unwrap());
+        assert_eq!(client_process(&first).unwrap(), me);
+        drop(client);
     }
 }
