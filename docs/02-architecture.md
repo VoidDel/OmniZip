@@ -133,7 +133,7 @@ pub struct JobCtx {
 ```
 
 `ExtractSink` 的实现：
-- `FsSink`：处理长路径（Windows `\\?\` 前缀）、保留名、时间戳、权限、符号链接策略、Mark-of-the-Web、新文件直接写入、替换已有文件时经临时文件 + rename、磁盘空间预检。
+- `FsSink`：处理长路径（Windows `\\?\` 前缀）、保留名、时间戳、权限、符号链接策略、Mark-of-the-Web、新文件直接写入、替换已有文件时经临时文件 + rename、磁盘空间预检。目标文件夹下的目录经 `DirGuard`（`omnizip_core::dirguard`）逐级打开并持有，创建、替换、建链接与设置权限都相对于打开的目录，不再按路径查找（09 §3 第 8 步）。
 - `MemorySink`：预览与测试。
 - `StreamSink`：CLI 的 stdout 管道。
 
@@ -159,6 +159,7 @@ pub struct JobCtx {
 - 每个 Job：`id`、`kind`、`state`（Queued / Running / Paused / Done / Failed / Cancelled）、`progress`（bytes_done/total、files_done/total、current_path）、`speed`、`eta`。
 - 取消：`CancellationToken` 在每个条目边界与每 1 MB 数据块检查。
 - 暂停：协作式检查点（v1.1）。
+- 窗口与作业（2026-11-09，`apps/desktop/src-tauri/src/closing.rs`）：作业在拥有它的窗口（小进度窗或主窗口）中提问，因此不能比这个窗口活得久，也不能被进程退出直接打断。窗口关闭前先取消它的作业（关闭最后一个窗口时为全部作业），等作业线程连同收尾步骤结束（最多 15 秒）再关闭；主窗口先询问（`app://close-requested` → `window_close_cancelling`）。退出请求同样先取消全部作业、等其结束；窗口被直接销毁时取消它的作业。
 - 进度事件通过 Tauri `Channel` 推送，节流 ≤ 30 Hz，多条合并。
 - 引擎内并行：7z LZMA2 / xz / zstd 的多线程由引擎参数控制；ZIP 小文件在工作线程上各自压缩进内存、由写入线程按顺序追加（`add_prepared_file`），大文件与 gzip 用 `omnizip_core::deflate::ParDeflate` 分块并行压缩，大文件先写成临时文件中的单条目压缩包再并入（`merge_archive`）。
 
@@ -184,6 +185,7 @@ Shell 扩展与 CLI 读取同一份 `config.toml`（语言、菜单项配置）�
 ## 5. 应用层（src-tauri）
 
 - Commands 按命名空间组织：`archive.*`、`job.*`、`settings.*`、`theme.*`、`locale.*`、`shell.*`、`preview.*`。
+- 线程：不带 `async` 的 Tauri 命令在主线程运行，而主线程同时驱动所有窗口。遍历文件夹、访问可能不响应的路径（网络共享）或处理整棵条目树（排序、搜索、统计）的命令一律为 `async`，工作经 `spawn_blocking` 在阻塞线程上进行（`commands::off_main` / `with_state`）；只有很快的查询与必须在主线程上的窗口操作保持同步。
 - Events：`job://progress`、`job://finished`、`archive://invalidated`、`settings://changed`、`theme://changed`。
 - 使用的 Tauri 插件：`dialog`、`fs`（限制 scope）、`shell`（仅 `open`）、`os`、`window-state`、`single-instance`、`cli`、`updater`、`notification`、`store`、`deep-link`；窗口材质用 `window-vibrancy`。
 - 安全：capabilities 最小化、禁止远程 URL、严格 CSP、前端不直接读文件系统，一切经 Command。

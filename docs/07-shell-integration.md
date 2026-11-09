@@ -49,7 +49,7 @@
 
 硬性约束：
 - 最小依赖、`panic = "abort"` + 入口 `catch_unwind` 返回 `E_FAIL`、无网络、无 UI、无阻塞 I/O（配置文件读取有 50 ms 超时且异步刷新缓存）。**M1 实现**：DLL 链接 `omnizip-core`（仅扩展名表与魔数探测）与 `omnizip-i18n`（菜单文案），约 0.75 MB；每次 Explorer 创建菜单对象时同步读取配置，尚无 mtime 缓存与读取超时。
-- COM 线程模型 `Both`，引用计数与 `DllCanUnloadNow` 正确实现，AppVerifier 与 `Application Verifier` 下无报错。
+- COM 线程模型 `Both`，引用计数与 `DllCanUnloadNow` 正确实现，AppVerifier 与 `Application Verifier` 下无报错。**当前实现**（2026-11-09）：命令、子项枚举器与类工厂都计入存活对象，`DllGetClassObject` 交出的类工厂在释放前保持 DLL 加载；`LockServer` 计数不会减到 0 以下；进程内测试覆盖。AppVerifier 尚未运行。
 - 同时构建 **x64 与 ARM64** 两份 DLL；ARM 设备上的 Explorer 为 ARM64 进程，x64 DLL 不会被加载。
 - 日志仅 ETW（可用 `wpr` 采集），默认静默。
 
@@ -131,11 +131,11 @@
 
 所有菜单项最终调用 `omnizip-desktop --shell <verb> …`，由构建脚本从 `shell-menu.toml` 生成。
 
-**当前实现**（Nautilus）：`platform/linux/nautilus/omnizip.py` 是 nautilus-python 扩展，只做一层外壳：右键时把所选路径交给 `omnizip shell-menu`（命令行的隐藏子命令，读标准输入、输出 JSON），由它按 Windows 菜单同一套规则（`omnizip_shell::menu`：哪些选择显示哪些项、按设置的界面语言生成标题、子菜单或平铺、设置里关掉的项）给出菜单项，设置改动无需重新注册；选中某项时把选择写入临时列表文件，启动 `omnizip-desktop --shell <verb> --cwd <目录> --files-from <列表>`。设置页"添加到右键菜单"或 `omnizip-desktop --register-shell` 把它装到 `$XDG_DATA_HOME/nautilus-python/extensions/`（填入本机两个程序的路径），需要 python3-nautilus，`nautilus -q` 后生效。"解压到‘名称’"中的路径分隔符由代码按平台补上（Linux 为 `/`）。
+**当前实现**（Nautilus）：`platform/linux/nautilus/omnizip.py` 是 nautilus-python 扩展，只做一层外壳：右键时把所选路径交给 `omnizip shell-menu`（命令行的隐藏子命令，读标准输入、输出 JSON），由它按 Windows 菜单同一套规则（`omnizip_shell::menu`：哪些选择显示哪些项、按设置的界面语言生成标题、子菜单或平铺、设置里关掉的项）给出菜单项，设置改动无需重新注册；选中某项时把选择写入临时列表文件，启动 `omnizip-desktop --shell <verb> --cwd <目录> --files-from <列表>`。设置页"添加到右键菜单"或 `omnizip-desktop --register-shell` 把它装到 `$XDG_DATA_HOME/nautilus-python/extensions/`（填入本机两个程序的路径），需要 python3-nautilus，`nautilus -q` 后生效。以 AppImage 运行时，AppImage 每次运行解包到不同的临时目录、退出即消失，因此扩展与 Dolphin 服务菜单都指向 `$APPIMAGE` 本身，菜单项由它的 `--shell-menu`（在启动界面之前处理，输出与 `omnizip shell-menu` 相同）给出（2026-11-09）。"解压到‘名称’"中的路径分隔符由代码按平台补上（Linux 为 `/`）。
 
 **当前实现**（Dolphin，2026-11-03）：同一次注册还把 KDE 服务菜单写到 `$XDG_DATA_HOME/kio/servicemenus/omnizip-*.desktop`（可执行权限，否则 Dolphin 不加载），内容由 `omnizip_shell::servicemenu` 按同一套设置生成（界面语言、子菜单 `X-KDE-Submenu` 或平铺、关掉的项、图标开关；`X-KDE-Priority=TopLevel` 放在顶层而不是"动作"子菜单里），设置页改动菜单设置时重写。服务菜单是静态的，Dolphin 只能按 MIME 类型与所选个数筛选，因此按 `applies` 的规则分成四个文件：一个压缩包（打开、挂载）、一个或多个压缩包（解压到此处、解压到同名文件夹、解压到…、测试、转换）、两个以上压缩包（分别解压）、任意文件与文件夹（添加为 ZIP / 7z、添加到压缩包…；只选压缩包时也显示，因为排除压缩包会让"压缩包加普通文件"的选择也看不到）；标题不含所选名称（"添加为 ZIP 压缩包"而非"添加到‘photos.zip’"，`menu-*-any` / `menu-extract-smart-folder`）；只用于本机文件（`X-KDE-Protocols=file`），程序被删除后菜单随之消失（`TryExec`）。选中某项启动 `omnizip-desktop --shell <verb> <所选路径…>`。"弹出"需要判断文件夹是否为挂载点，服务菜单做不到，Dolphin 中不提供（在应用侧栏或托盘卸载）。其他文件管理器尚未接入。
 
-**桌面项与图标**（2026-11-03）：Wayland 下任务栏按窗口的 app id 找同名桌面项取图标（OmniZip 的 app id 为程序名 `omnizip-desktop`），窗口自己设置的图标只对 X11 有效。软件包安装 `platform/linux/omnizip-desktop.desktop` 与图标；不经软件包运行时（开发构建、AppImage、压缩包），应用启动时把桌面项（`Exec` 指向自身，AppImage 取 `$APPIMAGE`）与 hicolor 图标装到 `$XDG_DATA_HOME`，内容变化才重写（`apps/desktop/src-tauri/src/desktop_entry.rs`）；开发构建的桌面项不出现在应用菜单（`NoDisplay`），但同样声明压缩包类型，才能在设置页设为默认程序。桌面项的 `MimeType` 与 Dolphin 服务菜单共用 `servicemenu::ARCHIVE_MIME_TYPES`，单元测试保证一致。 右键菜单同理（2026-11-09）：AppImage 运行时 Nautilus 扩展与 Dolphin 服务菜单启动的是 `$APPIMAGE`，菜单项也由它给出（`omnizip-desktop --shell-menu`，与 `omnizip shell-menu` 输出相同），不指向每次运行都不同、退出即消失的解包目录。
+**桌面项与图标**（2026-11-03）：Wayland 下任务栏按窗口的 app id 找同名桌面项取图标（OmniZip 的 app id 为程序名 `omnizip-desktop`），窗口自己设置的图标只对 X11 有效。软件包安装 `platform/linux/omnizip-desktop.desktop` 与图标；不经软件包运行时（开发构建、AppImage、压缩包），应用启动时把桌面项（`Exec` 指向自身，AppImage 取 `$APPIMAGE`）与 hicolor 图标装到 `$XDG_DATA_HOME`，内容变化才重写（`apps/desktop/src-tauri/src/desktop_entry.rs`）；开发构建的桌面项不出现在应用菜单（`NoDisplay`），但同样声明压缩包类型，才能在设置页设为默认程序。桌面项的 `MimeType` 与 Dolphin 服务菜单共用 `servicemenu::ARCHIVE_MIME_TYPES`，单元测试保证一致。
 
 ### 5.3 打包形态对集成的影响
 

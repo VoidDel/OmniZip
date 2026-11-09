@@ -2,7 +2,7 @@
 
 > 一款面向 Windows / macOS / Linux 的现代化压缩与解压软件：统一的 Rust 核心、美观大气的界面、多语言、多主题、广泛的格式支持、深度的 Shell 集成（右键菜单 + 文件关联 + 命令行），以及把任意压缩包像 ISO 一样直接挂载为虚拟磁盘的能力。
 
-本仓库已按路线图进入实施，当前为 **M1 MVP（Windows 优先）**：核心库、ZIP / 7z / TAR 系列 / RAR 引擎、`omnizip` 命令行、Tauri 桌面应用、Windows 右键菜单扩展、挂载核心与 Windows 安装包均已可构建并通过测试。Win11 一级右键菜单已用自签证书的 MSIX 实机验证；Windows 上已可用 WinFsp 把压缩包挂载为盘符或文件夹（可带临时可写层，卸载时保存回压缩包或丢弃），由挂载守护进程保持、OmniZip 退出后仍在；ZIP / gzip 多线程压缩、大量小文件的解压与 .xz 解码已优化，与 Bandizip 的对比见 [11 §8.4](docs/11-roadmap.md#84-性能与正确性2026-10-29)；macOS 上可经回环 NFS 服务挂载（无需安装，2026-11-08）；正式代码签名、macOS 与 Linux 尚未完成。逐项进度见 [11 §8 实施状态](docs/11-roadmap.md#8-实施状态2026-10-29windows-优先)，设计文档位于 [docs/](docs/)。
+本仓库已按路线图进入实施，当前为 **M1 MVP（Windows 优先）**：核心库、ZIP / 7z / TAR 系列 / RAR 引擎、`omnizip` 命令行、Tauri 桌面应用、Windows 右键菜单扩展、挂载核心与 Windows 安装包均已可构建并通过测试。Win11 一级右键菜单已用自签证书的 MSIX 实机验证；Windows 上已可用 WinFsp 把压缩包挂载为盘符或文件夹（可带临时可写层，卸载时保存回压缩包或丢弃），由挂载守护进程保持、OmniZip 退出后仍在；ZIP / gzip 多线程压缩、大量小文件的解压与 .xz 解码已优化，与 Bandizip 的对比见 [11 §8.4](docs/11-roadmap.md#84-性能与正确性2026-10-29)；macOS 上可经回环 NFS 服务挂载（无需安装，2026-11-08）；经过两轮安全与数据完整性修复（解码器与挂载缓存的资源上限、符号链接按系统解析方式检查、逐级打开目录防 TOCTOU、ZIP 重叠条目检测、密码用后清零、关闭窗口时先取消任务等，见 [11 §8.5](docs/11-roadmap.md#85-安全与数据完整性2026-11-08)）；正式代码签名、macOS 与 Linux 尚未完成。逐项进度见 [11 §8 实施状态](docs/11-roadmap.md#8-实施状态2026-10-29windows-优先)，设计文档位于 [docs/](docs/)。
 
 ## 一句话定位
 
@@ -37,7 +37,7 @@
 | 多语言 | 前端 i18next + ICU MessageFormat；Rust 侧 Fluent；核心库只返回错误码，不返回文案 |
 | Shell | Windows：Rust 编写的 COM `IExplorerCommand` 扩展 + MSIX 包身份；macOS：Services + Finder 扩展；Linux：Dolphin/Thunar/Nemo 声明式菜单 + nautilus-python |
 | 挂载 | 独立守护进程 `omnizip-mountd`；Windows WinFsp 盘符、macOS 回环 NFSv3 + `mount_nfs`（FSKit 待签名到位）、Linux FUSE3；按格式分级的随机访问与缓存策略，内容按需解压不落盘整包 |
-| 安全 | 全部输入视为恶意；路径净化、压缩炸弹限额、MOTW 传播、C 引擎进程隔离（v2） |
+| 安全 | 全部输入视为恶意；路径净化、符号链接按系统解析方式检查、逐级打开目录防 TOCTOU、压缩炸弹限额（含 ZIP 重叠条目）、密码用后清零、MOTW 传播、C 引擎进程隔离（v2） |
 
 ## 交互原型
 
@@ -90,7 +90,7 @@ OmniZip/
 ├─ Cargo.toml                 # Rust workspace（resolver 3，edition 2024）
 ├─ package.json               # pnpm workspace
 ├─ crates/
-│  ├─ omnizip-core/           # 抽象、格式检测、路径净化、编码修复、TreeIndex、作业
+│  ├─ omnizip-core/           # 抽象、格式检测、路径净化、编码修复、TreeIndex、作业、解压写入（逐级持有目录）、密码 Secret
 │  ├─ omnizip-engine-zip/     # ZIP（zip crate）
 │  ├─ omnizip-engine-7z/      # 7z（sevenz-rust2）
 │  ├─ omnizip-engine-tar/     # TAR 与 gz / bz2 / xz / zst / lz4 / br

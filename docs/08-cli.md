@@ -106,7 +106,7 @@ omnizip unmount --all
 | `--dry-run` | 只显示将执行的操作 |
 | `--log-file <f>` | 详细日志 |
 | `--encoding <name>` / `--encoding auto` | 文件名编码 |
-| `--allow-high-ratio` / `--max-size <n>` | 安全策略覆盖（见 09） |
+| `--allow-high-ratio` / `--max-size <n>` | 安全策略覆盖（见 09）：`--allow-high-ratio` 跳过膨胀比检查，也允许一并解压 ZIP 中数据范围重叠的条目 |
 
 ## 5. 输出规范
 

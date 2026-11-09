@@ -8,7 +8,7 @@ OmniZip/
 ├─ rust-toolchain.toml              # 固定 stable 版本
 ├─ package.json  pnpm-workspace.yaml
 ├─ crates/
-│  ├─ omnizip-core/                 # 抽象、格式注册表、TreeIndex、编码修复、安全策略、作业
+│  ├─ omnizip-core/                 # 抽象、格式注册表、TreeIndex、编码修复、安全策略、作业、解压写入（DirGuard）、密码 Secret
 │  ├─ omnizip-engine-zip/
 │  ├─ omnizip-engine-7z/
 │  ├─ omnizip-engine-tar/           # tar + gz / bz2 / xz / zst / lz4 / br
