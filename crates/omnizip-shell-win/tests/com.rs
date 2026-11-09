@@ -10,7 +10,7 @@ use omnizip_shell::{
 };
 use windows::{
     Win32::{
-        Foundation::S_OK,
+        Foundation::{S_FALSE, S_OK},
         System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, IClassFactory},
         UI::Shell::{
             ECF_HASSUBCOMMANDS, ECS_ENABLED, ECS_HIDDEN, IEnumExplorerCommand, IExplorerCommand,
@@ -150,6 +150,22 @@ fn explorer_command_behaves_like_explorer_expects() {
         assert!(live_objects() > 0);
     }
     // Every object released: the DLL may be unloaded.
+    assert_eq!(live_objects(), 0);
+    assert_eq!(DllCanUnloadNow(), S_OK);
+
+    // A class factory the caller still holds keeps the DLL loaded (COM may call
+    // CreateInstance on it at any time), even when it has created nothing yet.
+    let f = factory(CLSID_ROOT);
+    assert_eq!(live_objects(), 1);
+    assert_eq!(DllCanUnloadNow(), S_FALSE);
+    // So does a server lock, and an unbalanced unlock does not wrap the count around.
+    unsafe { f.LockServer(true) }.unwrap();
+    drop(f);
+    assert_eq!(DllCanUnloadNow(), S_FALSE);
+    let f = factory(CLSID_ROOT);
+    unsafe { f.LockServer(false) }.unwrap();
+    unsafe { f.LockServer(false) }.unwrap();
+    drop(f);
     assert_eq!(live_objects(), 0);
     assert_eq!(DllCanUnloadNow(), S_OK);
 }

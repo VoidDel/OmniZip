@@ -63,8 +63,17 @@ fn verb_for(clsid: &GUID) -> Option<Option<Verb>> {
 }
 
 static MODULE: AtomicIsize = AtomicIsize::new(0);
+/// Live COM objects of this DLL: commands, enumerators and class factories. A class factory
+/// handed out by `DllGetClassObject` holds the DLL as much as the objects it creates.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
+/// `IClassFactory::LockServer` locks.
 static LOCKS: AtomicUsize = AtomicUsize::new(0);
+
+/// Takes one off a counter, never below zero: an unbalanced `LockServer(FALSE)` from a caller
+/// would otherwise wrap around and keep the DLL loaded for good.
+fn decrement(counter: &AtomicUsize) {
+    let _ = counter.try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+}
 
 /// Path of this DLL.
 pub fn module_path() -> Option<PathBuf> {
@@ -172,7 +181,7 @@ impl Command {
 
 impl Drop for Command {
     fn drop(&mut self) {
-        LIVE.fetch_sub(1, Ordering::Relaxed);
+        decrement(&LIVE);
     }
 }
 
@@ -280,7 +289,7 @@ impl Commands {
 
 impl Drop for Commands {
     fn drop(&mut self) {
-        LIVE.fetch_sub(1, Ordering::Relaxed);
+        decrement(&LIVE);
     }
 }
 
@@ -339,6 +348,19 @@ pub struct Factory {
     verb: Option<Verb>,
 }
 
+impl Factory {
+    fn new(verb: Option<Verb>) -> Self {
+        LIVE.fetch_add(1, Ordering::Relaxed);
+        Self { verb }
+    }
+}
+
+impl Drop for Factory {
+    fn drop(&mut self) {
+        decrement(&LIVE);
+    }
+}
+
 // The signatures come from the windows crate and cannot be `unsafe`. The COM contract makes
 // the caller (Explorer) responsible for valid pointers; null pointers are checked first.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -367,7 +389,7 @@ impl IClassFactory_Impl for Factory_Impl {
         if lock.as_bool() {
             LOCKS.fetch_add(1, Ordering::Relaxed);
         } else {
-            LOCKS.fetch_sub(1, Ordering::Relaxed);
+            decrement(&LOCKS);
         }
         Ok(())
     }
@@ -404,7 +426,7 @@ pub unsafe extern "system" fn DllGetClassObject(
     let Some(verb) = verb_for(unsafe { &*clsid }) else {
         return CLASS_E_CLASSNOTAVAILABLE;
     };
-    let factory: IClassFactory = Factory { verb }.into();
+    let factory: IClassFactory = Factory::new(verb).into();
     unsafe { factory.query(riid, ppv) }
 }
 
