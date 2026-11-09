@@ -1,42 +1,60 @@
 //! An archive as a read-only file system (`docs/12-mount.md` §3, §5, §6).
 //!
 //! Directory structure comes from the core [`TreeIndex`]; names are cleaned per directory on
-//! first use ([`crate::names`]); file data is decoded on the first read of each entry into the
-//! [`ContentCache`] and served by offset afterwards. Solid archives (mount class C) and
-//! single-stream ones (D) are decoded in one pass on first access instead, since every entry
-//! would otherwise restart the solid block or the stream. Files stored as they are (plain tar,
-//! stored ZIP entries) are read in place from the archive file, neither decoded nor cached.
-//! A large entry of its own stream (class B) is decoded by a background thread, and reads are
-//! answered as soon as the bytes they want are decoded ([`Partial`]).
+//! first use ([`crate::names`]). Files stored as they are (plain tar, stored ZIP entries) are
+//! read in place from the archive file, neither decoded nor cached. Everything else is decoded
+//! by the volume's workers ([`crate::decoder`]) into the [`ContentCache`] and served by offset
+//! afterwards; a read waits only for the bytes it wants ([`Partial`]).
+//!
+//! What one decoding pass covers depends on the archive (mount class): an entry of its own
+//! stream (B) is one pass, and reading a folder out in archive order queues the next entries
+//! ahead of the reads. A solid archive (C) or a single stream (D) decodes from the start of its
+//! block or stream whichever entry is wanted, so the first access decodes everything that fits
+//! the cache in one pass: one per solid block when the engine knows them, which decode side by
+//! side with the block that was read first.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     ffi::OsStr,
     fs::File,
-    io::{self, Write},
-    panic::{AssertUnwindSafe, catch_unwind},
+    io,
     path::PathBuf,
-    sync::{
-        Arc, Mutex, OnceLock, RwLock,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex, OnceLock, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use omnizip_core::{
-    ArchiveInfo, ArchiveReader, CancelToken, Entry, EntryData, EntryId, EntryKind, Error,
-    ErrorCode, ExtractSink, FixedPassword, Interaction, JobCtx, MountClass, NoInteraction,
-    NullProgress, Secret, SecurityPolicy, TreeIndex,
+    ArchiveInfo, ArchiveReader, CancelToken, Entry, EntryId, EntryKind, FixedPassword, Interaction,
+    JobCtx, MountClass, NoInteraction, NullProgress, Secret, SecurityPolicy, TreeIndex,
     path::{logical_components, resolve_link},
 };
 
 use crate::{
     Attr, DirEntry, FileHandle, FileType, FsError, FsResult, FsStats, NodeId, OpenFlags, VirtualFs,
-    cache::{CacheLimits, Content, ContentBuilder, ContentCache, Partial, STALL_TIMEOUT},
+    cache::{CacheLimits, Content, ContentCache, Partial, Progress, STALL_TIMEOUT},
+    decoder::{CacheSink, Pool, PoolOptions, SharedReader, decode},
     names::{NameRules, assign},
 };
 
-type SharedReader = Arc<Mutex<Box<dyn ArchiveReader>>>;
+/// Read-ahead (DwarFS's sequential-access detector, `docs/12-mount.md` §5): a file read from
+/// its start within this many entries after one read before suggests a folder being copied
+/// out in archive order.
+const SEQ_GAP: EntryId = 8;
+/// How far read-ahead keeps ahead of the reads: entries, and bytes of them.
+const AHEAD_ENTRIES: EntryId = 64;
+const AHEAD_BYTES: u64 = 32 << 20;
+/// Entries read ahead are decoded in passes of neighbours, which lie next to each other in the
+/// archive file: up to this many, and this many bytes.
+const PASS_ENTRIES: usize = 8;
+const PASS_BYTES: u64 = 1 << 20;
+/// A warm-up of an archive whose entries decode on their own goes in passes this large.
+const WARM_PASS_ENTRIES: usize = 256;
+const WARM_PASS_BYTES: u64 = 64 << 20;
+
+/// Decoding passes a volume runs at once by default (`docs/12-mount.md` §4).
+pub fn default_workers() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get().min(4))
+}
 
 /// How symbolic links are shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,9 +87,11 @@ pub struct FsOptions {
     pub warm_solid: bool,
     /// Limits on untrusted content: the expansion ratio caps what one entry may unpack to.
     pub policy: SecurityPolicy,
-    /// A read waiting on a background decode fails with [`FsError::Io`] when the decoder makes
-    /// no progress for this long (`docs/12-mount.md` §7).
+    /// A read waiting on a decode fails with [`FsError::Io`] when the decoder makes no progress
+    /// for this long (`docs/12-mount.md` §7).
     pub stall_timeout: Duration,
+    /// Decoding passes run at once (worker threads, each with its own reader of the archive).
+    pub workers: usize,
 }
 
 impl Default for FsOptions {
@@ -90,9 +110,19 @@ impl Default for FsOptions {
             password: None,
             warm_solid: true,
             stall_timeout: STALL_TIMEOUT,
+            workers: default_workers(),
             policy: SecurityPolicy::default(),
         }
     }
+}
+
+/// What read-ahead has seen and done.
+#[derive(Debug, Default)]
+struct ReadAhead {
+    /// Entries most recently read from their start.
+    recent: VecDeque<EntryId>,
+    /// Entries before this one have been looked at for read-ahead.
+    to: EntryId,
 }
 
 /// Display names of one directory.
@@ -121,6 +151,7 @@ struct Shape {
 
 /// A mounted archive.
 pub struct ArchiveFs {
+    /// The reader everything but decoding uses (decoding workers have clones of it).
     reader: SharedReader,
     info: ArchiveInfo,
     entries: Vec<Entry>,
@@ -128,8 +159,10 @@ pub struct ArchiveFs {
     opts: FsOptions,
     dirs: RwLock<HashMap<NodeId, Arc<DirView>>>,
     cache: Arc<ContentCache>,
-    /// Large entries being decoded in the background, readable as far as they are.
-    decoding: Arc<Mutex<HashMap<EntryId, Arc<Partial>>>>,
+    pool: Pool,
+    /// Per entry, the solid block holding it (class C, when the engine knows its blocks).
+    blocks: Vec<Option<u32>>,
+    read_ahead: Mutex<ReadAhead>,
     /// Stops decoding when the volume goes away.
     cancel: CancelToken,
     handles: Mutex<HashMap<u64, NodeId>>,
@@ -137,7 +170,9 @@ pub struct ArchiveFs {
     interaction: Arc<dyn Interaction>,
     fallback_time: SystemTime,
     stats: FsStats,
-    warmed: AtomicBool,
+    /// The warm-up has been queued. Held while it is, so that reads arriving meanwhile wait
+    /// for its passes instead of starting passes of their own over the same blocks.
+    warmed: Mutex<bool>,
     /// The archive file, for reading stored entries in place (an archive of one file).
     file: Option<File>,
     /// Per entry, where its data lies as it is in [`file`](Self::file), asked once.
@@ -216,24 +251,44 @@ impl ArchiveFs {
         let stored = std::iter::repeat_with(OnceLock::new)
             .take(entries.len())
             .collect();
+        let blocks = if info.format.mount_class(info.solid) == MountClass::C {
+            entries.iter().map(|e| reader.solid_block(e.id)).collect()
+        } else {
+            Vec::new()
+        };
+        let reader: SharedReader = Arc::new(Mutex::new(reader));
+        let cancel = CancelToken::new();
+        let pool = Pool::new(
+            reader.clone(),
+            cache.clone(),
+            PoolOptions {
+                workers: opts.workers,
+                stall: opts.stall_timeout,
+                interaction: interaction.clone(),
+                cancel: cancel.clone(),
+                policy: opts.policy.clone(),
+            },
+        );
         Ok(Self {
             file,
             stored,
-            reader: Arc::new(Mutex::new(reader)),
+            reader,
             info,
             entries,
             tree,
             opts,
             dirs: RwLock::new(HashMap::new()),
             cache,
-            decoding: Arc::default(),
-            cancel: CancelToken::new(),
+            pool,
+            blocks,
+            read_ahead: Mutex::default(),
+            cancel,
             handles: Mutex::new(HashMap::new()),
             next_handle: Mutex::new(1),
             interaction,
             fallback_time,
             stats,
-            warmed: AtomicBool::new(false),
+            warmed: Mutex::new(false),
         })
     }
 
@@ -263,73 +318,111 @@ impl ArchiveFs {
             .with_policy(self.opts.policy.clone())
     }
 
-    /// Whether an entry is read while a background thread decodes it: a large file with its
-    /// own stream (class B). Solid and single-stream archives are decoded in one pass instead.
-    fn streams(&self, id: EntryId) -> bool {
-        let e = &self.entries[id as usize];
-        self.mount_class() == MountClass::B
-            && e.size_known
-            && e.size > self.cache.limits().inline_max
+    /// Decoding passes run at once, at most: one when the engine cannot clone its reader.
+    pub fn workers(&self) -> usize {
+        self.pool.max_workers()
     }
 
-    /// The decoding of a large entry: the one under way, or one started now.
-    fn stream(&self, id: EntryId) -> FsResult<Arc<Partial>> {
-        let mut decoding = self.decoding.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(p) = decoding.get(&id) {
-            return Ok(p.clone());
+    /// Whether the first access decodes everything that fits the cache (`docs/12-mount.md`
+    /// §5): any entry of a single stream decodes from its start, and so does any entry of a
+    /// solid block (a setting).
+    fn one_pass(&self) -> bool {
+        match self.mount_class() {
+            MountClass::C => self.opts.warm_solid,
+            MountClass::D => true,
+            MountClass::A | MountClass::B => false,
         }
-        let partial = Arc::new(Partial::new(self.opts.stall_timeout));
-        decoding.insert(id, partial.clone());
-        drop(decoding);
-        let (reader, cache, decoding) = (
-            self.reader.clone(),
-            self.cache.clone(),
-            self.decoding.clone(),
-        );
-        let ctx = self.ctx();
-        let p = partial.clone();
-        let spawned = std::thread::Builder::new()
-            .name("omnizip-decode".into())
-            .spawn(move || {
-                // A decoder may panic on corrupt data: the readers then get an error instead
-                // of waiting for an end that never comes.
-                let decoded = catch_unwind(AssertUnwindSafe(|| {
-                    let mut reader = reader.lock().unwrap_or_else(|e| e.into_inner());
-                    p.start();
-                    match cache.get(id) {
-                        // Decoded meanwhile.
-                        Some(c) => {
-                            p.end(Ok(c));
-                            Ok(())
-                        }
-                        None => decode(
-                            reader.as_mut(),
-                            &cache,
-                            HashSet::from([id]),
-                            Some((id, &p)),
-                            &ctx,
-                        ),
-                    }
-                }))
-                .unwrap_or_else(|_| {
-                    tracing::error!("mount: the decoder panicked");
-                    Err(FsError::Io)
-                });
-                // The sink ends it with the content; whatever stopped it short ends it here.
-                p.end(decoded.and(Err(FsError::Io)));
-                decoding
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .remove(&id);
-            });
-        if spawned.is_err() {
-            self.decoding
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&id);
-            return Err(FsError::Io);
+    }
+
+    /// The decode a read of `id` waits on: under way, or queued now with the passes the archive
+    /// calls for.
+    fn request(&self, id: EntryId) -> Arc<Partial> {
+        if let Some(p) = self.pool.pending(id) {
+            return p;
         }
-        Ok(partial)
+        if !self.one_pass() {
+            return self.pool.request(id, vec![(vec![id], false)]);
+        }
+        let mut warmed = self.warmed.lock().unwrap_or_else(|e| e.into_inner());
+        if *warmed {
+            drop(warmed);
+            return self.pool.request(id, vec![(vec![id], false)]);
+        }
+        *warmed = true;
+        self.pool.request(id, self.warm_passes(Some(id)))
+    }
+
+    /// Read-ahead after a read of `id` from its start (class B): when the entries just before
+    /// it were read too, the small entries after it are queued for decoding ahead of the reads
+    /// (DwarFS's sequential-access detector). Reads of a folder being copied out then find
+    /// their files decoded, by several workers at once.
+    fn read_ahead(&self, id: EntryId) {
+        let passes = {
+            let mut ra = self.read_ahead.lock().unwrap_or_else(|e| e.into_inner());
+            let sequential = ra.recent.iter().any(|&r| r < id && id - r <= SEQ_GAP);
+            if ra.recent.len() >= SEQ_GAP as usize {
+                ra.recent.pop_front();
+            }
+            ra.recent.push_back(id);
+            if !sequential {
+                return;
+            }
+            let end = id
+                .saturating_add(AHEAD_ENTRIES)
+                .min(self.entries.len() as EntryId);
+            // Go on from where the last look stopped, unless the reads went back before it.
+            let mut at = if ra.to > id && ra.to <= end {
+                ra.to
+            } else {
+                id + 1
+            };
+            let wanted = |e: &Entry| self.ahead_candidate(e);
+            let mut ahead: u64 = self.entries[id as usize + 1..at as usize]
+                .iter()
+                .filter(|e| wanted(e))
+                .map(|e| e.size)
+                .sum();
+            let (mut passes, mut pass, mut pass_bytes) = (Vec::new(), Vec::new(), 0);
+            while at < end && ahead < AHEAD_BYTES {
+                let e = &self.entries[at as usize];
+                at += 1;
+                if !wanted(e) {
+                    continue;
+                }
+                if pass.len() >= PASS_ENTRIES
+                    || !pass.is_empty() && pass_bytes + e.size > PASS_BYTES
+                {
+                    passes.push(std::mem::take(&mut pass));
+                    pass_bytes = 0;
+                }
+                pass.push(e.id);
+                pass_bytes += e.size;
+                ahead += e.size;
+            }
+            if !pass.is_empty() {
+                passes.push(pass);
+            }
+            ra.to = at;
+            passes
+        };
+        if !passes.is_empty() {
+            self.pool.ahead(passes);
+        }
+    }
+
+    /// Whether read-ahead decodes an entry: small files only. Large ones stream when they are
+    /// read, and stored ones are read in place.
+    fn ahead_candidate(&self, e: &Entry) -> bool {
+        let stored = e
+            .method
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("store") || m.eq_ignore_ascii_case("copy"))
+            || matches!(self.stored[e.id as usize].get(), Some(Some(_)));
+        e.kind == EntryKind::File
+            && e.size_known
+            && e.size > 0
+            && e.size <= self.cache.limits().inline_max
+            && !stored
     }
 
     fn dir_view(&self, dir: NodeId) -> FsResult<Arc<DirView>> {
@@ -518,38 +611,11 @@ impl ArchiveFs {
         Ok(shape)
     }
 
-    /// Decoded content of an entry, decoding it on first use.
-    fn content(&self, id: EntryId) -> FsResult<Content> {
-        if let Some(c) = self.cache.get(id) {
-            return Ok(c);
-        }
-        let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
-        // Another thread may have decoded it while we waited.
-        if let Some(c) = self.cache.get(id) {
-            return Ok(c);
-        }
-        // A solid block, or an archive that is one compressed stream (tar.gz), decodes only
-        // from its start: decoding one entry passes over the ones before it. Caching everything
-        // that fits in one pass keeps reading a whole folder from decoding the same start over
-        // and over. A stream has no other way around it; for solid archives it is a setting.
-        let one_pass = match self.mount_class() {
-            MountClass::C => self.opts.warm_solid,
-            MountClass::D => true,
-            MountClass::A | MountClass::B => false,
-        };
-        let mut targets: HashSet<EntryId> = HashSet::from([id]);
-        if one_pass && !self.warmed.swap(true, Ordering::SeqCst) {
-            targets.extend(self.warm_targets());
-        }
-        decode(reader.as_mut(), &self.cache, targets, None, &self.ctx())?;
-        drop(reader);
-        self.cache.get(id).ok_or(FsError::Io)
-    }
-
-    /// Entries a full warm-up decodes: every file not yet cached, within the disk budget.
-    fn warm_targets(&self) -> HashSet<EntryId> {
+    /// Entries a full warm-up decodes, in archive order: every file not yet cached, within the
+    /// disk budget.
+    fn warm_targets(&self) -> Vec<EntryId> {
         let mut budget = self.cache.limits().disk;
-        let mut out = HashSet::new();
+        let mut out = Vec::new();
         for e in &self.entries {
             if e.kind != EntryKind::File || self.cache.contains(e.id) {
                 continue;
@@ -558,22 +624,81 @@ impl ArchiveFs {
                 break;
             }
             budget -= e.size;
-            out.insert(e.id);
+            out.push(e.id);
         }
         out
     }
 
-    /// Decodes every file into the cache in one pass, as far as the disk budget allows
-    /// ("warm up", useful before seeking around a solid archive). Returns the number of
-    /// entries now cached.
-    pub fn warm(&self) -> FsResult<usize> {
-        let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
-        self.warmed.store(true, Ordering::SeqCst);
-        let targets = self.warm_targets();
-        if !targets.is_empty() {
-            decode(reader.as_mut(), &self.cache, targets, None, &self.ctx())?;
+    /// The passes of a warm-up (targets, and whether they go ahead of reads). A solid block or
+    /// a stream decodes only from its start, so decoding one entry passes over the ones before
+    /// it: caching everything that fits keeps reading a whole folder from decoding the same
+    /// start over and over. Each solid block is a pass of its own when the engine knows them
+    /// (they decode side by side); otherwise the whole archive is one. `first`, the entry a read
+    /// waits for, is in the pass that comes first; without it, every pass goes ahead of reads.
+    fn warm_passes(&self, first: Option<EntryId>) -> Vec<(Vec<EntryId>, bool)> {
+        let mut targets = self.warm_targets();
+        if let Some(id) = first
+            && !targets.contains(&id)
+        {
+            targets.push(id);
         }
-        Ok(self.cache.len())
+        let ahead = first.is_none();
+        let block_of = |id: EntryId| self.blocks.get(id as usize).copied().flatten();
+        if self.mount_class() == MountClass::C && targets.iter().any(|&id| block_of(id).is_some()) {
+            let mut by_block: BTreeMap<Option<u32>, Vec<EntryId>> = BTreeMap::new();
+            for id in targets {
+                by_block.entry(block_of(id)).or_default().push(id);
+            }
+            let lead = first.map(block_of);
+            let mut passes: Vec<(Vec<EntryId>, bool)> = Vec::new();
+            if let Some(b) = lead
+                && let Some(t) = by_block.remove(&b)
+            {
+                passes.push((t, false));
+            }
+            passes.extend(by_block.into_values().map(|t| (t, true)));
+            return passes;
+        }
+        if self.mount_class() == MountClass::B {
+            // Entries decode on their own: in passes the workers share.
+            let mut passes = Vec::new();
+            let (mut pass, mut bytes) = (Vec::new(), 0);
+            for id in targets {
+                let size = self.entries[id as usize].size;
+                if !pass.is_empty()
+                    && (pass.len() >= WARM_PASS_ENTRIES || bytes + size > WARM_PASS_BYTES)
+                {
+                    passes.push((std::mem::take(&mut pass), ahead));
+                    bytes = 0;
+                }
+                pass.push(id);
+                bytes += size;
+            }
+            if !pass.is_empty() {
+                passes.push((pass, ahead));
+            }
+            return passes;
+        }
+        vec![(targets, ahead)]
+    }
+
+    /// Decodes every file into the cache, as far as the disk budget allows ("warm up", useful
+    /// before seeking around a solid archive), and waits for it. Reads go first meanwhile.
+    /// Returns the number of entries now cached.
+    pub fn warm(&self) -> FsResult<usize> {
+        let queued = {
+            let mut warmed = self.warmed.lock().unwrap_or_else(|e| e.into_inner());
+            *warmed = true;
+            let passes = self.warm_passes(None).into_iter().map(|(t, _)| t).collect();
+            self.pool.ahead(passes)
+        };
+        let mut result = Ok(());
+        for p in queued {
+            if let Err(e) = p.wait_end() {
+                result = result.and(Err(e));
+            }
+        }
+        result.map(|()| self.cache.len())
     }
 
     /// Decodes one encrypted file, so that a missing or wrong password shows when mounting
@@ -594,25 +719,38 @@ impl ArchiveFs {
         if self.cache.contains(e.id) {
             return Ok(());
         }
-        let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
-        decode(
-            reader.as_mut(),
+        let (partials, progress) = (HashMap::new(), Progress::default());
+        let mut sink = CacheSink::detached(
             &self.cache,
             HashSet::from([e.id]),
-            None,
-            &self.ctx(),
-        )
+            &partials,
+            &progress,
+            self.info.archive_size,
+        );
+        let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
+        decode(reader.as_mut(), &mut sink, &self.ctx())
     }
 
     /// Where an entry's data lies as it is in the archive file, asked of the reader once.
+    /// When an engine without clones decodes on that reader and it is busy, the entry is taken
+    /// as not stored this time: decoding it is right too, and the read does not wait for the
+    /// decode in progress.
     fn stored(&self, id: EntryId) -> Option<(u64, u64)> {
         self.file.as_ref()?;
-        *self.stored.get(id as usize)?.get_or_init(|| {
-            self.reader
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .stored_range(id)
-        })
+        let slot = self.stored.get(id as usize)?;
+        if let Some(known) = slot.get() {
+            return *known;
+        }
+        let mut reader = if self.pool.decodes_on_shared_reader() {
+            match self.reader.try_lock() {
+                Ok(r) => r,
+                Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => return None,
+            }
+        } else {
+            self.reader.lock().unwrap_or_else(|e| e.into_inner())
+        };
+        *slot.get_or_init(|| reader.stored_range(id))
     }
 
     /// Reads a stored entry in place into `buf`, from `offset` and never past `declared`.
@@ -706,134 +844,6 @@ pub fn short_label(label: &str) -> String {
     format!("{}…{}", head.trim_end(), tail.trim_start())
 }
 
-/// Decodes `targets` into the cache; `partial` gets the bytes of the entry being streamed.
-fn decode(
-    reader: &mut dyn ArchiveReader,
-    cache: &ContentCache,
-    targets: HashSet<EntryId>,
-    partial: Option<(EntryId, &Arc<Partial>)>,
-    ctx: &JobCtx,
-) -> FsResult<()> {
-    let mut sink = CacheSink {
-        cache,
-        pending: targets,
-        partial,
-        archive_size: reader.info().archive_size,
-    };
-    match reader.extract_to(&mut sink, ctx) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            if e.code() != ErrorCode::Cancelled {
-                tracing::warn!(code = e.code().id(), "mount: decoding failed");
-            }
-            Err(e.into())
-        }
-    }
-}
-
-/// Receives decoded entries into the cache.
-struct CacheSink<'a> {
-    cache: &'a ContentCache,
-    pending: HashSet<EntryId>,
-    /// The entry being streamed, and its readers.
-    partial: Option<(EntryId, &'a Arc<Partial>)>,
-    /// For the expansion-ratio limit.
-    archive_size: u64,
-}
-
-/// Copies an entry in chunks of up to 1 MiB (no larger than the entry), checking for
-/// cancellation between them.
-fn copy(
-    r: &mut dyn io::Read,
-    w: &mut ContentBuilder,
-    size: Option<u64>,
-    ctx: &JobCtx,
-) -> io::Result<()> {
-    let chunk = size.map_or(1 << 20, |s| (s + 1).clamp(8 << 10, 1 << 20));
-    let mut buf = vec![0; chunk as usize];
-    loop {
-        if ctx.check().is_err() {
-            return Err(io::ErrorKind::Interrupted.into());
-        }
-        match r.read(&mut buf) {
-            Ok(0) => return Ok(()),
-            Ok(n) => w.write_all(&buf[..n])?,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
-        }
-    }
-}
-
-impl ExtractSink for CacheSink<'_> {
-    fn wants(&self, entry: &Entry) -> bool {
-        self.pending.contains(&entry.id)
-    }
-
-    fn entry(
-        &mut self,
-        entry: &Entry,
-        data: EntryData<'_>,
-        ctx: &JobCtx,
-    ) -> omnizip_core::Result<()> {
-        ctx.check()?;
-        self.pending.remove(&entry.id);
-        let cache = self.cache;
-        let partial = self
-            .partial
-            .filter(|(id, _)| *id == entry.id)
-            .map(|(_, p)| p);
-        let limits = cache.limits();
-        // Never more than declared, and never past the expansion ratio extraction would ask
-        // about (bomb guard: the declared size comes from the archive too, and a mounted volume
-        // is read by thumbnailers and virus scanners as soon as it is browsed). Unknown sizes
-        // are also bounded by the disk budget.
-        let declared = if entry.size_known {
-            entry.size
-        } else {
-            limits.disk
-        };
-        let cap = declared.min(ctx.policy.max_unpacked(self.archive_size));
-        let oversize = |e: io::Error| {
-            if ContentBuilder::is_oversize(&e) {
-                Error::new(ErrorCode::CompressionBomb).with("path", &entry.path)
-            } else {
-                Error::from(e)
-            }
-        };
-        let content = match data {
-            EntryData::Stream(r) => {
-                let mut b = match partial {
-                    Some(p) => cache.streaming_builder(cap, p.clone()),
-                    None => cache.builder(cap),
-                };
-                if let Err(e) = copy(r, &mut b, entry.size_known.then_some(entry.size), ctx) {
-                    ctx.check()?;
-                    return Err(oversize(e));
-                }
-                b.finish()?
-            }
-            EntryData::WriteTo(w) => {
-                let path = tempfile::Builder::new()
-                    .prefix("entry-")
-                    .tempfile_in(cache.dir())?
-                    .into_temp_path();
-                w(&path)?;
-                ContentBuilder::adopt(path, cap, limits.inline_max).map_err(oversize)?
-            }
-            EntryData::None => Content::Mem(Arc::from(&[][..])),
-        };
-        let content = cache.insert(entry.id, content);
-        if let Some(p) = partial {
-            p.end(Ok(content));
-        }
-        Ok(())
-    }
-
-    fn done(&self) -> bool {
-        self.pending.is_empty()
-    }
-}
-
 impl VirtualFs for ArchiveFs {
     fn lookup(&self, parent: NodeId, name: &OsStr) -> FsResult<Attr> {
         let (view, i) = self.find(parent, name)?;
@@ -906,21 +916,26 @@ impl VirtualFs for ArchiveFs {
             (_, Data::None) => Ok(0),
             (_, Data::Text(t)) => Ok(Content::Mem(t).read_into(offset, buf)?),
             (_, Data::Entry(id)) => {
-                if offset >= shape.attr.size && self.entries[id as usize].size_known {
+                let known = self.entries[id as usize].size_known;
+                if offset >= shape.attr.size && known {
                     return Ok(0);
                 }
                 if let Some(range) = self.stored(id) {
                     return self.read_stored(range, shape.attr.size, offset, buf);
                 }
+                if offset == 0 && self.mount_class() == MountClass::B {
+                    self.read_ahead(id);
+                }
                 if let Some(c) = self.cache.get(id) {
                     return Ok(c.read_into(offset, buf)?);
                 }
-                if self.streams(id) {
-                    // Never past the declared size: a read there would wait for the end.
-                    let n = shape.attr.size.saturating_sub(offset).min(buf.len() as u64);
-                    return self.stream(id)?.read_into(offset, &mut buf[..n as usize]);
-                }
-                Ok(self.content(id)?.read_into(offset, buf)?)
+                // Never past the declared size: a read there would wait for the end.
+                let n = if known {
+                    shape.attr.size.saturating_sub(offset).min(buf.len() as u64) as usize
+                } else {
+                    buf.len()
+                };
+                self.request(id).read_into(offset, &mut buf[..n])
             }
         }
     }

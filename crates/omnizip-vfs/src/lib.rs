@@ -15,6 +15,7 @@
 pub mod archivefs;
 pub mod backend;
 pub mod cache;
+mod decoder;
 pub mod names;
 pub mod overlay;
 mod pos;

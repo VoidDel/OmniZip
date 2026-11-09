@@ -5,8 +5,11 @@
 //! WinFsp.
 //!
 //! ```text
-//! cargo run --release -p omnizip-mount-winfsp --example mountbench -- <archive> [--writable] [--threads N]
+//! cargo run --release -p omnizip-mount-winfsp --example mountbench -- <archive> [--writable] [--threads N] [--vfs-only]
 //! ```
+//!
+//! `--vfs-only` stops after the in-process reads through `VirtualFs` (one thread, then as many
+//! as a backend uses): what decoding costs, without the driver or a virus scanner.
 //!
 //! Run the binary from outside the project directory: Defender makes file-heavy work there
 //! about 1.5 times slower.
@@ -43,6 +46,12 @@ mod bench {
         archive: PathBuf,
         writable: bool,
         threads: usize,
+        /// Only the in-process reads through `VirtualFs`: no extraction, no driver.
+        vfs_only: bool,
+        /// Threads of the parallel in-process read.
+        vfs_threads: usize,
+        /// Decoding workers per volume (the default when `None`).
+        workers: Option<usize>,
     }
 
     fn args() -> Args {
@@ -50,21 +59,41 @@ mod bench {
             archive: PathBuf::new(),
             writable: false,
             threads: 1,
+            vfs_only: false,
+            vfs_threads: VFS_THREADS,
+            workers: None,
         };
         let mut it = std::env::args().skip(1);
         while let Some(s) = it.next() {
             match s.as_str() {
                 "--writable" => a.writable = true,
+                "--vfs-only" => a.vfs_only = true,
+                "--workers" => a.workers = it.next().and_then(|n| n.parse().ok()),
+                "--vfs-threads" => {
+                    a.vfs_threads = it
+                        .next()
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(VFS_THREADS)
+                }
                 "--threads" => a.threads = it.next().and_then(|n| n.parse().ok()).unwrap_or(1),
                 _ => a.archive = PathBuf::from(s),
             }
         }
         if a.archive.as_os_str().is_empty() {
-            eprintln!("usage: mountbench <archive> [--writable] [--threads N]");
+            eprintln!(
+                "usage: mountbench <archive> [--writable] [--threads N] [--vfs-only] [--vfs-threads N]"
+            );
             std::process::exit(2);
         }
         a
     }
+
+    /// Requests a backend sends at once: FUSE serves a volume on 8 threads, WinFsp on one per
+    /// processor.
+    const VFS_THREADS: usize = 8;
+
+    /// `--workers`, for every volume the run opens.
+    static WORKERS: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
 
     fn row(what: &str, t: Duration, extra: impl std::fmt::Display) {
         println!("{what:<34} {:>9.3} s  {extra}", t.as_secs_f64());
@@ -88,6 +117,11 @@ mod bench {
                 reader,
                 FsOptions {
                     cache_dir: Some(cache),
+                    workers: WORKERS
+                        .get()
+                        .copied()
+                        .flatten()
+                        .unwrap_or_else(omnizip_vfs::archivefs::default_workers),
                     ..Default::default()
                 },
             )
@@ -111,6 +145,43 @@ mod bench {
             }
         }
         (files, bytes)
+    }
+
+    /// Every file node below `dir`, in listing order.
+    fn vfs_files(fs: &ArchiveFs, dir: u32, out: &mut Vec<u32>) {
+        for e in fs.readdir(dir, 0, usize::MAX).unwrap() {
+            if e.attr.is_dir() {
+                vfs_files(fs, e.attr.node, out);
+            } else {
+                out.push(e.attr.node);
+            }
+        }
+    }
+
+    /// Reads every file through the interface on `threads` threads, each taking the next file
+    /// of the listing (as a backend's request threads do when a folder is copied out); bytes.
+    fn read_vfs_parallel(fs: &ArchiveFs, threads: usize) -> (u64, u64) {
+        let mut files = Vec::new();
+        vfs_files(fs, omnizip_vfs::ROOT, &mut files);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let bytes = std::thread::scope(|s| {
+            (0..threads)
+                .map(|_| {
+                    s.spawn(|| {
+                        let mut n = 0;
+                        loop {
+                            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(&node) = files.get(i) else { return n };
+                            n += omnizip_vfs::read_all(fs, node, 1 << 20).unwrap().len() as u64;
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .sum()
+        });
+        (files.len() as u64, bytes)
     }
 
     /// A mount of `archive`, writable over a layer in `scratch` when asked.
@@ -209,11 +280,38 @@ mod bench {
 
     pub fn main() {
         let a = args();
+        let _ = WORKERS.set(a.workers);
         let scratch = tempfile::Builder::new()
             .prefix("mountbench-")
             .tempdir_in(std::env::current_dir().unwrap())
             .unwrap();
         println!("{}", a.archive.display());
+
+        // The files read through the file system interface in this process, without the
+        // driver: what decoding costs, on one thread and on as many as a backend uses.
+        let fs = open_fs(&a.archive, &scratch.path().join("direct"));
+        let t = Instant::now();
+        let (count, bytes) = read_vfs(&fs, omnizip_vfs::ROOT);
+        let direct = t.elapsed();
+        row(
+            "read all through VirtualFs",
+            direct,
+            format!("{count} files, {}", rate(bytes, direct)),
+        );
+        drop(fs);
+        let fs = open_fs(&a.archive, &scratch.path().join("direct-mt"));
+        let t = Instant::now();
+        let (count, bytes) = read_vfs_parallel(&fs, a.vfs_threads);
+        let direct = t.elapsed();
+        row(
+            &format!("read all through VirtualFs ({} thr)", a.vfs_threads),
+            direct,
+            format!("{count} files, {}", rate(bytes, direct)),
+        );
+        drop(fs);
+        if a.vfs_only {
+            return;
+        }
 
         // Reference: extracting the whole archive.
         let out = scratch.path().join("extracted");
@@ -241,19 +339,6 @@ mod bench {
             format!("{} files, {}", on_disk.len(), rate(total, extract_time)),
         );
         let _ = fs::remove_dir_all(&out);
-
-        // The same files read through the file system interface in this process, without the
-        // driver: what decoding costs.
-        let fs = open_fs(&a.archive, &scratch.path().join("direct"));
-        let t = Instant::now();
-        let (count, bytes) = read_vfs(&fs, omnizip_vfs::ROOT);
-        let direct = t.elapsed();
-        row(
-            "read all through VirtualFs",
-            direct,
-            format!("{count} files, {}", rate(bytes, direct)),
-        );
-        drop(fs);
 
         // Mount and list.
         let t = Instant::now();

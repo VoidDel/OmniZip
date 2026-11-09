@@ -7,15 +7,19 @@
 //! a reader still holds stays valid after eviction (it is reference counted), and a spool
 //! file is deleted when its last holder lets go.
 //!
-//! A large entry can be read while it is being decoded ([`Partial`]): readers wait only until
-//! the bytes they ask for are in the spool file, not for the whole entry.
+//! Every entry being decoded has a [`Partial`] its readers wait on; a large one can be read
+//! while it is decoded: readers wait only until the bytes they ask for are in the spool file,
+//! not for the whole entry.
 
 use std::{
     collections::HashMap,
     fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, OnceLock},
+    sync::{
+        Arc, Condvar, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -116,14 +120,54 @@ impl Content {
 /// (`docs/12-mount.md` §7): Explorer and other programs hang while a read is pending.
 pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// An entry being decoded into a spool file, readable as far as it has been written.
+/// How often a waiting read looks at the progress of the decoding pass.
+const PROGRESS_POLL: Duration = Duration::from_secs(1);
+
+/// What one decoding pass has produced so far, for every entry it decodes. An entry deep in a
+/// solid block or a tar.gz waits while the pass decodes the entries before it: that is the
+/// pass's progress, which keeps the entry's readers from taking it for a stuck decoder.
+#[derive(Debug, Default)]
+pub struct Progress {
+    bytes: AtomicU64,
+    /// A file the engine writes itself (RAR), whose growth counts too.
+    writing: Mutex<Option<PathBuf>>,
+}
+
+impl Progress {
+    /// Counts `n` bytes produced.
+    pub fn add(&self, n: u64) {
+        self.bytes.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Sets or clears the file the engine is writing.
+    pub fn writing(&self, path: Option<&Path>) {
+        *self.writing.lock().unwrap_or_else(|e| e.into_inner()) = path.map(Path::to_owned);
+    }
+
+    /// Bytes produced so far.
+    pub fn value(&self) -> u64 {
+        let file = self
+            .writing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map_or(0, |m| m.len());
+        self.bytes.load(Ordering::Relaxed).saturating_add(file)
+    }
+}
+
+/// An entry being decoded, whose readers wait until it is done or, for a large entry spooled as
+/// it is decoded, until the bytes they want are written.
 pub struct Partial {
     /// A handle on the spool file, set when it is created.
     file: OnceLock<File>,
     state: Mutex<PartialState>,
     grew: Condvar,
-    /// A read fails when the decoder, once started, produces nothing for this long.
+    /// A read fails when the decoding pass, once started, produces nothing for this long.
     stall: Duration,
+    /// The decoding pass this entry is part of.
+    progress: Arc<Progress>,
 }
 
 #[derive(Default)]
@@ -138,19 +182,28 @@ struct PartialState {
 
 impl Default for Partial {
     fn default() -> Self {
-        Self::new(STALL_TIMEOUT)
+        Self::new(STALL_TIMEOUT, Arc::default())
     }
 }
 
 impl Partial {
-    /// A decode whose readers give up after `stall` without progress.
-    pub fn new(stall: Duration) -> Self {
+    /// A decode, part of the pass making `progress`, whose readers give up after `stall`
+    /// without progress.
+    pub fn new(stall: Duration, progress: Arc<Progress>) -> Self {
         Self {
             file: OnceLock::new(),
             state: Mutex::default(),
             grew: Condvar::new(),
             stall,
+            progress,
         }
+    }
+
+    /// One that has already ended with `content`.
+    pub fn finished(content: Content) -> Self {
+        let p = Self::default();
+        p.end(Ok(content));
+        p
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, PartialState> {
@@ -184,22 +237,39 @@ impl Partial {
         self.lock().done.is_some()
     }
 
+    /// Waits until decoding ends, however long that takes (warming up a volume); the content or
+    /// why it stopped.
+    pub fn wait_end(&self) -> FsResult<Content> {
+        let mut st = self.lock();
+        loop {
+            if let Some(done) = &st.done {
+                return done.clone();
+            }
+            st = self.grew.wait(st).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
     /// Copies up to `buf.len()` bytes at `offset` into `buf`, waiting until they are decoded
     /// (or decoding ends); the number copied, fewer only at the end of the entry. Fails with
-    /// [`FsError::Io`] when the started decoder makes no progress for the stall time.
+    /// [`FsError::Io`] when the decoding pass, once started, makes no progress for the stall
+    /// time. Waiting for the pass to start (behind other decodes) has no limit.
     pub fn read_into(&self, offset: u64, buf: &mut [u8]) -> FsResult<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
         let want = offset.saturating_add(buf.len() as u64);
         let mut st = self.lock();
-        let mut seen = (st.started, st.written);
+        let mut seen = (st.started, st.written, self.progress.value());
         let mut since = Instant::now();
         while st.written < want && st.done.is_none() {
-            if (st.started, st.written) != seen {
-                seen = (st.started, st.written);
-                since = Instant::now();
-            }
             if !st.started {
                 st = self.grew.wait(st).unwrap_or_else(|e| e.into_inner());
                 continue;
+            }
+            let now = (st.started, st.written, self.progress.value());
+            if now != seen {
+                seen = now;
+                since = Instant::now();
             }
             let left = self.stall.saturating_sub(since.elapsed());
             if left.is_zero() {
@@ -209,9 +279,10 @@ impl Partial {
                 );
                 return Err(FsError::Io);
             }
+            // Progress on other entries of the pass wakes nobody: look at it now and then.
             st = self
                 .grew
-                .wait_timeout(st, left)
+                .wait_timeout(st, left.min(PROGRESS_POLL))
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }

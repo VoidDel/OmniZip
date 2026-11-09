@@ -81,6 +81,18 @@ fn mount(path: &Path, o: FsOptions) -> ArchiveFs {
     ArchiveFs::new(reader, o).unwrap()
 }
 
+/// Whether `f` holds within a few seconds (work the volume finishes in the background).
+fn eventually(f: impl Fn() -> bool) -> bool {
+    let deadline = Instant::now() + std::time::Duration::from_secs(10);
+    while !f() {
+        if Instant::now() > deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    true
+}
+
 fn names(fs: &dyn VirtualFs, dir: u32) -> Vec<String> {
     fs.readdir(dir, 0, usize::MAX)
         .unwrap()
@@ -319,10 +331,10 @@ fn solid_7z_is_decoded_in_one_pass() {
     assert_eq!(fs.mount_class(), MountClass::C);
     let a = resolve(&fs, "photos/相册/a.txt").unwrap();
     assert_eq!(read_all(&fs, a.node, 2).unwrap(), b"alpha");
-    assert_eq!(
-        fs.cache().len(),
-        3,
-        "whole solid archive cached by the first read"
+    // The read comes back once its file is decoded; the pass goes on with the rest.
+    assert!(
+        eventually(|| fs.cache().len() == 3),
+        "whole solid archive cached after the first read"
     );
     let b = resolve(&fs, "photos/media/big.bin").unwrap();
     let fh = fs.open(b.node, OpenFlags::default()).unwrap();
@@ -490,11 +502,21 @@ fn links_leading_out_through_other_links_are_files() {
 }
 
 /// A reader that serves scripted entries and counts decoding passes.
+#[derive(Clone)]
 struct Scripted {
     info: ArchiveInfo,
     entries: Vec<Entry>,
-    data: Vec<Vec<u8>>,
+    data: Arc<Vec<Vec<u8>>>,
     passes: Arc<AtomicUsize>,
+    /// Clones decode side by side ([`ArchiveReader::try_clone`]).
+    clones: bool,
+    /// The solid block of each entry.
+    blocks: Option<Vec<u32>>,
+    /// Data comes in pieces of at most 64 KiB, each after this pause.
+    pace: Option<std::time::Duration>,
+    /// Passes running now, and the most that ran at once.
+    active: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
 }
 
 impl Scripted {
@@ -514,11 +536,42 @@ impl Scripted {
             Self {
                 info,
                 entries,
-                data,
+                data: Arc::new(data),
                 passes: passes.clone(),
+                clones: false,
+                blocks: None,
+                pace: None,
+                active: Arc::default(),
+                peak: Arc::default(),
             },
             passes,
         )
+    }
+
+    /// `n` files `fNN.txt` of `size` bytes each.
+    fn files(n: usize, size: usize) -> (Self, Arc<AtomicUsize>) {
+        let names: Vec<String> = (0..n).map(|i| format!("f{i:02}.txt")).collect();
+        Self::new(
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| (name.as_str(), noise(size, i as u32), Some(size as u64)))
+                .collect(),
+        )
+    }
+}
+
+/// Reads in paced pieces.
+struct Paced<'a> {
+    inner: Cursor<&'a [u8]>,
+    pace: std::time::Duration,
+}
+
+impl std::io::Read for Paced<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        std::thread::sleep(self.pace);
+        let n = buf.len().min(64 << 10);
+        self.inner.read(&mut buf[..n])
     }
 }
 
@@ -531,18 +584,45 @@ impl ArchiveReader for Scripted {
         &self.entries
     }
 
+    fn try_clone(&self) -> Option<Box<dyn ArchiveReader>> {
+        self.clones
+            .then(|| Box::new(self.clone()) as Box<dyn ArchiveReader>)
+    }
+
+    fn solid_block(&self, id: omnizip_core::EntryId) -> Option<u32> {
+        self.blocks.as_ref()?.get(id as usize).copied()
+    }
+
     fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> omnizip_core::Result<()> {
         self.passes.fetch_add(1, Ordering::SeqCst);
-        for (e, d) in self.entries.iter().zip(&self.data) {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        let mut result = Ok(());
+        for (e, d) in self.entries.iter().zip(self.data.iter()) {
             if sink.done() {
                 break;
             }
             if sink.wants(e) {
-                let mut r = Cursor::new(d.as_slice());
-                sink.entry(e, EntryData::Stream(&mut r), ctx)?;
+                let mut cursor = Cursor::new(d.as_slice());
+                let mut paced;
+                let r: &mut dyn std::io::Read = match self.pace {
+                    Some(pace) => {
+                        paced = Paced {
+                            inner: cursor,
+                            pace,
+                        };
+                        &mut paced
+                    }
+                    None => &mut cursor,
+                };
+                result = sink.entry(e, EntryData::Stream(r), ctx);
+                if result.is_err() {
+                    break;
+                }
             }
         }
-        Ok(())
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        result
     }
 }
 
@@ -920,4 +1000,245 @@ fn a_stuck_decoder_fails_the_read_after_the_stall_time() {
     *lock.lock().unwrap() = true;
     cv.notify_all();
     fs.release(fh);
+}
+
+/// Reads from several threads of entries that decode on their own run on several workers at
+/// once, each with a clone of the reader; an engine without clones gets one worker.
+#[test]
+fn entries_decode_side_by_side_on_cloned_readers() {
+    for clones in [true, false] {
+        let (mut reader, passes) = Scripted::files(160, 20_000);
+        reader.clones = clones;
+        reader.pace = Some(std::time::Duration::from_millis(20));
+        let (data, peak) = (reader.data.clone(), reader.peak.clone());
+        let fs = Arc::new(
+            ArchiveFs::new(
+                Box::new(reader),
+                FsOptions {
+                    workers: 4,
+                    ..opts()
+                },
+            )
+            .unwrap(),
+        );
+        assert_eq!(fs.workers(), if clones { 4 } else { 1 });
+        // Entries ten apart, so that read-ahead stays out of it.
+        let threads: Vec<_> = (0..8u32)
+            .map(|t| {
+                let (fs, data) = (fs.clone(), data.clone());
+                std::thread::spawn(move || {
+                    for i in [t * 20, t * 20 + 10] {
+                        let a = resolve(fs.as_ref(), &format!("f{i:02}.txt")).unwrap();
+                        assert_eq!(
+                            read_all(fs.as_ref(), a.node, 4096).unwrap(),
+                            data[i as usize]
+                        );
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(passes.load(Ordering::SeqCst), 16);
+        let peak = peak.load(Ordering::SeqCst);
+        if clones {
+            assert!(peak > 1, "decoded one at a time");
+        } else {
+            assert_eq!(peak, 1);
+        }
+    }
+}
+
+/// Reading files in archive order (a folder copied out) decodes the next small files ahead of
+/// the reads; reads elsewhere do not.
+#[test]
+fn reading_in_archive_order_decodes_ahead() {
+    let (mut reader, _) = Scripted::files(40, 1000);
+    reader.clones = true;
+    let fs = ArchiveFs::new(Box::new(reader), opts()).unwrap();
+    for i in 0..3 {
+        let a = resolve(&fs, &format!("f{i:02}.txt")).unwrap();
+        read_all(&fs, a.node, 4096).unwrap();
+    }
+    assert!(
+        eventually(|| fs.cache().contains(20)),
+        "the files after the ones read are decoded"
+    );
+
+    let (mut reader, _) = Scripted::files(40, 1000);
+    reader.clones = true;
+    let fs = ArchiveFs::new(Box::new(reader), opts()).unwrap();
+    for i in [30, 3, 15] {
+        let a = resolve(&fs, &format!("f{i:02}.txt")).unwrap();
+        read_all(&fs, a.node, 4096).unwrap();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(fs.cache().len(), 3);
+}
+
+/// A solid archive whose blocks the engine knows warms up block by block: the block of the
+/// entry read first, then the others on the remaining workers.
+#[test]
+fn solid_blocks_are_decoded_as_separate_passes() {
+    let (mut reader, passes) = Scripted::files(30, 5000);
+    reader.clones = true;
+    reader.info.format = FormatId::SevenZ;
+    reader.info.solid = true;
+    reader.blocks = Some((0..30).map(|i| i / 10).collect());
+    let data = reader.data.clone();
+    let fs = ArchiveFs::new(Box::new(reader), opts()).unwrap();
+    assert_eq!(fs.mount_class(), MountClass::C);
+    let a = resolve(&fs, "f25.txt").unwrap();
+    assert_eq!(read_all(&fs, a.node, 4096).unwrap(), data[25]);
+    assert!(eventually(|| fs.cache().len() == 30));
+    assert_eq!(passes.load(Ordering::SeqCst), 3, "one pass per block");
+    let b = resolve(&fs, "f03.txt").unwrap();
+    assert_eq!(read_all(&fs, b.node, 4096).unwrap(), data[3]);
+    assert_eq!(passes.load(Ordering::SeqCst), 3);
+}
+
+/// An entry late in a single-stream pass waits while the pass decodes the entries before it.
+/// That is progress, not a stuck decoder, however long it takes.
+#[test]
+fn a_long_pass_before_an_entry_is_not_a_stall() {
+    let (mut reader, _) = Scripted::new(vec![
+        ("first.bin", noise(1 << 20, 1), Some(1 << 20)),
+        ("second.txt", b"after the first".to_vec(), Some(15)),
+    ]);
+    reader.info.format = FormatId::TarGz;
+    // 16 pieces of 64 KiB, 60 ms apart: about a second before the second entry.
+    reader.pace = Some(std::time::Duration::from_millis(60));
+    let fs = Arc::new(
+        ArchiveFs::new(
+            Box::new(reader),
+            FsOptions {
+                stall_timeout: std::time::Duration::from_millis(300),
+                ..opts()
+            },
+        )
+        .unwrap(),
+    );
+    let node = resolve(fs.as_ref(), "second.txt").unwrap().node;
+    let f = fs.clone();
+    assert_eq!(
+        within(20, move || read_all(f.as_ref(), node, 64)).unwrap(),
+        b"after the first"
+    );
+}
+
+/// The engines clone their readers, so a mounted ZIP, 7z or tar.gz decodes on several workers;
+/// what many threads read is right.
+#[test]
+fn real_archives_decode_on_several_workers() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("many");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    let mut expected = Vec::new();
+    for i in 0..60u32 {
+        let rel = if i % 3 == 0 {
+            format!("sub/file{i:02}.txt")
+        } else {
+            format!("file{i:02}.txt")
+        };
+        let data = format!("{i} ").repeat(500 + i as usize * 37).into_bytes();
+        fs::write(root.join(&rel), &data).unwrap();
+        expected.push((format!("many/{rel}"), data));
+    }
+    let expected = Arc::new(expected);
+    for (name, format, solid) in [
+        ("many.zip", FormatId::Zip, false),
+        ("many.7z", FormatId::SevenZ, false),
+        ("solid.7z", FormatId::SevenZ, true),
+        ("many.tar.gz", FormatId::TarGz, false),
+    ] {
+        let archive = create(
+            d.path(),
+            &root,
+            name,
+            WriteOptions {
+                format,
+                solid,
+                ..Default::default()
+            },
+        );
+        let fs = Arc::new(mount(
+            &archive,
+            FsOptions {
+                workers: 4,
+                ..opts()
+            },
+        ));
+        assert_eq!(fs.workers(), 4, "{name}");
+        let threads: Vec<_> = (0..6usize)
+            .map(|t| {
+                let (fs, expected) = (fs.clone(), expected.clone());
+                std::thread::spawn(move || {
+                    for (path, data) in expected.iter().skip(t).step_by(6) {
+                        let a = resolve(fs.as_ref(), path).unwrap();
+                        assert_eq!(
+                            &read_all(fs.as_ref(), a.node, 1000).unwrap(),
+                            data,
+                            "{path}"
+                        );
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+    }
+}
+
+/// RAR readers open a native handle per decode: several decoding at once on different threads
+/// (clones, other volumes) each get their own, and every read is right.
+#[test]
+fn rar_volumes_decode_side_by_side() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/rar");
+    let names = ["version.rar", "unicode-entry.rar", "solid.rar"];
+    let only_file = |fs: &ArchiveFs| -> u32 {
+        let mut dir = ROOT;
+        loop {
+            let e = fs.readdir(dir, 0, 1).unwrap().remove(0);
+            if !e.attr.is_dir() {
+                return e.attr.node;
+            }
+            dir = e.attr.node;
+        }
+    };
+    let expected: Vec<Vec<u8>> = names
+        .iter()
+        .map(|n| {
+            let fs = mount(&fixtures.join(n), opts());
+            read_all(&fs, only_file(&fs), 1 << 16).unwrap()
+        })
+        .collect();
+    let expected = Arc::new(expected);
+    for _ in 0..10 {
+        let volumes: Vec<Arc<ArchiveFs>> = names
+            .iter()
+            .map(|n| {
+                Arc::new(mount(
+                    &fixtures.join(n),
+                    FsOptions {
+                        workers: 4,
+                        ..opts()
+                    },
+                ))
+            })
+            .collect();
+        let threads: Vec<_> = (0..12)
+            .map(|t| {
+                let (fs, expected) = (volumes[t % 3].clone(), expected.clone());
+                std::thread::spawn(move || {
+                    let node = only_file(&fs);
+                    assert_eq!(read_all(fs.as_ref(), node, 777).unwrap(), expected[t % 3]);
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+    }
 }
