@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Error, ErrorCode, JobCtx, Result,
+    dirguard::{DirGuard, EnterError, Kind},
     entry::{Entry, EntryId, EntryKind},
     job::{
         Confirm, Conflict, ConflictChoice, ConflictDecision, copy_with_buffer, copy_with_progress,
@@ -144,9 +145,10 @@ pub struct FsSink {
     os: TargetOs,
     report: Report,
     dir_times: Vec<(PathBuf, SystemTime)>,
-    /// Directories known to be real directories (checked or created by this extraction), so the
-    /// entries below them do not check them again.
-    known_dirs: HashSet<PathBuf>,
+    /// The directory being written into, held open from the root down (`crate::dirguard`):
+    /// nothing below the root is looked up by its path again, so a directory swapped for a link
+    /// meanwhile cannot redirect a write.
+    guard: DirGuard,
     /// Directories this extraction created: only these take a mode from the archive, never a
     /// directory that was already there (the destination itself included).
     created_dirs: HashSet<PathBuf>,
@@ -180,13 +182,14 @@ impl FsSink {
         archive_size: u64,
     ) -> Result<Self> {
         fs::create_dir_all(&root).map_err(|e| Error::io(e, &root))?;
+        let guard = DirGuard::open(&root).map_err(|e| Error::io(e, &root))?;
         let origin = if opts.propagate_origin {
             archive_path.and_then(origin::read)
         } else {
             None
         };
         Ok(Self {
-            known_dirs: HashSet::from([root.clone()]),
+            guard,
             root,
             opts,
             selection,
@@ -240,14 +243,22 @@ impl FsSink {
             ctx.check()?;
             self.create_link(l, &pending);
         }
-        for (p, mode) in &self.dir_modes {
-            apply_dir_mode(p, *mode);
+        for (p, mode) in std::mem::take(&mut self.dir_modes) {
+            if self.enter_existing(&p) {
+                apply_dir_mode(self.guard.dir(), mode);
+            }
         }
         // Deepest directories first so parents are not touched afterwards.
-        self.dir_times
-            .sort_by_key(|(p, _)| std::cmp::Reverse(p.components().count()));
-        for (p, t) in &self.dir_times {
-            let _ = filetime::set_file_mtime(p, filetime::FileTime::from_system_time(*t));
+        let mut times = std::mem::take(&mut self.dir_times);
+        times.sort_by_key(|(p, _)| std::cmp::Reverse(p.components().count()));
+        for (p, t) in times {
+            if self.enter_existing(&p) {
+                let _ = filetime::set_file_handle_times(
+                    self.guard.dir(),
+                    None,
+                    Some(filetime::FileTime::from_system_time(t)),
+                );
+            }
         }
         // A single folder (an archive holding one folder, without a wrapper folder) is what was
         // extracted, not the destination around it.
@@ -302,42 +313,38 @@ impl FsSink {
         Some(comps)
     }
 
-    /// Creates the directories leading to `comps` (excluding the last), refusing to follow
-    /// links that could lead outside the root.
+    /// Enters the directory leading to `comps` (its last component excluded), creating what is
+    /// missing and refusing links on the way; the path of `comps`.
     fn ensure_parents(&mut self, comps: &[String]) -> Result<PathBuf> {
         let parents = &comps[..comps.len().saturating_sub(1)];
-        let target = self.root.join(comps.iter().collect::<PathBuf>());
-        // Directories are only recorded once every directory above them is: a known parent
-        // means the whole chain is.
-        if target.parent().is_some_and(|p| self.known_dirs.contains(p)) || parents.is_empty() {
-            return Ok(target);
-        }
-        let mut cur = self.root.clone();
-        for c in parents {
-            cur.push(c);
-            if self.known_dirs.contains(&cur) {
-                continue;
-            }
-            match fs::symlink_metadata(&cur) {
-                Ok(m) if m.file_type().is_symlink() => {
-                    return Err(Error::new(ErrorCode::UnsafeLink).with("path", cur.display()));
+        self.enter(parents, true)?;
+        Ok(self.root.join(comps.iter().collect::<PathBuf>()))
+    }
+
+    /// Makes `dirs` (below the root) the current directory of the guard, level by level without
+    /// following links (`UnsafeLink` when one is in the way, `AlreadyExists` for a file).
+    fn enter(&mut self, dirs: &[String], create: bool) -> Result<()> {
+        let Self {
+            guard,
+            created_dirs,
+            ..
+        } = self;
+        guard
+            .enter(dirs, create, &mut |p| {
+                created_dirs.insert(p.to_owned());
+            })
+            .map_err(|e| match e {
+                EnterError::Link(p) => Error::new(ErrorCode::UnsafeLink).with("path", p.display()),
+                EnterError::NotDir(p) => {
+                    Error::new(ErrorCode::AlreadyExists).with("path", p.display())
                 }
-                Ok(m) if m.is_dir() => {}
-                Ok(_) => {
-                    // A file is in the way of a directory.
-                    return Err(Error::new(ErrorCode::AlreadyExists).with("path", cur.display()));
-                }
-                Err(_) => match fs::create_dir(&cur) {
-                    Ok(()) => {
-                        self.created_dirs.insert(cur.clone());
-                    }
-                    Err(_) if cur.is_dir() => {}
-                    Err(e) => return Err(Error::io(e, &cur)),
-                },
-            }
-            self.known_dirs.insert(cur.clone());
-        }
-        Ok(target)
+                EnterError::Io(e, p) => Error::io(e, &p),
+            })
+    }
+
+    /// Enters the existing directory `dir` (a path below the root); whether that worked.
+    fn enter_existing(&mut self, dir: &Path) -> bool {
+        below(&self.root, dir).is_some_and(|comps| self.enter(&comps, false).is_ok())
     }
 
     fn decide_conflict(
@@ -346,16 +353,16 @@ impl FsSink {
         entry: &Entry,
         ctx: &JobCtx,
     ) -> Result<Option<PathBuf>> {
-        let Ok(meta) = fs::symlink_metadata(target) else {
+        let Ok(meta) = self.guard.stat(&file_name(target)) else {
             return Ok(Some(target.to_owned()));
         };
-        if meta.is_dir() {
+        if meta.kind == Kind::Dir {
             self.report
                 .warn(ErrorCode::AlreadyExists, &entry.path, None);
             self.report.skipped += 1;
             return Ok(None);
         }
-        let existing_mtime = meta.modified().ok();
+        let existing_mtime = meta.modified;
         let choice = match (self.opts.overwrite, self.apply_all) {
             (_, Some(c)) => c,
             (OverwriteMode::Skip, _) => ConflictChoice::Skip,
@@ -368,7 +375,7 @@ impl FsSink {
                     apply_to_all,
                 } = ctx.interaction.conflict(&Conflict {
                     path: target.to_owned(),
-                    existing_size: meta.len(),
+                    existing_size: meta.len,
                     existing_mtime,
                     incoming_size: entry.size,
                     incoming_mtime: entry.mtime,
@@ -402,7 +409,7 @@ impl FsSink {
                 let parent = target.parent().unwrap_or(&self.root);
                 for n in 2..10_000 {
                     let candidate = parent.join(numbered_name(&name, n));
-                    if fs::symlink_metadata(&candidate).is_err() {
+                    if self.guard.stat(&file_name(&candidate)).is_err() {
                         return Ok(Some(candidate));
                     }
                 }
@@ -439,13 +446,15 @@ impl FsSink {
         file: File,
         ctx: &JobCtx,
     ) -> Result<Option<PathBuf>> {
-        match self.fill(entry, data, file, target, target, ctx) {
+        let name = file_name(target);
+        let path = self.guard.path_for_engine(&name);
+        match self.fill(entry, data, file, &path, target, ctx) {
             Ok(n) => {
                 self.placed(target, entry, n, ctx)?;
                 Ok(Some(target.to_owned()))
             }
             Err(e) => {
-                let _ = fs::remove_file(target);
+                let _ = self.guard.remove_file(&name);
                 self.skip_broken(entry, e).map(|()| None)
             }
         }
@@ -460,29 +469,38 @@ impl FsSink {
         target: PathBuf,
         ctx: &JobCtx,
     ) -> Result<Option<PathBuf>> {
-        let parent = target.parent().unwrap_or(&self.root);
-        let tmp = tempfile::Builder::new()
-            .prefix(".omnizip-")
-            .suffix(".part")
-            .tempfile_in(parent)
-            .map_err(|e| Error::io(e, parent))?;
-        let (file, tmp_path) = tmp.into_parts();
+        let name = file_name(&target);
+        let (file, tmp) = self
+            .guard
+            .create_temp()
+            .map_err(|e| Error::io(e, self.guard.path()))?;
+        let tmp_path = self.guard.path_for_engine(&tmp);
         let n = match self.fill(entry, data, file, &tmp_path, &target, ctx) {
             Ok(n) => n,
-            Err(e) => return self.skip_broken(entry, e).map(|()| None),
+            Err(e) => {
+                let _ = self.guard.remove_file(&tmp);
+                return self.skip_broken(entry, e).map(|()| None);
+            }
         };
-        // Replace a read-only file we are allowed to overwrite.
-        if let Ok(m) = fs::metadata(&target)
-            && m.permissions().readonly()
+        // Replace a read-only file we are allowed to overwrite (only Windows refuses that; on
+        // Unix the directory's permissions decide, and changing the mode by path would follow
+        // a link put there meanwhile).
+        #[cfg(windows)]
+        if self
+            .guard
+            .stat(&name)
+            .is_ok_and(|s| s.readonly && s.kind == Kind::File)
+            && let Ok(m) = fs::metadata(&target)
         {
             let mut p = m.permissions();
             #[allow(clippy::permissions_set_readonly_false)]
             p.set_readonly(false);
             let _ = fs::set_permissions(&target, p);
         }
-        tmp_path
-            .persist(&target)
-            .map_err(|e| Error::io(e.error, &target))?;
+        if let Err(e) = self.guard.rename(&tmp, &name) {
+            let _ = self.guard.remove_file(&tmp);
+            return Err(Error::io(e, &target));
+        }
         self.placed(&target, entry, n, ctx)?;
         Ok(Some(target))
     }
@@ -557,7 +575,11 @@ impl FsSink {
 
     /// A file now in place: permissions, origin, totals and the streaming bomb check.
     fn placed(&mut self, target: &Path, entry: &Entry, n: u64, ctx: &JobCtx) -> Result<()> {
+        // On Unix set through the handle when the file was written (`finish_file`).
+        #[cfg(not(unix))]
         apply_permissions(target, entry, self.opts.restore_permissions);
+        #[cfg(unix)]
+        let _ = entry;
         if let Some(origin) = &self.origin {
             let _ = origin::apply(target, origin);
         }
@@ -593,6 +615,9 @@ impl FsSink {
 
     fn create_link(&mut self, l: DeferredLink, pending: &HashMap<String, String>) {
         let policy = self.opts.symlinks;
+        let name = file_name(&l.path);
+        // Enters the link's directory.
+        let in_place = |s: &mut Self| l.path.parent().is_some_and(|dir| s.enter_existing(dir));
         match l.kind {
             EntryKind::Hardlink => {
                 let mode = if self.opts.strip_unsafe_paths {
@@ -603,16 +628,25 @@ impl FsSink {
                 let source = sanitize(&l.target, self.os, mode)
                     .ok()
                     .and_then(|s| self.written.get(&s.to_slash_path()).cloned());
-                match source {
-                    Some(src) => {
-                        if fs::hard_link(&src, &l.path)
-                            .or_else(|_| fs::copy(&src, &l.path).map(|_| ()))
-                            .is_ok()
-                        {
+                // The source is opened through the guard: a link put in its place meanwhile is
+                // neither linked nor copied.
+                let opened = source.as_deref().and_then(|src| {
+                    let file = (self.enter_existing(src.parent()?))
+                        .then(|| self.guard.open_file(&file_name(src)).ok())??;
+                    Some((src.to_owned(), file))
+                });
+                match opened {
+                    Some((src, mut file)) if in_place(self) => {
+                        let linked = self.guard.hard_link(&file, &src, &name).is_ok()
+                            || self
+                                .guard
+                                .create_new(&name)
+                                .is_ok_and(|mut out| io::copy(&mut file, &mut out).is_ok());
+                        if linked {
                             self.report.links += 1;
                         }
                     }
-                    None => self
+                    _ => self
                         .report
                         .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target)),
                 }
@@ -622,8 +656,19 @@ impl FsSink {
                     self.report.skipped += 1;
                     return;
                 }
+                if !in_place(self) {
+                    self.report
+                        .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target));
+                    self.report.skipped += 1;
+                    return;
+                }
+                let as_file = |s: &Self| {
+                    s.guard
+                        .create_new(&name)
+                        .is_ok_and(|mut f| f.write_all(l.target.as_bytes()).is_ok())
+                };
                 if policy == SymlinkPolicy::AsFile {
-                    if fs::write(&l.path, l.target.as_bytes()).is_ok() {
+                    if as_file(self) {
                         self.report.files += 1;
                     }
                     return;
@@ -634,11 +679,11 @@ impl FsSink {
                     self.report.skipped += 1;
                     return;
                 }
-                match make_symlink(&l.target, &l.path) {
+                match self.guard.symlink(&l.target, &name) {
                     Ok(()) => self.report.links += 1,
                     // No privilege for symlinks (Windows): fall back to a file with the target.
                     Err(_) => {
-                        if fs::write(&l.path, l.target.as_bytes()).is_ok() {
+                        if as_file(self) {
                             self.report.files += 1;
                         }
                     }
@@ -684,20 +729,15 @@ impl ExtractSink for FsSink {
                 if self.opts.path_mode == PathMode::Flat {
                     return Ok(());
                 }
-                if !self.known_dirs.contains(&target) {
-                    match fs::symlink_metadata(&target) {
-                        Ok(m) if m.is_dir() => {}
-                        Ok(_) => {
-                            self.report
-                                .warn(ErrorCode::AlreadyExists, &entry.path, None);
-                            return Ok(());
-                        }
-                        Err(_) => {
-                            fs::create_dir(&target).map_err(|e| Error::io(e, &target))?;
-                            self.created_dirs.insert(target.clone());
-                        }
+                match self.enter(&comps, true) {
+                    Ok(()) => {}
+                    Err(e)
+                        if matches!(e.code(), ErrorCode::UnsafeLink | ErrorCode::AlreadyExists) =>
+                    {
+                        self.report.warn(e.code(), &entry.path, None);
+                        return Ok(());
                     }
-                    self.known_dirs.insert(target.clone());
+                    Err(e) => return Err(e),
                 }
                 if comps.len() == 1 {
                     self.note_top(Some(target.clone()));
@@ -728,7 +768,7 @@ impl ExtractSink for FsSink {
                     (None, _) => String::new(),
                 };
                 if let Some(path) = self.decide_conflict(&target, entry, ctx)? {
-                    let _ = fs::remove_file(&path);
+                    let _ = self.guard.remove_file(&file_name(&path));
                     self.links.push(DeferredLink {
                         path,
                         target: link_target,
@@ -740,10 +780,10 @@ impl ExtractSink for FsSink {
             EntryKind::File => {
                 // A new file is written in place; only an existing one goes through the
                 // conflict decision (and is then replaced through a temporary file).
-                let placed = match create_new(&target) {
+                let placed = match self.guard.create_new(&file_name(&target)) {
                     Ok(file) => self.write_new(entry, data, &target, file, ctx)?,
                     // Something is there (Windows may report a directory as access denied).
-                    Err(_) if fs::symlink_metadata(&target).is_ok() => {
+                    Err(_) if self.guard.stat(&file_name(&target)).is_ok() => {
                         match self.decide_conflict(&target, entry, ctx)? {
                             Some(t) => self.write_replacing(entry, data, t, ctx)?,
                             None => return Ok(()),
@@ -762,17 +802,10 @@ impl ExtractSink for FsSink {
     }
 }
 
-/// Creates a file for writing, failing when anything is already at `path`. On Unix it stays
-/// private (`0o600`) until [`apply_permissions`].
-fn create_new(path: &Path) -> io::Result<File> {
-    let mut o = File::options();
-    o.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    o.open(path)
-}
-
+/// Times and (Unix) permissions of a file just written, through its handle.
 fn finish_file(file: &File, entry: &Entry, opts: &ExtractOptions) {
+    #[cfg(unix)]
+    apply_permissions(file, entry, opts.restore_permissions);
     if opts.restore_mtime
         && let Some(t) = entry.mtime
     {
@@ -788,27 +821,28 @@ fn finish_file(file: &File, entry: &Entry, opts: &ExtractOptions) {
 /// less the umask with `restore` (as `tar` does for ordinary users), otherwise those of a new
 /// file.
 #[cfg(unix)]
-fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
+fn apply_permissions(file: &File, entry: &Entry, restore: bool) {
     use std::os::unix::fs::PermissionsExt;
     let mode = match entry.unix_mode.filter(|_| restore) {
         // Never restore setuid / setgid / sticky; always keep the owner able to read and write.
         Some(mode) => (mode & 0o777 & !crate::volume::umask()) | 0o600,
         None => crate::volume::new_file_mode(),
     };
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    let _ = file.set_permissions(fs::Permissions::from_mode(mode));
 }
 
-/// Mode of an extracted directory entry, less the umask; the owner always keeps `rwx`.
+/// Mode of an extracted directory entry (open as `dir`), less the umask; the owner always keeps
+/// `rwx`.
 #[cfg(unix)]
-fn apply_dir_mode(path: &Path, mode: u32) {
+fn apply_dir_mode(dir: &File, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     let mode = (mode & 0o777 & !crate::volume::umask()) | 0o700;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    let _ = dir.set_permissions(fs::Permissions::from_mode(mode));
 }
 
 /// Directory modes are Unix-only.
 #[cfg(not(unix))]
-fn apply_dir_mode(_path: &Path, _mode: u32) {}
+fn apply_dir_mode(_dir: &File, _mode: u32) {}
 
 #[cfg(not(unix))]
 fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
@@ -829,20 +863,11 @@ fn apply_permissions(path: &Path, entry: &Entry, restore: bool) {
     }
 }
 
-#[cfg(unix)]
-fn make_symlink(target: &str, link: &Path) -> io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
-}
-
-#[cfg(windows)]
-fn make_symlink(target: &str, link: &Path) -> io::Result<()> {
-    let t = target.replace('/', "\\");
-    let resolved = link.parent().map(|p| p.join(&t));
-    if resolved.is_some_and(|r| r.is_dir()) {
-        std::os::windows::fs::symlink_dir(&t, link)
-    } else {
-        std::os::windows::fs::symlink_file(&t, link)
-    }
+/// The last component of a path below the root (a name in the guard's current directory).
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The components of `path` below `root`; `None` when it is not below it.
@@ -1435,6 +1460,34 @@ mod tests {
         put(&mut s, &file_entry(0, "src/app/ui/a.tsx", b"a"), b"a", &ctx);
         s.finish(&ctx).unwrap();
         assert!(d.path().join("ui/a.tsx").exists());
+    }
+
+    /// Another program swaps a directory of the destination for a link between two files written
+    /// into it: the second still lands in the directory that was entered (Unix), or the swap is
+    /// refused while the directory is held (Windows). Nothing is written where the link points.
+    #[test]
+    fn a_directory_swapped_during_extraction_does_not_redirect_writes() {
+        let d = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let dest = d.path().join("dest");
+        let ctx = JobCtx::default();
+        let mut s = sink(&dest, ExtractOptions::default());
+        put(&mut s, &file_entry(0, "sub/a.txt", b"a"), b"a", &ctx);
+        let moved = std::fs::rename(dest.join("sub"), d.path().join("moved"));
+        #[cfg(windows)]
+        assert!(moved.is_err(), "a held directory cannot be moved");
+        #[cfg(unix)]
+        {
+            moved.unwrap();
+            std::os::unix::fs::symlink(outside.path(), dest.join("sub")).unwrap();
+        }
+        put(&mut s, &file_entry(1, "sub/b.txt", b"b"), b"b", &ctx);
+        s.finish(&ctx).unwrap();
+        assert!(!outside.path().join("b.txt").exists());
+        #[cfg(unix)]
+        assert_eq!(fs::read(d.path().join("moved/b.txt")).unwrap(), b"b");
+        #[cfg(windows)]
+        assert_eq!(fs::read(dest.join("sub/b.txt")).unwrap(), b"b");
     }
 
     /// A link whose target text stays inside but which leads out through another link of the

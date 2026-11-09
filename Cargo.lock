@@ -3041,6 +3041,7 @@ dependencies = [
  "filetime",
  "flate2",
  "globset",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -3048,6 +3049,7 @@ dependencies = [
  "time",
  "tracing",
  "unicode-normalization",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
