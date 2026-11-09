@@ -331,7 +331,10 @@
     "warnings": "{count} 条警告",
     "working": "{kind} {name}",
     "close": "关闭",
-    "preparing": "正在准备…"
+    "preparing": "正在准备…",
+    "closeTitle": "任务仍在进行",
+    "closeMessage": "关闭窗口会取消 {count} 个进行中的任务，写了一半的文件会被删除。",
+    "closeConfirm": "取消任务并关闭"
   },
   "toast": {
     "extracted": "已解压 {count} 个文件到 {dest}",

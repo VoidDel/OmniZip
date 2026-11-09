@@ -101,6 +101,8 @@ pub struct Job {
     /// Unanswered prompts, so a window that opens late can still show them.
     open_prompts: Mutex<Vec<PromptEvent>>,
     next_prompt: AtomicU32,
+    /// The job's thread is done, the finishing step included.
+    ended: AtomicBool,
 }
 
 impl Job {
@@ -220,6 +222,7 @@ impl JobManager {
             pending: Mutex::new(HashMap::new()),
             open_prompts: Mutex::new(Vec::new()),
             next_prompt: AtomicU32::new(1),
+            ended: AtomicBool::new(false),
         });
         self.jobs
             .lock()
@@ -277,6 +280,7 @@ impl JobManager {
                 if let Some(f) = finish {
                     f(&app, &snapshot);
                 }
+                job.ended.store(true, Ordering::Release);
             })
             .expect("spawn job thread");
         id
@@ -382,6 +386,39 @@ impl JobManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|_, j| matches!(j.snapshot().state, JobState::Running | JobState::Paused));
+    }
+
+    /// Jobs whose thread has not ended: all of them, or those owned by the window `window` (it
+    /// shows their questions; a job without a window of its own belongs to the main window).
+    pub fn live(&self, window: Option<&str>) -> Vec<u32> {
+        let jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids: Vec<u32> = jobs
+            .values()
+            .filter(|j| !j.ended.load(Ordering::Acquire))
+            .map(|j| j.snapshot())
+            .filter(|i| window.is_none_or(|w| i.window.as_deref().unwrap_or("main") == w))
+            .map(|i| i.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Waits until the jobs `ids` have ended, at most `timeout`; whether they all did.
+    pub fn wait_ended(&self, ids: &[u32], timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let running = ids.iter().any(|id| {
+                self.get(*id)
+                    .is_some_and(|j| !j.ended.load(Ordering::Acquire))
+            });
+            if !running {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// Whether any job is still running.
@@ -569,6 +606,7 @@ mod tests {
             pending: Mutex::new(HashMap::new()),
             open_prompts: Mutex::new(Vec::new()),
             next_prompt: AtomicU32::new(1),
+            ended: AtomicBool::new(!matches!(state, JobState::Running | JobState::Paused)),
         });
         m.jobs.lock().unwrap().insert(id, j.clone());
         j
@@ -622,6 +660,39 @@ mod tests {
             Err(mpsc::TryRecvError::Disconnected)
         ));
         assert!(m.open_prompts().is_empty());
+    }
+
+    #[test]
+    fn live_jobs_by_owner_window() {
+        let m = JobManager::default();
+        job(&m, 1, JobState::Running);
+        job(&m, 2, JobState::Done);
+        let mini = job(&m, 3, JobState::Paused);
+        mini.info.lock().unwrap().window = Some("mini-3".into());
+        assert_eq!(m.live(None), [1, 3]);
+        assert_eq!(
+            m.live(Some("main")),
+            [1],
+            "jobs without a window belong to the main one"
+        );
+        assert_eq!(m.live(Some("mini-3")), [3]);
+        assert!(m.live(Some("shell-1")).is_empty());
+
+        // Waiting ends when the thread has, or at the time limit.
+        assert!(!m.wait_ended(&[1, 3], Duration::from_millis(60)));
+        let j1 = m.get(1).unwrap();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            j1.ended.store(true, Ordering::Release);
+            mini.ended.store(true, Ordering::Release);
+        });
+        assert!(m.wait_ended(&[1, 3], Duration::from_secs(10)));
+        t.join().unwrap();
+        assert!(m.live(None).is_empty());
+        assert!(
+            m.wait_ended(&[42], Duration::ZERO),
+            "unknown jobs have ended"
+        );
     }
 
     #[test]

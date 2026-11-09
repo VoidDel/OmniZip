@@ -331,7 +331,10 @@
     "warnings": "{count, plural, one {# warning} other {# warnings}}",
     "working": "{kind} {name}",
     "close": "Close",
-    "preparing": "Preparing…"
+    "preparing": "Preparing…",
+    "closeTitle": "Tasks are still running",
+    "closeMessage": "{count, plural, one {Closing the window cancels the running task} other {Closing the window cancels # running tasks}}; half-written files are deleted.",
+    "closeConfirm": "Cancel and close"
   },
   "toast": {
     "extracted": "Extracted {count, plural, one {# file} other {# files}} to {dest}",

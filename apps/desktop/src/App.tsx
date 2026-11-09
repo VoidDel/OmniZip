@@ -102,6 +102,30 @@ export function App() {
     return () => subs.forEach((s) => void s.then((f) => f()));
   }, []);
 
+  // Closing the window while tasks run cancels them: ask first.
+  useEffect(() => {
+    let asking = false;
+    const un = events.onCloseRequested((count) => {
+      if (asking) return;
+      asking = true;
+      useApp.getState().openDialog({
+        kind: 'ask',
+        title: t('task.closeTitle'),
+        message: t('task.closeMessage', { count }),
+        confirm: t('task.closeConfirm'),
+        danger: true,
+        onConfirm: () => {
+          asking = false;
+          void api.closeCancellingJobs();
+        },
+        onCancel: () => {
+          asking = false;
+        },
+      });
+    });
+    return () => void un.then((f) => f());
+  }, [t]);
+
   // Drag and drop from the file manager.
   useEffect(() => {
     const un = getCurrentWebview().onDragDropEvent((e) => {

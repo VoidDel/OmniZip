@@ -114,6 +114,8 @@ export const api = {
   windowReady: () => invoke<void>('window_ready'),
   /** Focuses the window and its page (needed for transparent material windows). */
   focusWindow: () => invoke<void>('window_focus'),
+  /** Cancels the jobs closing this window would cut short, then closes it. */
+  closeCancellingJobs: () => invoke<void>('window_close_cancelling'),
   openDefaultApps: () => invoke<void>('open_default_apps'),
   /** Linux: which formats OmniZip opens by default, by format key; `null` where the system decides. */
   formatDefaults: () => invoke<Record<string, boolean> | null>('format_defaults'),
@@ -145,4 +147,6 @@ export const events = {
   onMounts: (f: () => void): Promise<UnlistenFn> => listen('mounts://changed', () => f()),
   /** The notification-area icon unmounts a mount with unsaved changes: ask about them. */
   onTrayUnmount: (f: (id: number) => void): Promise<UnlistenFn> => listen<number>('tray://unmount', (e) => f(e.payload)),
+  /** The main window is closing while `count` of its tasks run: ask before cancelling them. */
+  onCloseRequested: (f: (count: number) => void): Promise<UnlistenFn> => listen<number>('app://close-requested', (e) => f(e.payload)),
 };

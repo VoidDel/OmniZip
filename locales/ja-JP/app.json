@@ -331,7 +331,10 @@
     "warnings": "{count} 件の警告",
     "working": "{kind} {name}",
     "close": "閉じる",
-    "preparing": "準備中…"
+    "preparing": "準備中…",
+    "closeTitle": "タスクを実行中です",
+    "closeMessage": "ウィンドウを閉じると実行中の {count} 件のタスクがキャンセルされ、書きかけのファイルは削除されます。",
+    "closeConfirm": "キャンセルして閉じる"
   },
   "toast": {
     "extracted": "{count} ファイルを {dest} に展開しました",

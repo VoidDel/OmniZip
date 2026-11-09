@@ -1,6 +1,7 @@
 //! OmniZip desktop application (Tauri 2).
 
 pub mod clipboard;
+pub mod closing;
 pub mod commands;
 #[cfg(target_os = "linux")]
 pub mod defaults;
@@ -254,6 +255,10 @@ pub fn run() {
                 let _ = window.hide();
                 return;
             }
+            // A window closing under running jobs cancels them first (`closing`).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                closing::close_requested(window, api);
+            }
             if let tauri::WindowEvent::Destroyed = event
                 && let Some(state) = window.try_state::<AppState>()
             {
@@ -262,6 +267,7 @@ pub fn run() {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(window.label());
+                closing::destroyed(window.app_handle(), window.label());
             }
         })
         .setup(move |app| {
@@ -353,6 +359,7 @@ pub fn run() {
             commands::recent_clear,
             commands::window_ready,
             commands::window_focus,
+            commands::window_close_cancelling,
             commands::open_default_apps,
             commands::format_defaults,
             commands::format_set_default,
@@ -371,10 +378,14 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building OmniZip")
-        .run(|_app, _event| {
+        .run(|app, event| {
+            // Quitting under running jobs cancels them and waits for them (`closing`).
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                closing::exit_requested(app, api, *code);
+            }
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
-                open_urls(_app, &urls);
+            if let tauri::RunEvent::Opened { urls } = event {
+                open_urls(app, &urls);
             }
         });
 }

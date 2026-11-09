@@ -143,6 +143,13 @@ pub fn window_focus(window: WebviewWindow) {
     let _ = AsRef::<tauri::Webview>::as_ref(&window).set_focus();
 }
 
+/// Closes the calling window after cancelling the jobs closing it would cut short: the user's
+/// answer to `app://close-requested` (`crate::closing`).
+#[tauri::command]
+pub fn window_close_cancelling(app: AppHandle, window: WebviewWindow) {
+    crate::closing::cancel_then_close(&app, window.label());
+}
+
 /// The request a standalone dialog window was opened for (`None` for other windows).
 #[tauri::command]
 pub fn shell_request(window: WebviewWindow, state: State<'_, AppState>) -> Option<LaunchRequest> {
