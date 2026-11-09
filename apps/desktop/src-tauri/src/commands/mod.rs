@@ -49,6 +49,23 @@ fn err(e: Error) -> ErrorReport {
     e.to_report()
 }
 
+/// Runs a command's work on a blocking thread. A command without `async` runs on the main
+/// thread, which also drives every window: a folder walk, a look at a network path that does
+/// not answer, or work over the tree of a large archive there freezes the whole UI.
+async fn off_main<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> CmdResult<T> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| err(Error::internal(e)))
+}
+
+/// [`off_main`] for work that needs the app and its state.
+async fn with_state<T: Send + 'static>(
+    app: AppHandle,
+    f: impl FnOnce(&AppHandle, &AppState) -> CmdResult<T> + Send + 'static,
+) -> CmdResult<T> {
+    off_main(move || f(&app, &app.state::<AppState>())).await?
+}
+
 fn archive(state: &AppState, id: u32) -> CmdResult<Arc<OpenedArchive>> {
     state
         .archive(id)

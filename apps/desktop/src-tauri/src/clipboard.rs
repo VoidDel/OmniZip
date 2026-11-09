@@ -212,7 +212,7 @@ fn watch(app: AppHandle, generation: u64, archive: u32, items: Vec<(PathBuf, Str
         if let Some(a) = state.archive(archive) {
             let nodes: Vec<NodeId> = gone.iter().filter_map(|p| a.tree.find(p)).collect();
             if !nodes.is_empty() {
-                let _ = crate::commands::job_delete(app.clone(), state, archive, nodes);
+                let _ = crate::commands::delete_items(&app, &state, archive, nodes);
             }
         }
         end(&app, generation);

@@ -10,21 +10,24 @@ pub struct Classified {
 
 /// Splits dropped paths into archives and other files (`docs/04-ui-design.md` §5.2).
 #[tauri::command]
-pub fn paths_classify(paths: Vec<String>) -> Classified {
-    let (mut archives, mut others) = (Vec::new(), Vec::new());
-    for p in paths {
-        let path = Path::new(&p);
-        if path.is_file()
-            && shared()
-                .detect(path)
-                .is_ok_and(|d| shared().engine(d.format).is_some())
-        {
-            archives.push(p);
-        } else {
-            others.push(p);
+pub async fn paths_classify(paths: Vec<String>) -> CmdResult<Classified> {
+    off_main(move || {
+        let (mut archives, mut others) = (Vec::new(), Vec::new());
+        for p in paths {
+            let path = Path::new(&p);
+            if path.is_file()
+                && shared()
+                    .detect(path)
+                    .is_ok_and(|d| shared().engine(d.format).is_some())
+            {
+                archives.push(p);
+            } else {
+                others.push(p);
+            }
         }
-    }
-    Classified { archives, others }
+        Classified { archives, others }
+    })
+    .await
 }
 
 #[derive(Serialize)]
@@ -38,7 +41,11 @@ pub struct PathStats {
 
 /// Size of files about to be compressed and a suggested archive name.
 #[tauri::command]
-pub fn paths_stats(paths: Vec<String>) -> PathStats {
+pub async fn paths_stats(paths: Vec<String>) -> CmdResult<PathStats> {
+    off_main(move || stats(paths)).await
+}
+
+fn stats(paths: Vec<String>) -> PathStats {
     let ctx = omnizip_core::JobCtx::default();
     let pb: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     let sources = omnizip_core::source::collect(&pb, &Default::default(), &ctx).unwrap_or_default();
@@ -66,26 +73,44 @@ pub fn paths_stats(paths: Vec<String>) -> PathStats {
 }
 
 #[tauri::command]
-pub fn path_reveal(path: String) -> CmdResult<()> {
-    let p = PathBuf::from(&path);
-    let r = if p.is_dir() {
-        tauri_plugin_opener::open_path(&p, None::<&str>)
-    } else {
-        tauri_plugin_opener::reveal_item_in_dir(&p)
-    };
-    r.map_err(|e| err(Error::internal(e)))
+pub async fn path_reveal(path: String) -> CmdResult<()> {
+    off_main(move || {
+        let p = PathBuf::from(&path);
+        let r = if p.is_dir() {
+            tauri_plugin_opener::open_path(&p, None::<&str>)
+        } else {
+            tauri_plugin_opener::reveal_item_in_dir(&p)
+        };
+        r.map_err(|e| err(Error::internal(e)))
+    })
+    .await?
 }
 
 #[tauri::command]
-pub fn path_exists(path: String) -> bool {
-    Path::new(&path).exists()
+pub async fn path_exists(path: String) -> CmdResult<bool> {
+    off_main(move || Path::new(&path).exists()).await
 }
 
+/// Recent archives that still exist. Looking can take long (a network share that does not
+/// answer), so it happens without holding the list.
 #[tauri::command]
-pub fn recent_list(state: State<'_, AppState>) -> Vec<RecentItem> {
-    let mut r = state.recent.lock().unwrap_or_else(|e| e.into_inner());
-    r.retain(|i| Path::new(&i.path).exists());
-    r.clone()
+pub async fn recent_list(app: AppHandle) -> CmdResult<Vec<RecentItem>> {
+    with_state(app, |_, state| {
+        let items = state
+            .recent
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let gone: Vec<String> = items
+            .into_iter()
+            .filter(|i| !Path::new(&i.path).exists())
+            .map(|i| i.path)
+            .collect();
+        let mut r = state.recent.lock().unwrap_or_else(|e| e.into_inner());
+        r.retain(|i| !gone.contains(&i.path));
+        Ok(r.clone())
+    })
+    .await
 }
 
 #[tauri::command]

@@ -115,71 +115,77 @@ pub async fn archive_reencode(
 }
 
 #[tauri::command]
-pub fn archive_summary(state: State<'_, AppState>, id: u32) -> CmdResult<ArchiveSummary> {
-    let a = archive(&state, id)?;
-    Ok(summary(&a))
+pub async fn archive_summary(app: AppHandle, id: u32) -> CmdResult<ArchiveSummary> {
+    with_state(app, move |_, state| Ok(summary(&*archive(state, id)?))).await
 }
 
+/// Closes an archive. Letting go of a large one and deleting a new archive's scratch folders
+/// take a while, so it happens off the main thread.
 #[tauri::command]
-pub fn archive_close(state: State<'_, AppState>, id: u32) {
-    state
-        .archives
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&id);
-    let draft = state
-        .drafts
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&id);
-    for dir in draft.map(|d| d.scratch).unwrap_or_default() {
-        let _ = std::fs::remove_dir_all(dir);
-    }
+pub async fn archive_close(app: AppHandle, id: u32) -> CmdResult<()> {
+    with_state(app, move |_, state| {
+        let opened = state
+            .archives
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+        drop(opened);
+        let draft = state
+            .drafts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+        for dir in draft.map(|d| d.scratch).unwrap_or_default() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Starts a new archive (`crate::draft`), optionally with files and folders in it, and opens
 /// it for browsing.
 #[tauri::command]
-pub fn draft_new(
-    state: State<'_, AppState>,
+pub async fn draft_new(
+    app: AppHandle,
     name: String,
     paths: Vec<String>,
 ) -> CmdResult<ArchiveSummary> {
-    let mut draft = Draft::new(name);
-    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    draft.add(&paths, "").map_err(err)?;
-    let id = state.next_archive_id();
-    let opened = draft.open(id);
-    let s = summary(&opened);
-    state
-        .archives
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(id, Arc::new(opened));
-    state
-        .drafts
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(id, draft);
-    Ok(s)
+    with_state(app, move |_, state| {
+        let mut draft = Draft::new(name);
+        let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+        draft.add(&paths, "").map_err(err)?;
+        let id = state.next_archive_id();
+        let opened = draft.open(id);
+        let s = summary(&opened);
+        state
+            .archives
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, Arc::new(opened));
+        state
+            .drafts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, draft);
+        Ok(s)
+    })
+    .await
 }
 
 /// Creates an empty folder in a new archive.
 #[tauri::command]
-pub fn draft_mkdir(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: u32,
-    dir: NodeId,
-    name: String,
-) -> CmdResult<()> {
+pub async fn draft_mkdir(app: AppHandle, id: u32, dir: NodeId, name: String) -> CmdResult<()> {
     if name.is_empty() || name.contains(['/', '\\']) {
         return Err(err(Error::invalid_argument("invalid name")));
     }
-    let dir = archive(&state, id)?.tree.path(dir);
-    edit_draft(&app, &state, id, |d| d.mkdir(&dir, &name))
-        .unwrap_or_else(|| Err(err(Error::invalid_argument("not a new archive"))))
-        .map(|_| ())
+    with_state(app, move |app, state| {
+        let dir = archive(state, id)?.tree.path(dir);
+        edit_draft(app, state, id, |d| d.mkdir(&dir, &name))
+            .unwrap_or_else(|| Err(err(Error::invalid_argument("not a new archive"))))
+            .map(|_| ())
+    })
+    .await
 }
 
 /// Applies an edit to a new archive and refreshes its listing. Drafts live in memory, so there
@@ -263,10 +269,11 @@ fn sort_key(s: &str) -> SortKey {
 }
 
 /// One page of a directory, or of search results below it.
+/// Sorting and searching walk the tree: a large archive takes a while.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn archive_list(
-    state: State<'_, AppState>,
+pub async fn archive_list(
+    app: AppHandle,
     id: u32,
     dir: NodeId,
     sort: String,
@@ -275,8 +282,30 @@ pub fn archive_list(
     limit: usize,
     query: Option<String>,
 ) -> CmdResult<ListPage> {
-    let a = archive(&state, id)?;
-    let key = sort_key(&sort);
+    with_state(app, move |_, state| {
+        list(
+            &*archive(state, id)?,
+            dir,
+            &sort,
+            desc,
+            offset,
+            limit,
+            query,
+        )
+    })
+    .await
+}
+
+fn list(
+    a: &OpenedArchive,
+    dir: NodeId,
+    sort: &str,
+    desc: bool,
+    offset: usize,
+    limit: usize,
+    query: Option<String>,
+) -> CmdResult<ListPage> {
+    let key = sort_key(sort);
     let limit = limit.min(2000);
     let page = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
         Some(q) => a.tree.search(dir, q, key, desc, offset, limit),
@@ -286,7 +315,7 @@ pub fn archive_list(
     let rows = page
         .items
         .iter()
-        .filter_map(|&n| row(&a, n, searching))
+        .filter_map(|&n| row(a, n, searching))
         .collect();
     Ok(ListPage {
         total: page.total,
@@ -306,8 +335,11 @@ pub struct TreeItem {
 
 /// Sub-directories of a node (sidebar tree).
 #[tauri::command]
-pub fn archive_dirs(state: State<'_, AppState>, id: u32, node: NodeId) -> CmdResult<Vec<TreeItem>> {
-    let a = archive(&state, id)?;
+pub async fn archive_dirs(app: AppHandle, id: u32, node: NodeId) -> CmdResult<Vec<TreeItem>> {
+    with_state(app, move |_, state| dirs(&*archive(state, id)?, node)).await
+}
+
+fn dirs(a: &OpenedArchive, node: NodeId) -> CmdResult<Vec<TreeItem>> {
     let page = a.tree.list(node, SortKey::Name, false, 0, usize::MAX);
     Ok(page
         .items
