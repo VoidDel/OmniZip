@@ -14,7 +14,7 @@ use std::{
     sync::Mutex,
 };
 
-use omnizip_core::{Error, ErrorCode};
+use omnizip_core::{Error, ErrorCode, Secret};
 use omnizip_mountd::{Level, MountSpec, MountStatus, Request, Response, SavedLayer};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -61,7 +61,7 @@ pub struct MountRequest {
     pub label: Option<String>,
     /// Decode a solid archive into the cache right away (the setting when absent).
     pub warm: Option<bool>,
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Mount through the elevated daemon (asks for administrator rights).
     #[serde(default)]
     pub elevated: bool,

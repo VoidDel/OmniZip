@@ -4,13 +4,13 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{FormatId, encoding::NameEncoding};
+use crate::{FormatId, Secret, encoding::NameEncoding};
 
 /// Options for opening an archive.
 #[derive(Debug, Clone, Default)]
 pub struct OpenOptions {
     /// Password to try first (the interaction callback is asked when it is missing or wrong).
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Force a file-name encoding instead of auto-detection.
     pub encoding: Option<NameEncoding>,
     /// BCP 47 locale of the user, used as a hint for encoding detection.
@@ -181,7 +181,7 @@ pub struct WriteOptions {
     /// 7z solid compression.
     pub solid: bool,
     #[serde(skip_serializing)]
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Also encrypt the file list (7z).
     pub encrypt_names: bool,
     /// Split the output into volumes of this many bytes (`name.7z.001`, …).

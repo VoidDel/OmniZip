@@ -10,8 +10,8 @@ use std::{
 
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryId, EntryKind, Error,
-    ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Source,
-    SourceKind, UpdateOp, WriteOptions,
+    ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Secret,
+    Source, SourceKind, UpdateOp, WriteOptions,
     encoding::{self, NameEncoding},
     job::{MAX_PASSWORD_ATTEMPTS, ProgressReader},
     source, timeutil,
@@ -182,7 +182,7 @@ pub struct ZipReader {
     archive: ZipArchive<Box<dyn ReadSeek>>,
     info: ArchiveInfo,
     entries: Vec<Entry>,
-    password: Option<String>,
+    password: Option<Secret>,
     display_name: String,
 }
 
@@ -278,7 +278,7 @@ impl ZipReader {
         })
     }
 
-    fn password_for(&mut self, entry: &str, attempt: u32, ctx: &JobCtx) -> Result<String> {
+    fn password_for(&mut self, entry: &str, attempt: u32, ctx: &JobCtx) -> Result<Secret> {
         if attempt == 0
             && let Some(p) = &self.password
         {

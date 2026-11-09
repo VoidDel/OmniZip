@@ -11,7 +11,7 @@ use std::{
 };
 
 use omnizip_core::{
-    ArchiveInfo, ArchiveReader, EntryKind, Error, JobCtx, TreeIndex, appdirs,
+    ArchiveInfo, ArchiveReader, EntryKind, Error, JobCtx, Secret, TreeIndex, appdirs,
     encoding::NameEncoding,
 };
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ pub struct OpenedArchive {
     pub kinds: Vec<EntryKind>,
     /// Locked by jobs and previews; listing only needs `tree`.
     pub reader: Mutex<Box<dyn ArchiveReader>>,
-    pub password: Mutex<Option<String>>,
+    pub password: Mutex<Option<Secret>>,
     pub encoding: Option<NameEncoding>,
     /// A new archive not saved yet (`crate::draft`): edits change memory, not a file.
     pub draft: bool,

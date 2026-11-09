@@ -9,8 +9,8 @@ use std::{
 
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryKind, Error,
-    ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Source,
-    SourceKind, WriteOptions,
+    ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Secret,
+    Source, SourceKind, WriteOptions,
     job::MAX_PASSWORD_ATTEMPTS,
     sink::drain,
     source,
@@ -122,7 +122,7 @@ pub struct SevenZReader {
     block_encrypted: Vec<bool>,
     /// Indices of entries without data (directories, empty files).
     streamless: Vec<usize>,
-    password: Option<String>,
+    password: Option<Secret>,
     password_verified: bool,
     display_name: String,
 }

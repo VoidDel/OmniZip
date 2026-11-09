@@ -22,6 +22,7 @@ flate2.workspace = true
 crc32fast.workspace = true
 tempfile.workspace = true
 globset.workspace = true
+zeroize.workspace = true
 time = { version = "0.3", features = ["local-offset"] }
 
 [dev-dependencies]

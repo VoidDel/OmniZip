@@ -11,7 +11,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use omnizip_core::{
     ArchiveReader, Capabilities, CollectOptions, Entry, EntryData, EntryKind, Error, ErrorCode,
     ExtractOptions, ExtractSink, FormatId, JobCtx, Level, OpenOptions, OverwriteMode, PathMode,
-    Result, Selection, SortKey, TreeIndex, UpdateOp, WriteOptions, encoding::NameEncoding,
+    Result, Secret, Selection, SortKey, TreeIndex, UpdateOp, WriteOptions, encoding::NameEncoding,
     format::archive_stem, source,
 };
 use omnizip_formats::shared;
@@ -143,7 +143,7 @@ fn display_name(p: &Path) -> String {
 fn open(
     ui: &Ui,
     path: &Path,
-    password: Option<String>,
+    password: Option<Secret>,
     encoding: Option<NameEncoding>,
     ctx: &JobCtx,
 ) -> Result<Box<dyn ArchiveReader>> {
@@ -207,7 +207,7 @@ fn extract_one(
     flat: bool,
     overwrite: OverwriteMode,
     dest_root: &Path,
-    pw: Option<String>,
+    pw: Option<Secret>,
     enc: Option<NameEncoding>,
     ui: &Ui,
 ) -> Result<i32> {

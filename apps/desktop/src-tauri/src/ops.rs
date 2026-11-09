@@ -8,8 +8,8 @@ use std::{
 
 use omnizip_core::{
     CollectOptions, Error, ErrorCode, ExtractOptions, FormatId, JobCtx, OpenOptions, OverwriteMode,
-    PathMode, Report, Selection, SymlinkPolicy, UpdateOp, WriteOptions, encoding::NameEncoding,
-    format::archive_stem, source,
+    PathMode, Report, Secret, Selection, SymlinkPolicy, UpdateOp, WriteOptions,
+    encoding::NameEncoding, format::archive_stem, source,
 };
 use omnizip_formats::shared;
 use serde::Deserialize;
@@ -38,7 +38,7 @@ pub struct ExtractRequest {
     /// `smart`, `full` or `flat`.
     pub path_mode: String,
     pub overwrite: OverwriteMode,
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     pub encoding: Option<String>,
     #[serde(default)]
     pub open_after: bool,
@@ -60,7 +60,7 @@ pub struct CompressRequest {
     pub format: FormatId,
     pub level: omnizip_core::Level,
     pub method: Option<String>,
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     #[serde(default)]
     pub encrypt_names: bool,
     #[serde(default = "yes")]
@@ -347,7 +347,7 @@ pub fn compress_work(
 pub fn test_work(
     opened: Option<Arc<OpenedArchive>>,
     paths: Vec<String>,
-    password: Option<String>,
+    password: Option<Secret>,
 ) -> (String, Work) {
     let title = match (&opened, paths.first()) {
         (Some(a), _) => file_name(&a.path),
@@ -589,7 +589,7 @@ pub fn reopen(a: &OpenedArchive) -> Result<OpenedArchive, Error> {
 pub fn open_archive(
     id: u32,
     path: &Path,
-    password: Option<String>,
+    password: Option<Secret>,
     encoding: Option<NameEncoding>,
 ) -> Result<OpenedArchive, Error> {
     let ctx = match &password {

@@ -594,6 +594,7 @@ dependencies = [
  "time",
  "tracing",
  "unicode-normalization",
+ "zeroize",
 ]
 
 [[package]]

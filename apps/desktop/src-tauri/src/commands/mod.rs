@@ -10,7 +10,7 @@ use std::{
 use base64::Engine as _;
 use omnizip_core::{
     Capabilities, EntryKind, Error, ErrorCode, ErrorReport, FormatId, FormatSupport, NodeId,
-    SortKey, UpdateOp,
+    Secret, SortKey, UpdateOp,
     encoding::{self, NameEncoding},
     entry::to_millis,
 };

@@ -16,7 +16,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, ErrorCode, Result, policy::SecurityPolicy};
+use crate::{Error, ErrorCode, Result, Secret, policy::SecurityPolicy};
 
 /// Cooperative cancellation flag shared between a job and its controller.
 #[derive(Debug, Clone, Default)]
@@ -164,7 +164,7 @@ pub enum Confirm {
 /// Callbacks into the front end. Every method has a safe, non-interactive default.
 pub trait Interaction: Send + Sync {
     /// Asks for a password. `None` gives up.
-    fn password(&self, _req: &PasswordRequest) -> Option<String> {
+    fn password(&self, _req: &PasswordRequest) -> Option<Secret> {
         None
     }
 
@@ -190,10 +190,10 @@ impl Interaction for NoInteraction {}
 
 /// Provides a fixed password and otherwise behaves like [`NoInteraction`].
 #[derive(Debug, Clone)]
-pub struct FixedPassword(pub String);
+pub struct FixedPassword(pub Secret);
 
 impl Interaction for FixedPassword {
-    fn password(&self, req: &PasswordRequest) -> Option<String> {
+    fn password(&self, req: &PasswordRequest) -> Option<Secret> {
         (req.attempt == 0).then(|| self.0.clone())
     }
 }
@@ -331,7 +331,7 @@ impl JobCtx {
     }
 
     /// Asks for a password; `Err(PasswordRequired)` when the front end gives up.
-    pub fn ask_password(&self, archive: &str, entry: Option<&str>, attempt: u32) -> Result<String> {
+    pub fn ask_password(&self, archive: &str, entry: Option<&str>, attempt: u32) -> Result<Secret> {
         self.check()?;
         let req = PasswordRequest {
             archive: archive.to_owned(),
@@ -496,7 +496,7 @@ mod tests {
             ErrorCode::WrongPassword
         );
         let ctx = JobCtx::new(Arc::new(NullProgress), Arc::new(FixedPassword("pw".into())));
-        assert_eq!(ctx.ask_password("a.7z", None, 0).unwrap(), "pw");
+        assert_eq!(&*ctx.ask_password("a.7z", None, 0).unwrap(), "pw");
         assert_eq!(
             ctx.ask_password("a.7z", None, 1).unwrap_err().code(),
             ErrorCode::WrongPassword

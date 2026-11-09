@@ -55,7 +55,7 @@ pub fn job_test(
     state: State<'_, AppState>,
     archive_id: Option<u32>,
     paths: Vec<String>,
-    password: Option<String>,
+    password: Option<Secret>,
 ) -> CmdResult<u32> {
     let opened = match archive_id {
         Some(id) => Some(archive(&state, id)?),

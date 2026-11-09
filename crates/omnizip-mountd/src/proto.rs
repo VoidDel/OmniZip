@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use omnizip_core::{Error, ErrorReport};
+use omnizip_core::{Error, ErrorReport, Secret};
 pub use omnizip_vfs::Changes;
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +48,7 @@ pub struct MountSpec {
     pub mount_point: Option<PathBuf>,
     /// The volume label; derived from the archive name when absent.
     pub label: Option<String>,
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Entry name encoding (`NameEncoding::label`); detected when absent.
     pub encoding: Option<String>,
     /// Mark files offline so Explorer does not read them for thumbnails.
@@ -116,7 +116,7 @@ pub struct SavedLayer {
     pub layer: PathBuf,
     pub changes: Changes,
     /// The archive's password and name encoding, as mounted.
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     pub encoding: Option<String>,
 }
 

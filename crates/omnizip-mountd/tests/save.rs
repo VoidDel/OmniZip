@@ -27,7 +27,7 @@ fn archive(dir: &Path, format: FormatId, password: Option<&str>) -> PathBuf {
     let wo = WriteOptions {
         format,
         level: Level::Fast,
-        password: password.map(str::to_owned),
+        password: password.map(Into::into),
         ..Default::default()
     };
     omnizip_formats::shared()
@@ -52,14 +52,14 @@ fn layer(dir: &Path, archive: PathBuf, password: Option<&str>) -> SavedLayer {
             deleted: vec!["docs/notes.txt".into()],
             entries: vec!["docs/notes.txt".into()],
         },
-        password: password.map(str::to_owned),
+        password: password.map(Into::into),
         encoding: None,
     }
 }
 
 fn open(path: &Path, password: Option<&str>) -> ArchiveFs {
     let oo = OpenOptions {
-        password: password.map(str::to_owned),
+        password: password.map(Into::into),
         ..Default::default()
     };
     let reader = omnizip_formats::shared()
@@ -68,7 +68,7 @@ fn open(path: &Path, password: Option<&str>) -> ArchiveFs {
     ArchiveFs::new(
         reader,
         FsOptions {
-            password: password.map(str::to_owned),
+            password: password.map(Into::into),
             ..Default::default()
         },
     )

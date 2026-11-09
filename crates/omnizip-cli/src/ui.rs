@@ -10,8 +10,8 @@ use console::Style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use omnizip_core::{
     CancelToken, Confirm, Conflict, ConflictChoice, ConflictDecision, Error, ErrorCode,
-    Interaction, JobCtx, PasswordRequest, Phase, Progress, ProgressSink, SecurityPolicy, Warning,
-    timeutil,
+    Interaction, JobCtx, PasswordRequest, Phase, Progress, ProgressSink, Secret, SecurityPolicy,
+    Warning, timeutil,
 };
 use omnizip_i18n::{Localizer, tr};
 use serde_json::{Value, json};
@@ -173,7 +173,7 @@ impl Ui {
     pub fn job(
         &self,
         archive: &str,
-        preset_password: Option<String>,
+        preset_password: Option<Secret>,
         overwrite_all: Option<bool>,
     ) -> (JobCtx, Display) {
         let display = Display::new(self.progress, self.json);
@@ -192,15 +192,17 @@ impl Ui {
     }
 
     /// Resolves the password sources of a command.
-    pub fn password(&self, p: &PasswordArgs, confirm: bool) -> Result<Option<String>, Error> {
+    pub fn password(&self, p: &PasswordArgs, confirm: bool) -> Result<Option<Secret>, Error> {
         if let Some(file) = &p.password_file {
-            let s = std::fs::read_to_string(file).map_err(|e| Error::io(e, file))?;
-            return Ok(Some(s.trim_end_matches(['\r', '\n']).to_owned()));
+            let mut s = std::fs::read_to_string(file).map_err(|e| Error::io(e, file))?;
+            // Cut in place: the line break goes, the text is not copied.
+            s.truncate(s.trim_end_matches(['\r', '\n']).len());
+            return Ok(Some(Secret::new(s)));
         }
         if let Some(var) = &p.password_env {
             let s = std::env::var(var)
                 .map_err(|_| Error::invalid_argument(format!("${var} is not set")))?;
-            return Ok(Some(s));
+            return Ok(Some(Secret::new(s)));
         }
         match p.password.as_deref() {
             None => Ok(None),
@@ -219,7 +221,7 @@ impl Ui {
             }
             Some(inline) => {
                 self.warn_text(&self.l.get("warn-password-argument"));
-                Ok(Some(inline.to_owned()))
+                Ok(Some(Secret::from(inline)))
             }
         }
     }
@@ -233,8 +235,10 @@ impl Ui {
     }
 }
 
-fn prompt_hidden(prompt: &str) -> Result<String, Error> {
-    rpassword::prompt_password(format!("{prompt} ")).map_err(Error::from)
+fn prompt_hidden(prompt: &str) -> Result<Secret, Error> {
+    rpassword::prompt_password(format!("{prompt} "))
+        .map(Secret::new)
+        .map_err(Error::from)
 }
 
 /// Progress display shared with the job context.
@@ -318,7 +322,7 @@ struct CliInteraction {
     l: Localizer,
     interactive: bool,
     yes: bool,
-    preset: Mutex<Option<String>>,
+    preset: Mutex<Option<Secret>>,
     archive: String,
     bar: Option<ProgressBar>,
     /// `Some(true)` overwrite everything, `Some(false)` skip everything, `None` ask.
@@ -345,7 +349,7 @@ impl CliInteraction {
 }
 
 impl Interaction for CliInteraction {
-    fn password(&self, req: &PasswordRequest) -> Option<String> {
+    fn password(&self, req: &PasswordRequest) -> Option<Secret> {
         if req.attempt == 0
             && let Some(p) = self.preset.lock().ok()?.take()
         {

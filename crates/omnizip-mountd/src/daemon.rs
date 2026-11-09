@@ -39,7 +39,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use omnizip_core::{Error, ErrorCode, MountClass, appdirs};
+use omnizip_core::{Error, ErrorCode, MountClass, Secret, appdirs};
 use omnizip_vfs::{ArchiveFs, Mount, MountBackend, MountError, MountOptions, OverlayFs, VirtualFs};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -195,7 +195,7 @@ struct Hosted {
     /// The writable layer over `fs`, which is then what is mounted.
     overlay: Option<Arc<OverlayFs>>,
     /// As mounted, for saving the changes.
-    password: Option<String>,
+    password: Option<Secret>,
     encoding: Option<String>,
     mount: Box<dyn Mount>,
     warming: Arc<AtomicBool>,

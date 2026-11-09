@@ -28,6 +28,7 @@ pub mod path;
 pub mod policy;
 pub mod precompressed;
 pub mod registry;
+pub mod secret;
 pub mod sink;
 pub mod source;
 pub mod timeutil;
@@ -49,6 +50,7 @@ pub use options::{
 };
 pub use policy::SecurityPolicy;
 pub use registry::{FormatRegistry, FormatSupport};
+pub use secret::Secret;
 pub use sink::{EntryData, ExtractSink, Report, Selection, Warning};
 pub use source::{CollectOptions, Source, SourceKind};
 pub use tree::{NodeId, SortKey, TreeIndex};

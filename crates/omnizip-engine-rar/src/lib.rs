@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryKind, Error,
-    ErrorCode, ExtractSink, FormatId, JobCtx, OpenOptions, Report, Result, Selection,
+    ErrorCode, ExtractSink, FormatId, JobCtx, OpenOptions, Report, Result, Secret, Selection,
     job::MAX_PASSWORD_ATTEMPTS, timeutil,
 };
 use unrar::{
@@ -76,7 +76,7 @@ pub struct RarReader {
     path: PathBuf,
     info: ArchiveInfo,
     entries: Vec<Entry>,
-    password: Option<String>,
+    password: Option<Secret>,
     password_verified: bool,
     display_name: String,
 }

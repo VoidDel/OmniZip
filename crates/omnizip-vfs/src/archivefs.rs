@@ -26,7 +26,7 @@ use std::{
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, CancelToken, Entry, EntryData, EntryId, EntryKind, Error,
     ErrorCode, ExtractSink, FixedPassword, Interaction, JobCtx, MountClass, NoInteraction,
-    NullProgress, SecurityPolicy, TreeIndex,
+    NullProgress, Secret, SecurityPolicy, TreeIndex,
     path::{logical_components, resolve_link},
 };
 
@@ -64,7 +64,7 @@ pub struct FsOptions {
     pub max_handles: usize,
     /// Password for encrypted entries. Without one, reading them fails with
     /// [`FsError::Access`].
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Decode a whole solid archive on first access when it fits the disk budget.
     pub warm_solid: bool,
     /// Limits on untrusted content: the expansion ratio caps what one entry may unpack to.

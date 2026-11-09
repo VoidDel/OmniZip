@@ -19,7 +19,7 @@ use std::{
 use omnizip_core::{
     CancelToken, Confirm, Conflict, ConflictChoice, ConflictDecision, Error, ErrorCode,
     ErrorReport, Interaction, JobCtx, PasswordRequest, Phase, Progress, ProgressSink, Report,
-    SecurityPolicy, entry::to_millis,
+    Secret, SecurityPolicy, entry::to_millis,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -70,7 +70,7 @@ pub struct JobInfo {
 )]
 pub enum PromptAnswer {
     Password {
-        value: Option<String>,
+        value: Option<Secret>,
     },
     Conflict {
         choice: ConflictChoice,
@@ -128,7 +128,7 @@ pub struct JobSpec {
     pub archive_id: Option<u32>,
     pub policy: SecurityPolicy,
     /// Answer to the first password prompt (typed in the dialog that started the job).
-    pub password: Option<String>,
+    pub password: Option<Secret>,
 }
 
 impl JobSpec {
@@ -497,7 +497,7 @@ impl ProgressSink for JobProgress {
 struct JobInteraction {
     app: AppHandle,
     job: Arc<Job>,
-    preset: Mutex<Option<String>>,
+    preset: Mutex<Option<Secret>>,
 }
 
 impl JobInteraction {
@@ -540,7 +540,7 @@ impl JobInteraction {
 }
 
 impl Interaction for JobInteraction {
-    fn password(&self, req: &PasswordRequest) -> Option<String> {
+    fn password(&self, req: &PasswordRequest) -> Option<Secret> {
         if req.attempt == 0
             && let Some(p) = self.preset.lock().unwrap_or_else(|e| e.into_inner()).take()
         {

@@ -314,7 +314,7 @@ fn compressed_files_are_stored_in_blocks_of_their_own() {
         let o = WriteOptions {
             solid,
             skip_compressed: skip,
-            password: password.map(str::to_owned),
+            password: password.map(Into::into),
             encrypt_names: password.is_some(),
             ..opts7z()
         };

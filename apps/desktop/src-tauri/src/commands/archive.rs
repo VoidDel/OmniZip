@@ -53,7 +53,7 @@ fn summary(a: &OpenedArchive) -> ArchiveSummary {
 pub async fn archive_open(
     state: State<'_, AppState>,
     path: String,
-    password: Option<String>,
+    password: Option<Secret>,
     encoding: Option<String>,
 ) -> CmdResult<ArchiveSummary> {
     let enc = match encoding.as_deref() {
@@ -522,7 +522,7 @@ pub async fn archive_preview(
 pub fn archive_set_password(
     state: State<'_, AppState>,
     id: u32,
-    password: String,
+    password: Secret,
 ) -> CmdResult<()> {
     let a = archive(&state, id)?;
     *a.password.lock().unwrap_or_else(|e| e.into_inner()) = Some(password);
