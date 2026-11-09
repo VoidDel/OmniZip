@@ -861,7 +861,10 @@ fn parallel_extraction_reports_damage() {
         .windows(15)
         .position(|w| w == b"body of file 70")
         .unwrap();
-    cut.splice(start..local_end, std::iter::repeat_n(0u8, local_end - start));
+    cut.splice(
+        start..local_end,
+        std::iter::repeat_n(0u8, local_end - start),
+    );
     let p = d.path().join("cut.zip");
     fs::write(&p, &cut).unwrap();
     let mut r = open(&p);
