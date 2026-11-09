@@ -213,6 +213,8 @@ pub struct JobCtx {
     tracker: Mutex<Tracker>,
     /// Minimum delay between two progress callbacks.
     pub throttle: Duration,
+    /// Held while the user is asked something: threads of one job ask one at a time.
+    asking: Mutex<()>,
 }
 
 impl Default for JobCtx {
@@ -242,6 +244,7 @@ impl JobCtx {
                 last_emit: None,
             }),
             throttle: Duration::from_millis(33),
+            asking: Mutex::new(()),
         }
     }
 
@@ -330,6 +333,12 @@ impl JobCtx {
             .clone()
     }
 
+    /// Held while asking the user something: threads of one job (a parallel extraction) then
+    /// ask one question at a time.
+    pub fn one_question(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.asking.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Asks for a password; `Err(PasswordRequired)` when the front end gives up.
     pub fn ask_password(&self, archive: &str, entry: Option<&str>, attempt: u32) -> Result<Secret> {
         self.check()?;
@@ -338,7 +347,11 @@ impl JobCtx {
             entry: entry.map(str::to_owned),
             attempt,
         };
-        match self.interaction.password(&req) {
+        let answer = {
+            let _one = self.one_question();
+            self.interaction.password(&req)
+        };
+        match answer {
             Some(p) => Ok(p),
             None if attempt == 0 => {
                 Err(Error::new(ErrorCode::PasswordRequired).with("path", archive))

@@ -251,6 +251,7 @@ fn extract_one(
         overwrite,
         keep_broken: a.keep_broken,
         strip_unsafe_paths: a.strip_unsafe_paths,
+        threads: ui.threads,
         ..ExtractOptions::default()
     };
     let started = Instant::now();

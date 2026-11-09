@@ -85,6 +85,21 @@ pub struct ExtractOptions {
     pub propagate_origin: bool,
     /// Drop dangerous path parts instead of refusing the entry.
     pub strip_unsafe_paths: bool,
+    /// Threads extracting at once, each decoding and writing its own entries, where they decode
+    /// on their own (ZIP, 7z); `0` = automatic.
+    pub threads: u32,
+}
+
+impl ExtractOptions {
+    /// Threads to extract on: as asked, else one per processor, at most 8 (writing many small
+    /// files gains little beyond that).
+    pub fn effective_threads(&self) -> usize {
+        if self.threads > 0 {
+            self.threads as usize
+        } else {
+            std::thread::available_parallelism().map_or(1, |n| n.get().min(8))
+        }
+    }
 }
 
 impl Default for ExtractOptions {
@@ -100,6 +115,7 @@ impl Default for ExtractOptions {
             symlinks: SymlinkPolicy::platform_default(),
             propagate_origin: true,
             strip_unsafe_paths: false,
+            threads: 0,
         }
     }
 }

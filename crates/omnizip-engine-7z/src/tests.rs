@@ -349,3 +349,119 @@ fn compressed_files_are_stored_in_blocks_of_their_own() {
         assert!(!cut && data == photo, "{case}");
     }
 }
+
+/// `n` text files in a few folders, and a photo (stored as it is, in a block of its own when
+/// the archive is solid).
+fn many_files(root: &Path, n: usize) -> std::path::PathBuf {
+    let p = root.join("many");
+    for i in 0..n {
+        let dir = p.join(format!("d{}", i % 5));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("f{i:03}.txt")), content(i)).unwrap();
+    }
+    let mut x = 0x2545_F491_u32;
+    let photo: Vec<u8> = (0..300_000)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            x as u8
+        })
+        .collect();
+    fs::write(p.join("photo.jpg"), photo).unwrap();
+    p
+}
+
+fn files_below(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    fn walk(
+        dir: &Path,
+        root: &Path,
+        out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) {
+        for e in fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, root, out);
+            } else {
+                out.insert(
+                    p.strip_prefix(root).unwrap().to_owned(),
+                    fs::read(&p).unwrap(),
+                );
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// Non-solid archives (a block per file) and solid ones with several blocks extract on several
+/// threads to the same files as on one; an encrypted one asks for its password once.
+#[test]
+fn parallel_extraction_writes_what_serial_does() {
+    let d = tempfile::tempdir().unwrap();
+    let src = many_files(d.path(), 90);
+    let expected = files_below(&src);
+    for (name, solid, password) in [
+        ("plain.7z", false, None),
+        ("solid.7z", true, None),
+        ("secret.7z", false, Some("s3cret")),
+    ] {
+        let sources = source::collect(
+            std::slice::from_ref(&src),
+            &CollectOptions::default(),
+            &ctx(),
+        )
+        .unwrap();
+        let archive = d.path().join(name);
+        let wo = WriteOptions {
+            solid,
+            password: password.map(Into::into),
+            ..opts7z()
+        };
+        SevenZEngine
+            .create(&archive, &sources, &wo, &ctx())
+            .unwrap();
+        if solid {
+            let r = open(&archive);
+            let blocks: std::collections::HashSet<_> = r
+                .entries()
+                .iter()
+                .filter_map(|e| r.solid_block(e.id))
+                .collect();
+            assert_eq!(blocks.len(), 2, "the photo is stored in a block of its own");
+        }
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        struct Count(Arc<std::sync::atomic::AtomicUsize>);
+        impl omnizip_core::Interaction for Count {
+            fn password(&self, _r: &omnizip_core::job::PasswordRequest) -> Option<Secret> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Some("s3cret".into())
+            }
+        }
+        let c = JobCtx::new(Arc::new(NullProgress), Arc::new(Count(asked.clone())));
+        for threads in [1, 4] {
+            let mut r = open(&archive);
+            let out = d.path().join(format!("{name}-{threads}"));
+            let o = ExtractOptions {
+                destination: out.clone(),
+                threads,
+                ..Default::default()
+            };
+            let report = extract(r.as_mut(), &o, Selection::all(), &c).unwrap();
+            assert_eq!(report.files, 91, "{name} on {threads}");
+            assert_eq!(
+                files_below(&out.join("many")),
+                expected,
+                "{name} on {threads}"
+            );
+        }
+        if password.is_some() {
+            assert_eq!(
+                asked.load(std::sync::atomic::Ordering::SeqCst),
+                2,
+                "once per extraction"
+            );
+        }
+    }
+}

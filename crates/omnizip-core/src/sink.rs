@@ -12,6 +12,10 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::SystemTime,
 };
 
@@ -145,18 +149,28 @@ struct DeferredLink {
     entry_path: String,
 }
 
-/// Writes entries below a destination directory, enforcing the security policy.
-pub struct FsSink {
+/// What every writer of one extraction shares ([`FsSink::fork`]).
+struct Shared {
     root: PathBuf,
     opts: ExtractOptions,
     selection: Selection,
     os: TargetOs,
+    origin: Option<Origin>,
+    archive_size: u64,
+    /// Bytes written so far, for the streaming bomb check.
+    total_written: AtomicU64,
+    bomb_confirmed: AtomicBool,
+    /// Questions to the user go one at a time (conflicts, a high ratio); holds the conflict
+    /// choice the user applied to all.
+    asking: Mutex<Option<ConflictChoice>>,
+    state: Mutex<State>,
+}
+
+/// What the writers of one extraction record.
+#[derive(Default)]
+struct State {
     report: Report,
     dir_times: Vec<(PathBuf, SystemTime)>,
-    /// The directory being written into, held open from the root down (`crate::dirguard`):
-    /// nothing below the root is looked up by its path again, so a directory swapped for a link
-    /// meanwhile cannot redirect a write.
-    guard: DirGuard,
     /// Directories this extraction created: only these take a mode from the archive, never a
     /// directory that was already there (the destination itself included).
     created_dirs: HashSet<PathBuf>,
@@ -164,20 +178,34 @@ pub struct FsSink {
     /// filled.
     dir_modes: Vec<(PathBuf, u32)>,
     links: Vec<DeferredLink>,
-    apply_all: Option<ConflictChoice>,
-    origin: Option<Origin>,
     /// Sanitized archive path → written file, for hard links.
     written: HashMap<String, PathBuf>,
-    /// Bytes written so far, and the archive size, for the streaming bomb check.
-    total_written: u64,
-    archive_size: u64,
-    bomb_confirmed: bool,
-    /// Copy buffer shared by all files (allocated on first use).
-    buf: Vec<u8>,
     /// The folder written directly below the root, while it is the only item there; `top_mixed`
     /// once anything else is.
     top_dir: Option<PathBuf>,
     top_mixed: bool,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Writes entries below a destination directory, enforcing the security policy.
+///
+/// Several writers can fill one destination from several threads ([`fork`](Self::fork)): they
+/// share the report, the questions to the user and what is done at the end, and each holds its
+/// own current directory and is handed its own entries ([`set_unit`](Self::set_unit)).
+pub struct FsSink {
+    shared: Arc<Shared>,
+    /// The directory being written into, held open from the root down (`crate::dirguard`):
+    /// nothing below the root is looked up by its path again, so a directory swapped for a link
+    /// meanwhile cannot redirect a write.
+    guard: DirGuard,
+    /// Copy buffer shared by all files (allocated on first use).
+    buf: Vec<u8>,
+    /// The entries this writer still has to write, when it was handed some; otherwise it takes
+    /// the whole selection.
+    unit: Option<HashSet<EntryId>>,
 }
 
 impl FsSink {
@@ -197,67 +225,107 @@ impl FsSink {
             None
         };
         Ok(Self {
+            shared: Arc::new(Shared {
+                root,
+                opts,
+                selection,
+                os: TargetOs::current(),
+                origin,
+                archive_size,
+                total_written: AtomicU64::new(0),
+                bomb_confirmed: AtomicBool::new(false),
+                asking: Mutex::new(None),
+                state: Mutex::default(),
+            }),
             guard,
-            root,
-            opts,
-            selection,
-            os: TargetOs::current(),
-            report: Report::default(),
-            dir_times: Vec::new(),
-            created_dirs: HashSet::new(),
-            dir_modes: Vec::new(),
-            links: Vec::new(),
-            apply_all: None,
-            origin,
-            written: HashMap::new(),
-            total_written: 0,
-            archive_size,
-            bomb_confirmed: false,
             buf: Vec::new(),
-            top_dir: None,
-            top_mixed: false,
+            unit: None,
         })
+    }
+
+    /// Another writer of the same extraction, for another thread: it shares everything but the
+    /// directory it is in and its buffer. Only the first writer is finished.
+    pub fn fork(&self) -> Result<Self> {
+        let root = &self.shared.root;
+        Ok(Self {
+            shared: self.shared.clone(),
+            guard: DirGuard::open(root).map_err(|e| Error::io(e, root))?,
+            buf: Vec::new(),
+            unit: None,
+        })
+    }
+
+    /// Hands this writer `ids` (of the selection): it wants only these until they are written.
+    pub fn set_unit(&mut self, ids: impl IntoIterator<Item = EntryId>) {
+        self.unit = Some(ids.into_iter().collect());
     }
 
     /// The user already accepted a high ratio (the check on declared sizes before extracting):
     /// do not ask again while writing.
-    pub fn high_ratio_confirmed(mut self) -> Self {
-        self.bomb_confirmed = true;
+    pub fn high_ratio_confirmed(self) -> Self {
+        self.shared.bomb_confirmed.store(true, Ordering::Relaxed);
         self
     }
 
-    /// Overrides the file-system rules (tests).
+    /// Overrides the file-system rules (tests; before any fork).
     pub fn with_target_os(mut self, os: TargetOs) -> Self {
-        self.os = os;
+        if let Some(s) = Arc::get_mut(&mut self.shared) {
+            s.os = os;
+        }
         self
     }
 
     /// The destination root.
     pub fn root(&self) -> &Path {
-        &self.root
+        &self.shared.root
+    }
+
+    /// Whether the selection holds `id`.
+    pub fn selects(&self, id: EntryId) -> bool {
+        self.shared.selection.contains(id)
+    }
+
+    fn st(&self) -> MutexGuard<'_, State> {
+        lock(&self.shared.state)
+    }
+
+    /// Where `entry` goes below the root, as a key that is the same for two entries exactly when
+    /// they would land on the same file (names differing only in case are on Windows and macOS);
+    /// `None` when it is skipped. Records nothing.
+    pub fn target_key(&self, entry: &Entry) -> Option<String> {
+        let s = sanitize(&entry.path, self.shared.os, self.path_mode()).ok()?;
+        self.arrange(s.components).map(|c| link_key(&c))
     }
 
     /// Creates deferred links, applies directory modes and times and returns the report.
     pub fn finish(mut self, ctx: &JobCtx) -> Result<Report> {
-        let links = std::mem::take(&mut self.links);
+        let (links, dir_modes, mut times, written) = {
+            let mut st = self.st();
+            (
+                std::mem::take(&mut st.links),
+                std::mem::take(&mut st.dir_modes),
+                std::mem::take(&mut st.dir_times),
+                std::mem::take(&mut st.written),
+            )
+        };
+        let root = self.shared.root.clone();
         // Every symbolic link of this extraction, whether created before or after the one being
         // checked: the order they are created in must not decide where a link leads.
         let pending: HashMap<String, String> = links
             .iter()
             .filter(|l| l.kind == EntryKind::Symlink)
-            .filter_map(|l| Some((link_key(&below(&self.root, &l.path)?), l.target.clone())))
+            .filter_map(|l| Some((link_key(&below(&root, &l.path)?), l.target.clone())))
             .collect();
         for l in links {
             ctx.check()?;
-            self.create_link(l, &pending);
+            self.create_link(l, &pending, &written);
         }
-        for (p, mode) in std::mem::take(&mut self.dir_modes) {
+        for (p, mode) in dir_modes {
             if self.enter_existing(&p) {
                 apply_dir_mode(self.guard.dir(), mode);
             }
         }
         // Deepest directories first so parents are not touched afterwards.
-        let mut times = std::mem::take(&mut self.dir_times);
         times.sort_by_key(|(p, _)| std::cmp::Reverse(p.components().count()));
         for (p, t) in times {
             if self.enter_existing(&p) {
@@ -268,57 +336,69 @@ impl FsSink {
                 );
             }
         }
+        let mut st = std::mem::take(&mut *self.st());
         // A single folder (an archive holding one folder, without a wrapper folder) is what was
         // extracted, not the destination around it.
-        let out = match self.top_dir.take() {
-            Some(d) if !self.top_mixed => d,
-            _ => self.root.clone(),
+        let out = match st.top_dir.take() {
+            Some(d) if !st.top_mixed => d,
+            _ => root,
         };
-        self.report.outputs = vec![out];
-        Ok(self.report)
+        st.report.outputs = vec![out];
+        Ok(st.report)
     }
 
     /// Records an item written directly below the root: a folder (`Some`) or anything else.
-    fn note_top(&mut self, dir: Option<PathBuf>) {
-        match (dir, &self.top_dir) {
+    fn note_top(&self, dir: Option<PathBuf>) {
+        let mut st = self.st();
+        match (dir, &st.top_dir) {
             (Some(d), Some(t)) if d == *t => {}
-            (Some(d), None) if !self.top_mixed => self.top_dir = Some(d),
-            _ => self.top_mixed = true,
+            (Some(d), None) if !st.top_mixed => st.top_dir = Some(d),
+            _ => st.top_mixed = true,
         }
     }
 
-    /// Relative components for an entry, or `None` (with a warning) when it must be skipped.
-    fn relative(&mut self, entry: &Entry) -> Option<Vec<String>> {
-        let mode = if self.opts.strip_unsafe_paths {
+    fn path_mode(&self) -> UnsafePathMode {
+        if self.shared.opts.strip_unsafe_paths {
             UnsafePathMode::Strip
         } else {
             UnsafePathMode::Reject
-        };
-        let mut comps = match sanitize(&entry.path, self.os, mode) {
+        }
+    }
+
+    /// Sanitized components with the selection's prefix stripped, flattened in flat mode.
+    fn arrange(&self, mut comps: Vec<String>) -> Option<Vec<String>> {
+        let strip = &self.shared.selection.strip_prefix;
+        if !strip.is_empty() && comps.len() > strip.len() && comps[..strip.len()] == strip[..] {
+            comps.drain(..strip.len());
+        }
+        if self.shared.opts.path_mode == PathMode::Flat {
+            let last = comps.pop()?;
+            comps = vec![last];
+        }
+        Some(comps)
+    }
+
+    /// Relative components for an entry, or `None` (with a warning) when it must be skipped.
+    fn relative(&self, entry: &Entry) -> Option<Vec<String>> {
+        let comps = match sanitize(&entry.path, self.shared.os, self.path_mode()) {
             Ok(s) => {
                 if !s.repaired.is_empty() {
                     let detail = format!("{:?}", s.repaired);
-                    self.report
+                    self.st()
+                        .report
                         .warn(ErrorCode::PathEscape, &entry.path, Some(detail));
                 }
                 s.components
             }
             Err(e) => {
-                self.report
+                let mut st = self.st();
+                st.report
                     .warn(e.code(), &entry.path, e.param("issue").map(str::to_owned));
-                self.report.skipped += 1;
+                st.report.skipped += 1;
                 return None;
             }
         };
-        let strip = &self.selection.strip_prefix;
-        if !strip.is_empty() && comps.len() > strip.len() && comps[..strip.len()] == strip[..] {
-            comps.drain(..strip.len());
-        }
-        if self.opts.path_mode == PathMode::Flat {
-            let last = comps.pop()?;
-            comps = vec![last];
-        }
-        Some(comps)
+        self.arrange(comps)
     }
 
     /// Enters the directory leading to `comps` (its last component excluded), creating what is
@@ -326,33 +406,29 @@ impl FsSink {
     fn ensure_parents(&mut self, comps: &[String]) -> Result<PathBuf> {
         let parents = &comps[..comps.len().saturating_sub(1)];
         self.enter(parents, true)?;
-        Ok(self.root.join(comps.iter().collect::<PathBuf>()))
+        Ok(self.shared.root.join(comps.iter().collect::<PathBuf>()))
     }
 
     /// Makes `dirs` (below the root) the current directory of the guard, level by level without
     /// following links (`UnsafeLink` when one is in the way, `AlreadyExists` for a file).
     fn enter(&mut self, dirs: &[String], create: bool) -> Result<()> {
-        let Self {
-            guard,
-            created_dirs,
-            ..
-        } = self;
-        guard
-            .enter(dirs, create, &mut |p| {
-                created_dirs.insert(p.to_owned());
-            })
-            .map_err(|e| match e {
-                EnterError::Link(p) => Error::new(ErrorCode::UnsafeLink).with("path", p.display()),
-                EnterError::NotDir(p) => {
-                    Error::new(ErrorCode::AlreadyExists).with("path", p.display())
-                }
-                EnterError::Io(e, p) => Error::io(e, &p),
-            })
+        let mut made = Vec::new();
+        let entered = self
+            .guard
+            .enter(dirs, create, &mut |p| made.push(p.to_owned()));
+        if !made.is_empty() {
+            self.st().created_dirs.extend(made);
+        }
+        entered.map_err(|e| match e {
+            EnterError::Link(p) => Error::new(ErrorCode::UnsafeLink).with("path", p.display()),
+            EnterError::NotDir(p) => Error::new(ErrorCode::AlreadyExists).with("path", p.display()),
+            EnterError::Io(e, p) => Error::io(e, &p),
+        })
     }
 
     /// Enters the existing directory `dir` (a path below the root); whether that worked.
     fn enter_existing(&mut self, dir: &Path) -> bool {
-        below(&self.root, dir).is_some_and(|comps| self.enter(&comps, false).is_ok())
+        below(&self.shared.root, dir).is_some_and(|comps| self.enter(&comps, false).is_ok())
     }
 
     fn decide_conflict(
@@ -365,33 +441,38 @@ impl FsSink {
             return Ok(Some(target.to_owned()));
         };
         if meta.kind == Kind::Dir {
-            self.report
-                .warn(ErrorCode::AlreadyExists, &entry.path, None);
-            self.report.skipped += 1;
+            let mut st = self.st();
+            st.report.warn(ErrorCode::AlreadyExists, &entry.path, None);
+            st.report.skipped += 1;
             return Ok(None);
         }
         let existing_mtime = meta.modified;
-        let choice = match (self.opts.overwrite, self.apply_all) {
-            (_, Some(c)) => c,
-            (OverwriteMode::Skip, _) => ConflictChoice::Skip,
-            (OverwriteMode::Overwrite, _) => ConflictChoice::Overwrite,
-            (OverwriteMode::OverwriteOlder, _) => ConflictChoice::OverwriteOlder,
-            (OverwriteMode::Rename, _) => ConflictChoice::Rename,
-            (OverwriteMode::Ask, None) => {
-                let ConflictDecision {
-                    choice,
-                    apply_to_all,
-                } = ctx.interaction.conflict(&Conflict {
-                    path: target.to_owned(),
-                    existing_size: meta.len,
-                    existing_mtime,
-                    incoming_size: entry.size,
-                    incoming_mtime: entry.mtime,
-                });
-                if apply_to_all {
-                    self.apply_all = Some(choice);
+        let choice = {
+            // One question at a time; an answer applied to all holds for every writer.
+            let mut apply_all = lock(&self.shared.asking);
+            match (self.shared.opts.overwrite, *apply_all) {
+                (_, Some(c)) => c,
+                (OverwriteMode::Skip, _) => ConflictChoice::Skip,
+                (OverwriteMode::Overwrite, _) => ConflictChoice::Overwrite,
+                (OverwriteMode::OverwriteOlder, _) => ConflictChoice::OverwriteOlder,
+                (OverwriteMode::Rename, _) => ConflictChoice::Rename,
+                (OverwriteMode::Ask, None) => {
+                    let _one = ctx.one_question();
+                    let ConflictDecision {
+                        choice,
+                        apply_to_all,
+                    } = ctx.interaction.conflict(&Conflict {
+                        path: target.to_owned(),
+                        existing_size: meta.len,
+                        existing_mtime,
+                        incoming_size: entry.size,
+                        incoming_mtime: entry.mtime,
+                    });
+                    if apply_to_all {
+                        *apply_all = Some(choice);
+                    }
+                    choice
                 }
-                choice
             }
         };
         match choice {
@@ -401,12 +482,12 @@ impl FsSink {
                 if newer {
                     Ok(Some(target.to_owned()))
                 } else {
-                    self.report.skipped += 1;
+                    self.st().report.skipped += 1;
                     Ok(None)
                 }
             }
             ConflictChoice::Skip => {
-                self.report.skipped += 1;
+                self.st().report.skipped += 1;
                 Ok(None)
             }
             ConflictChoice::Rename => {
@@ -414,7 +495,7 @@ impl FsSink {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                let parent = target.parent().unwrap_or(&self.root);
+                let parent = target.parent().unwrap_or(&self.shared.root);
                 for n in 2..10_000 {
                     let candidate = parent.join(numbered_name(&name, n));
                     if self.guard.stat(&file_name(&candidate)).is_err() {
@@ -427,20 +508,28 @@ impl FsSink {
         }
     }
 
-    fn check_streaming_ratio(&mut self, ctx: &JobCtx) -> Result<()> {
+    fn check_streaming_ratio(&self, ctx: &JobCtx) -> Result<()> {
+        let s = &*self.shared;
         let p = &ctx.policy;
-        if self.bomb_confirmed || !p.is_high_ratio(self.total_written, self.archive_size) {
+        let total = s.total_written.load(Ordering::Relaxed);
+        if s.bomb_confirmed.load(Ordering::Relaxed) || !p.is_high_ratio(total, s.archive_size) {
             return Ok(());
         }
-        let ratio = self.total_written / self.archive_size.max(1);
+        let _one_question = lock(&s.asking);
+        // Another writer may have asked meanwhile.
+        if s.bomb_confirmed.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let ratio = total / s.archive_size.max(1);
+        let _one = ctx.one_question();
         if ctx.interaction.confirm(&Confirm::HighRatio {
             ratio,
-            unpacked: self.total_written,
+            unpacked: total,
         }) {
-            self.bomb_confirmed = true;
+            s.bomb_confirmed.store(true, Ordering::Relaxed);
             Ok(())
         } else {
-            Err(p.bomb_error(self.total_written, self.archive_size))
+            Err(p.bomb_error(total, s.archive_size))
         }
     }
 
@@ -535,13 +624,12 @@ impl FsSink {
                 }
                 let mut guard = RatioGuard {
                     file: &mut file,
-                    unpacked: self.total_written,
-                    archive_size: self.archive_size,
-                    confirmed: &mut self.bomb_confirmed,
+                    unpacked: self.shared.total_written.load(Ordering::Relaxed),
+                    shared: &self.shared,
                     ctx,
                 };
                 let n = copy_with_buffer(reader, &mut guard, &mut self.buf, ctx, limit)?;
-                finish_file(&file, entry, &self.opts);
+                finish_file(&file, entry, &self.shared.opts);
                 Ok(n)
             }
             EntryData::WriteTo(write) => {
@@ -555,26 +643,27 @@ impl FsSink {
                 }
                 ctx.add_bytes(n);
                 if let Ok(f) = File::options().write(true).open(path) {
-                    finish_file(&f, entry, &self.opts);
+                    finish_file(&f, entry, &self.shared.opts);
                 }
                 Ok(n)
             }
             EntryData::None => {
-                finish_file(&file, entry, &self.opts);
+                finish_file(&file, entry, &self.shared.opts);
                 Ok(0)
             }
         }
     }
 
     /// Checksum and data errors skip the entry with a warning; anything else stops the job.
-    fn skip_broken(&mut self, entry: &Entry, e: Error) -> Result<()> {
+    fn skip_broken(&self, entry: &Entry, e: Error) -> Result<()> {
         if matches!(
             e.code(),
             ErrorCode::CrcMismatch | ErrorCode::Corrupt | ErrorCode::Truncated
         ) {
-            self.report
+            let mut st = self.st();
+            st.report
                 .warn(e.code(), &entry.path, e.param("detail").map(str::to_owned));
-            self.report.skipped += 1;
+            st.report.skipped += 1;
             Ok(())
         } else {
             Err(e)
@@ -582,32 +671,36 @@ impl FsSink {
     }
 
     /// A file now in place: permissions, origin, totals and the streaming bomb check.
-    fn placed(&mut self, target: &Path, entry: &Entry, n: u64, ctx: &JobCtx) -> Result<()> {
+    fn placed(&self, target: &Path, entry: &Entry, n: u64, ctx: &JobCtx) -> Result<()> {
         // On Unix set through the handle when the file was written (`finish_file`).
         #[cfg(not(unix))]
-        apply_permissions(target, entry, self.opts.restore_permissions);
+        apply_permissions(target, entry, self.shared.opts.restore_permissions);
         #[cfg(unix)]
         let _ = entry;
-        if let Some(origin) = &self.origin {
+        if let Some(origin) = &self.shared.origin {
             let _ = origin::apply(target, origin);
         }
-        self.total_written += n;
-        self.report.files += 1;
-        self.report.bytes += n;
+        self.shared.total_written.fetch_add(n, Ordering::Relaxed);
+        {
+            let mut st = self.st();
+            st.report.files += 1;
+            st.report.bytes += n;
+        }
         self.check_streaming_ratio(ctx)
     }
 
     /// Whether the symbolic link `l` leads somewhere inside the destination, following the
     /// links of this extraction (`pending`) and links already on disk through every component.
     fn link_inside(&self, l: &DeferredLink, pending: &HashMap<String, String>) -> bool {
-        let Some(base) = l.path.parent().and_then(|p| below(&self.root, p)) else {
+        let root = &self.shared.root;
+        let Some(base) = l.path.parent().and_then(|p| below(root, p)) else {
             return false;
         };
         resolve_link(&base, &l.target, |at| {
             if let Some(t) = pending.get(&link_key(at)) {
                 return Some(t.clone());
             }
-            let p = self.root.join(at.iter().collect::<PathBuf>());
+            let p = root.join(at.iter().collect::<PathBuf>());
             match fs::symlink_metadata(&p) {
                 // An unreadable link counts as leading out.
                 Ok(m) if m.file_type().is_symlink() => Some(
@@ -621,21 +714,21 @@ impl FsSink {
         .is_some()
     }
 
-    fn create_link(&mut self, l: DeferredLink, pending: &HashMap<String, String>) {
-        let policy = self.opts.symlinks;
+    fn create_link(
+        &mut self,
+        l: DeferredLink,
+        pending: &HashMap<String, String>,
+        written: &HashMap<String, PathBuf>,
+    ) {
+        let policy = self.shared.opts.symlinks;
         let name = file_name(&l.path);
         // Enters the link's directory.
         let in_place = |s: &mut Self| l.path.parent().is_some_and(|dir| s.enter_existing(dir));
         match l.kind {
             EntryKind::Hardlink => {
-                let mode = if self.opts.strip_unsafe_paths {
-                    UnsafePathMode::Strip
-                } else {
-                    UnsafePathMode::Reject
-                };
-                let source = sanitize(&l.target, self.os, mode)
+                let source = sanitize(&l.target, self.shared.os, self.path_mode())
                     .ok()
-                    .and_then(|s| self.written.get(&s.to_slash_path()).cloned());
+                    .and_then(|s| written.get(&s.to_slash_path()).cloned());
                 // The source is opened through the guard: a link put in its place meanwhile is
                 // neither linked nor copied.
                 let opened = source.as_deref().and_then(|src| {
@@ -651,23 +744,29 @@ impl FsSink {
                                 .create_new(&name)
                                 .is_ok_and(|mut out| io::copy(&mut file, &mut out).is_ok());
                         if linked {
-                            self.report.links += 1;
+                            self.st().report.links += 1;
                         }
                     }
-                    _ => self
-                        .report
-                        .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target)),
+                    _ => {
+                        self.st()
+                            .report
+                            .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target))
+                    }
                 }
             }
             _ => {
                 if policy == SymlinkPolicy::Skip {
-                    self.report.skipped += 1;
+                    self.st().report.skipped += 1;
                     return;
                 }
+                let refuse = |s: &Self, l: &DeferredLink| {
+                    let mut st = s.st();
+                    st.report
+                        .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target.clone()));
+                    st.report.skipped += 1;
+                };
                 if !in_place(self) {
-                    self.report
-                        .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target));
-                    self.report.skipped += 1;
+                    refuse(self, &l);
                     return;
                 }
                 let as_file = |s: &Self| {
@@ -677,22 +776,20 @@ impl FsSink {
                 };
                 if policy == SymlinkPolicy::AsFile {
                     if as_file(self) {
-                        self.report.files += 1;
+                        self.st().report.files += 1;
                     }
                     return;
                 }
                 if !self.link_inside(&l, pending) {
-                    self.report
-                        .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target));
-                    self.report.skipped += 1;
+                    refuse(self, &l);
                     return;
                 }
                 match self.guard.symlink(&l.target, &name) {
-                    Ok(()) => self.report.links += 1,
+                    Ok(()) => self.st().report.links += 1,
                     // No privilege for symlinks (Windows): fall back to a file with the target.
                     Err(_) => {
                         if as_file(self) {
-                            self.report.files += 1;
+                            self.st().report.files += 1;
                         }
                     }
                 }
@@ -703,38 +800,51 @@ impl FsSink {
 
 impl ExtractSink for FsSink {
     fn wants(&self, entry: &Entry) -> bool {
-        self.selection.contains(entry.id)
+        self.unit.as_ref().is_none_or(|u| u.contains(&entry.id))
+            && self.shared.selection.contains(entry.id)
+    }
+
+    fn wanted(&self) -> Option<Vec<EntryId>> {
+        self.unit.as_ref().map(|u| u.iter().copied().collect())
+    }
+
+    fn done(&self) -> bool {
+        self.unit.as_ref().is_some_and(HashSet::is_empty)
     }
 
     fn entry(&mut self, entry: &Entry, data: EntryData<'_>, ctx: &JobCtx) -> Result<()> {
         ctx.check()?;
+        if let Some(u) = &mut self.unit {
+            u.remove(&entry.id);
+        }
         ctx.begin_file(&entry.path);
         let Some(comps) = self.relative(entry) else {
             return Ok(());
         };
         if entry.kind == EntryKind::Other {
-            self.report.skipped += 1;
+            self.st().report.skipped += 1;
             return Ok(());
         }
         let target = match self.ensure_parents(&comps) {
             Ok(t) => t,
             Err(e) if matches!(e.code(), ErrorCode::UnsafeLink | ErrorCode::AlreadyExists) => {
-                self.report
+                let mut st = self.st();
+                st.report
                     .warn(e.code(), &entry.path, e.param("path").map(str::to_owned));
-                self.report.skipped += 1;
+                st.report.skipped += 1;
                 return Ok(());
             }
             Err(e) => return Err(e),
         };
         match (comps.as_slice(), entry.kind) {
-            ([top, _, ..], _) => self.note_top(Some(self.root.join(top))),
+            ([top, _, ..], _) => self.note_top(Some(self.shared.root.join(top))),
             // Noted once it is a directory.
             (_, EntryKind::Dir) => {}
             _ => self.note_top(None),
         }
         match entry.kind {
             EntryKind::Dir => {
-                if self.opts.path_mode == PathMode::Flat {
+                if self.shared.opts.path_mode == PathMode::Flat {
                     return Ok(());
                 }
                 match self.enter(&comps, true) {
@@ -742,7 +852,7 @@ impl ExtractSink for FsSink {
                     Err(e)
                         if matches!(e.code(), ErrorCode::UnsafeLink | ErrorCode::AlreadyExists) =>
                     {
-                        self.report.warn(e.code(), &entry.path, None);
+                        self.st().report.warn(e.code(), &entry.path, None);
                         return Ok(());
                     }
                     Err(e) => return Err(e),
@@ -750,18 +860,20 @@ impl ExtractSink for FsSink {
                 if comps.len() == 1 {
                     self.note_top(Some(target.clone()));
                 }
-                if self.opts.restore_permissions
+                let opts = &self.shared.opts;
+                let mut st = self.st();
+                if opts.restore_permissions
                     && let Some(mode) = entry.unix_mode
-                    && self.created_dirs.contains(&target)
+                    && st.created_dirs.contains(&target)
                 {
-                    self.dir_modes.push((target.clone(), mode));
+                    st.dir_modes.push((target.clone(), mode));
                 }
-                if self.opts.restore_mtime
+                if opts.restore_mtime
                     && let Some(t) = entry.mtime
                 {
-                    self.dir_times.push((target, t));
+                    st.dir_times.push((target, t));
                 }
-                self.report.dirs += 1;
+                st.report.dirs += 1;
             }
             EntryKind::Symlink | EntryKind::Hardlink => {
                 let link_target = match (entry.link_target.clone(), data) {
@@ -777,7 +889,7 @@ impl ExtractSink for FsSink {
                 };
                 if let Some(path) = self.decide_conflict(&target, entry, ctx)? {
                     let _ = self.guard.remove_file(&file_name(&path));
-                    self.links.push(DeferredLink {
+                    self.st().links.push(DeferredLink {
                         path,
                         target: link_target,
                         kind: entry.kind,
@@ -800,7 +912,7 @@ impl ExtractSink for FsSink {
                     Err(e) => return Err(Error::io(e, &target)),
                 };
                 if let Some(t) = placed {
-                    self.written.insert(comps.join("/"), t);
+                    self.st().written.insert(comps.join("/"), t);
                 }
                 ctx.file_done();
             }
@@ -1025,26 +1137,31 @@ impl ExtractSink for CaptureSink {
 /// after the disk is full; so the check runs before each write, with the bytes of earlier files.
 struct RatioGuard<'a> {
     file: &'a mut File,
-    /// Bytes this extraction has written, earlier files included.
+    /// Bytes this extraction has written: earlier files (as far as other writers had finished
+    /// theirs when this file began) and this one so far.
     unpacked: u64,
-    archive_size: u64,
-    confirmed: &'a mut bool,
+    shared: &'a Shared,
     ctx: &'a JobCtx,
 }
 
 impl Write for RatioGuard<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let after = self.unpacked.saturating_add(buf.len() as u64);
-        let policy = &self.ctx.policy;
-        if !*self.confirmed && policy.is_high_ratio(after, self.archive_size) {
-            let ratio = after / self.archive_size.max(1);
-            if !self.ctx.interaction.confirm(&Confirm::HighRatio {
-                ratio,
-                unpacked: after,
-            }) {
-                return Err(policy.bomb_error(after, self.archive_size).into());
+        let (policy, s) = (&self.ctx.policy, self.shared);
+        if !s.bomb_confirmed.load(Ordering::Relaxed) && policy.is_high_ratio(after, s.archive_size)
+        {
+            let _one_question = lock(&s.asking);
+            if !s.bomb_confirmed.load(Ordering::Relaxed) {
+                let ratio = after / s.archive_size.max(1);
+                let _one = self.ctx.one_question();
+                if !self.ctx.interaction.confirm(&Confirm::HighRatio {
+                    ratio,
+                    unpacked: after,
+                }) {
+                    return Err(policy.bomb_error(after, s.archive_size).into());
+                }
+                s.bomb_confirmed.store(true, Ordering::Relaxed);
             }
-            *self.confirmed = true;
         }
         let n = self.file.write(buf)?;
         self.unpacked += n as u64;

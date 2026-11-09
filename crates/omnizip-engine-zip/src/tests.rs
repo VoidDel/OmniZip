@@ -664,3 +664,214 @@ fn compressed_files_are_stored() {
         assert!(t.warnings.is_empty(), "{:?}", t.warnings);
     }
 }
+
+/// `n` files in a few folders, of varied sizes, and one file larger than a unit of a parallel
+/// extraction.
+fn many_files(root: &Path, n: usize) -> std::path::PathBuf {
+    let p = root.join("many");
+    for i in 0..n {
+        let dir = p.join(format!("d{}", i % 7));
+        fs::create_dir_all(&dir).unwrap();
+        let body = format!("{i}:").repeat(100 + i * 31);
+        fs::write(dir.join(format!("f{i:03}.txt")), body).unwrap();
+    }
+    fs::write(p.join("big.bin"), noisy(9 << 20)).unwrap();
+    p
+}
+
+fn zip_of(dir: &Path, src: &Path, opts: &WriteOptions) -> std::path::PathBuf {
+    let sources = source::collect(&[src.to_owned()], &CollectOptions::default(), &ctx()).unwrap();
+    let dest = dir.join("many.zip");
+    ZipEngine.create(&dest, &sources, opts, &ctx()).unwrap();
+    dest
+}
+
+/// Relative path → content and modification time of every file below `root`.
+fn snapshot(
+    root: &Path,
+) -> std::collections::BTreeMap<std::path::PathBuf, (Vec<u8>, std::time::SystemTime)> {
+    walk(root)
+        .into_iter()
+        .filter(|p| p.is_file())
+        .map(|p| {
+            let m = fs::metadata(&p).unwrap();
+            (
+                p.strip_prefix(root).unwrap().to_owned(),
+                (fs::read(&p).unwrap(), m.modified().unwrap()),
+            )
+        })
+        .collect()
+}
+
+fn extract_with(zip: &Path, dest: &Path, threads: u32, c: &JobCtx) -> omnizip_core::Report {
+    let mut r = open(zip);
+    let o = ExtractOptions {
+        destination: dest.to_owned(),
+        threads,
+        ..Default::default()
+    };
+    extract(r.as_mut(), &o, Selection::all(), c).unwrap()
+}
+
+/// Extracting on several threads writes the same files, with the same times, and reports the
+/// same totals as on one.
+#[test]
+fn parallel_extraction_writes_what_serial_does() {
+    let d = tempfile::tempdir().unwrap();
+    let src = many_files(d.path(), 150);
+    let zip = zip_of(d.path(), &src, &WriteOptions::default());
+    let one = extract_with(&zip, &d.path().join("one"), 1, &ctx());
+    let four = extract_with(&zip, &d.path().join("four"), 4, &ctx());
+    assert_eq!(
+        (one.files, one.dirs, one.bytes, one.skipped),
+        (four.files, four.dirs, four.bytes, four.skipped)
+    );
+    assert_eq!(four.files, 151);
+    assert!(four.warnings.is_empty(), "{:?}", four.warnings);
+    assert_eq!(four.outputs, vec![d.path().join("four/many")]);
+    let a = snapshot(&d.path().join("one"));
+    assert_eq!(a.len(), 151);
+    assert_eq!(a, snapshot(&d.path().join("four")));
+}
+
+/// Counts the questions it is asked: the password, and conflicts (answered "overwrite all").
+#[derive(Default)]
+struct Counting {
+    passwords: std::sync::atomic::AtomicUsize,
+    conflicts: std::sync::atomic::AtomicUsize,
+}
+
+impl omnizip_core::Interaction for Counting {
+    fn password(&self, _req: &omnizip_core::job::PasswordRequest) -> Option<Secret> {
+        self.passwords
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some("s3cret".into())
+    }
+
+    fn conflict(&self, _c: &omnizip_core::job::Conflict) -> omnizip_core::job::ConflictDecision {
+        self.conflicts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        omnizip_core::job::ConflictDecision {
+            choice: omnizip_core::job::ConflictChoice::Overwrite,
+            apply_to_all: true,
+        }
+    }
+}
+
+/// An encrypted archive extracted on several threads asks for its password once, and a
+/// conflict answered for all is asked once.
+#[test]
+fn parallel_extraction_asks_each_question_once() {
+    let d = tempfile::tempdir().unwrap();
+    let src = many_files(d.path(), 120);
+    let zip = zip_of(
+        d.path(),
+        &src,
+        &WriteOptions {
+            password: Some("s3cret".into()),
+            ..Default::default()
+        },
+    );
+    let asked = Arc::new(Counting::default());
+    let c = JobCtx::new(Arc::new(NullProgress), asked.clone());
+    let dest = d.path().join("out");
+    let first = extract_with(&zip, &dest, 4, &c);
+    assert_eq!(first.files, 121);
+    assert_eq!(asked.passwords.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(snapshot(&dest.join("many")).len(), 121);
+
+    // Again into the same folder: every file is in the way.
+    let mut r = open(&zip);
+    let o = ExtractOptions {
+        destination: dest.clone(),
+        overwrite: OverwriteMode::Ask,
+        threads: 4,
+        ..Default::default()
+    };
+    let again = extract(r.as_mut(), &o, Selection::all(), &c).unwrap();
+    assert_eq!(again.files, 121);
+    assert_eq!(asked.conflicts.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// Two entries landing on the same file are written in archive order, the later one last,
+/// even when several threads are asked for.
+#[test]
+fn entries_on_the_same_file_keep_archive_order() {
+    let d = tempfile::tempdir().unwrap();
+    let names: Vec<String> = (0..80).map(|i| format!("f{i:02}.txt")).collect();
+    let mut entries: Vec<(&[u8], &[u8])> = vec![(b"same.txt", b"older")];
+    entries.extend(names.iter().map(|n| (n.as_bytes(), n.as_bytes())));
+    entries.push((b"same.txt", b"newer"));
+    let zip = d.path().join("dup.zip");
+    fs::write(&zip, raw_zip(&entries)).unwrap();
+    let mut r = open(&zip);
+    let o = ExtractOptions {
+        destination: d.path().join("out"),
+        smart_folder: false,
+        overwrite: OverwriteMode::Overwrite,
+        threads: 4,
+        ..Default::default()
+    };
+    extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap();
+    assert_eq!(fs::read(d.path().join("out/same.txt")).unwrap(), b"newer");
+    assert_eq!(fs::read(d.path().join("out/f42.txt")).unwrap(), b"f42.txt");
+}
+
+/// A damaged entry among many is skipped with a warning by whichever thread meets it, and the
+/// others are written; a truncated archive stops the extraction with an error.
+#[test]
+fn parallel_extraction_reports_damage() {
+    let d = tempfile::tempdir().unwrap();
+    let names: Vec<String> = (0..90).map(|i| format!("f{i:02}.txt")).collect();
+    let bodies: Vec<String> = (0..90).map(|i| format!("body of file {i:02} ")).collect();
+    let entries: Vec<(&[u8], &[u8])> = names
+        .iter()
+        .zip(&bodies)
+        .map(|(n, b)| (n.as_bytes(), b.as_bytes()))
+        .collect();
+    let mut bytes = raw_zip(&entries);
+    let pos = bytes
+        .windows(15)
+        .position(|w| w == b"body of file 57")
+        .unwrap();
+    bytes[pos] = b'B';
+    let p = d.path().join("bad.zip");
+    fs::write(&p, &bytes).unwrap();
+    let mut r = open(&p);
+    let o = ExtractOptions {
+        destination: d.path().join("out"),
+        smart_folder: false,
+        threads: 4,
+        ..Default::default()
+    };
+    let rep = extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap();
+    assert_eq!(rep.warnings.len(), 1, "{:?}", rep.warnings);
+    assert_eq!(rep.warnings[0].code, ErrorCode::CrcMismatch);
+    assert_eq!((rep.files, rep.skipped), (89, 1));
+    assert!(!d.path().join("out/f57.txt").exists());
+    assert_eq!(
+        fs::read(d.path().join("out/f58.txt")).unwrap(),
+        b"body of file 58 "
+    );
+
+    // The data of the later entries cut off: an error, not a hang.
+    let local_end = bytes.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+    let mut cut = bytes.clone();
+    let start = cut
+        .windows(15)
+        .position(|w| w == b"body of file 70")
+        .unwrap();
+    cut.splice(start..local_end, std::iter::repeat_n(0u8, local_end - start));
+    let p = d.path().join("cut.zip");
+    fs::write(&p, &cut).unwrap();
+    let mut r = open(&p);
+    let o = ExtractOptions {
+        destination: d.path().join("cut"),
+        ..o
+    };
+    let rep = extract(r.as_mut(), &o, Selection::all(), &ctx());
+    match rep {
+        Err(e) => assert_ne!(e.code(), ErrorCode::Cancelled),
+        Ok(rep) => assert!(!rep.warnings.is_empty(), "the damage is reported"),
+    }
+}

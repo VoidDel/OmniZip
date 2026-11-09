@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Capabilities, Error, ErrorCode, FormatId, JobCtx, Result,
+    Capabilities, Error, ErrorCode, FormatId, JobCtx, MountClass, Result,
     encoding::NameEncoding,
     entry::{Entry, EntryId},
     format::archive_stem,
@@ -248,10 +248,175 @@ pub fn extract(
         sink = sink.high_ratio_confirmed();
     }
     ctx.begin(Phase::Extracting, bytes, files);
-    reader.extract_to(&mut sink, ctx)?;
+    match parallel_plan(reader, &sink, opts.effective_threads()) {
+        Some(plan) => extract_parallel(reader, &mut sink, plan, opts.effective_threads(), ctx)?,
+        None => reader.extract_to(&mut sink, ctx)?,
+    }
     let report = sink.finish(ctx)?;
     ctx.finish();
     Ok(report)
+}
+
+/// Files a parallel extraction hands out together: up to this many neighbours in the archive,
+/// and this many declared bytes (a larger file goes alone).
+const UNIT_ENTRIES: usize = 32;
+const UNIT_BYTES: u64 = 8 << 20;
+
+/// How an extraction is shared out among threads.
+struct ParallelPlan {
+    /// Directories, extracted first on the calling thread.
+    dirs: Vec<EntryId>,
+    /// Units of files, each decoded and written by one thread, the largest first so that a big
+    /// file does not end the job alone.
+    units: Vec<Vec<EntryId>>,
+}
+
+/// The plan for extracting on `threads` threads, or `None` to extract on one. Entries must
+/// decode on their own (ZIP, non-solid 7z: units of neighbouring files) or in solid blocks the
+/// engine knows (7z: a unit per block), and no two selected entries may land on the same file:
+/// which of them were written last would then depend on timing.
+fn parallel_plan(
+    reader: &dyn ArchiveReader,
+    sink: &FsSink,
+    threads: usize,
+) -> Option<ParallelPlan> {
+    let info = reader.info();
+    if threads < 2 || !matches!(info.format, FormatId::Zip | FormatId::SevenZ) {
+        return None;
+    }
+    let selected: Vec<&Entry> = reader
+        .entries()
+        .iter()
+        .filter(|e| sink.selects(e.id))
+        .collect();
+    let mut targets = std::collections::HashSet::new();
+    for e in &selected {
+        if let Some(key) = sink.target_key(e)
+            && !targets.insert(key)
+        {
+            return None;
+        }
+    }
+    let (dirs, files): (Vec<&Entry>, Vec<&Entry>) = selected.into_iter().partition(|e| e.is_dir());
+    let mut units: Vec<(u64, Vec<EntryId>)> = Vec::new();
+    match info.format.mount_class(info.solid) {
+        MountClass::B => {
+            let (mut unit, mut bytes) = (Vec::new(), 0u64);
+            for e in files {
+                if !unit.is_empty()
+                    && (unit.len() >= UNIT_ENTRIES || bytes.saturating_add(e.size) > UNIT_BYTES)
+                {
+                    units.push((bytes, std::mem::take(&mut unit)));
+                    bytes = 0;
+                }
+                unit.push(e.id);
+                bytes = bytes.saturating_add(e.size);
+            }
+            if !unit.is_empty() {
+                units.push((bytes, unit));
+            }
+        }
+        MountClass::C => {
+            let mut blocks: std::collections::BTreeMap<Option<u32>, (u64, Vec<EntryId>)> =
+                std::collections::BTreeMap::new();
+            for e in files {
+                let b = blocks.entry(reader.solid_block(e.id)).or_default();
+                b.0 = b.0.saturating_add(e.size);
+                b.1.push(e.id);
+            }
+            if blocks.keys().filter(|b| b.is_some()).count() < 2 {
+                return None;
+            }
+            units = blocks.into_values().collect();
+        }
+        MountClass::A | MountClass::D => return None,
+    }
+    if units.len() < 2 {
+        return None;
+    }
+    units.sort_by_key(|(bytes, _)| std::cmp::Reverse(*bytes));
+    Some(ParallelPlan {
+        dirs: dirs.iter().map(|e| e.id).collect(),
+        units: units.into_iter().map(|(_, u)| u).collect(),
+    })
+}
+
+/// Runs a plan: directories on this thread, then the units on up to `threads` threads, each with
+/// its own clone of the reader and its own writer of the sink. The first error stops the other
+/// threads before their next unit and is returned.
+fn extract_parallel(
+    reader: &mut dyn ArchiveReader,
+    sink: &mut FsSink,
+    plan: ParallelPlan,
+    threads: usize,
+    ctx: &JobCtx,
+) -> Result<()> {
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    let ParallelPlan { dirs, mut units } = plan;
+    if !dirs.is_empty() {
+        sink.set_unit(dirs);
+        reader.extract_to(sink, ctx)?;
+    }
+    // The password is asked for once: a unit holding an encrypted entry is decoded here first,
+    // so that the clones made after it know the password.
+    let encrypted = |u: &Vec<EntryId>| {
+        u.iter().any(|&id| {
+            reader
+                .entries()
+                .get(id as usize)
+                .is_some_and(|e| e.encrypted)
+        })
+    };
+    if let Some(i) = units.iter().position(encrypted) {
+        sink.set_unit(units.remove(i));
+        reader.extract_to(sink, ctx)?;
+    }
+    let mut clones: Vec<Box<dyn ArchiveReader>> = Vec::new();
+    while clones.len() + 1 < threads.min(units.len()) {
+        match reader.try_clone() {
+            Some(r) => clones.push(r),
+            None => break,
+        }
+    }
+    let writers = (0..=clones.len())
+        .map(|_| sink.fork())
+        .collect::<Result<Vec<_>>>()?;
+    let units = &units;
+    let (next, stop) = (AtomicUsize::new(0), AtomicBool::new(false));
+    let failed: Mutex<Option<Error>> = Mutex::new(None);
+    let readers = std::iter::once(reader).chain(
+        clones
+            .iter_mut()
+            .map(|r| -> &mut dyn ArchiveReader { r.as_mut() }),
+    );
+    std::thread::scope(|s| {
+        for (r, mut w) in readers.zip(writers) {
+            let (next, stop, failed) = (&next, &stop, &failed);
+            s.spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let Some(unit) = units.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                        break;
+                    };
+                    w.set_unit(unit.iter().copied());
+                    if let Err(e) = r.extract_to(&mut w, ctx) {
+                        stop.store(true, Ordering::Relaxed);
+                        failed
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .get_or_insert(e);
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    match failed.into_inner().unwrap_or_else(|e| e.into_inner()) {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Tests entries.
@@ -279,4 +444,126 @@ pub fn read_entry(
     sink.data
         .map(|d| (d, truncated))
         .ok_or_else(|| Error::internal("entry not delivered"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entry::EntryKind;
+
+    /// Entries with sizes, optionally in solid blocks; extraction is never run.
+    struct Planned {
+        info: ArchiveInfo,
+        entries: Vec<Entry>,
+        blocks: Option<Vec<u32>>,
+    }
+
+    impl Planned {
+        fn new(format: FormatId, files: &[(&str, u64)]) -> Self {
+            let entries = files
+                .iter()
+                .enumerate()
+                .map(|(i, (path, size))| {
+                    let kind = if path.ends_with('/') {
+                        EntryKind::Dir
+                    } else {
+                        EntryKind::File
+                    };
+                    let mut e = Entry::new(i as u32, (*path).into(), kind);
+                    e.size = *size;
+                    e
+                })
+                .collect();
+            Self {
+                info: ArchiveInfo::new(Path::new("x"), format, 1),
+                entries,
+                blocks: None,
+            }
+        }
+    }
+
+    impl ArchiveReader for Planned {
+        fn info(&self) -> &ArchiveInfo {
+            &self.info
+        }
+
+        fn entries(&self) -> &[Entry] {
+            &self.entries
+        }
+
+        fn solid_block(&self, id: EntryId) -> Option<u32> {
+            self.blocks.as_ref()?.get(id as usize).copied()
+        }
+
+        fn extract_to(&mut self, _sink: &mut dyn ExtractSink, _ctx: &JobCtx) -> Result<()> {
+            unreachable!()
+        }
+    }
+
+    fn plan(r: &Planned, threads: usize) -> Option<ParallelPlan> {
+        let d = tempfile::tempdir().unwrap();
+        let sink = FsSink::new(
+            d.path().to_owned(),
+            ExtractOptions::default(),
+            Selection::all(),
+            None,
+            1,
+        )
+        .unwrap();
+        parallel_plan(r, &sink, threads)
+    }
+
+    #[test]
+    fn files_are_shared_out_in_units_the_largest_first() {
+        let mut files: Vec<(String, u64)> = vec![("dir/".into(), 0)];
+        files.extend((0..70).map(|i| (format!("dir/f{i:02}"), 1000)));
+        files.push(("dir/big".into(), 20 << 20));
+        let named: Vec<(&str, u64)> = files.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        let r = Planned::new(FormatId::Zip, &named);
+        let p = plan(&r, 4).expect("a plan");
+        assert_eq!(p.dirs, vec![0]);
+        assert_eq!(p.units[0], vec![71], "the big file alone, first");
+        assert_eq!(p.units[1].len(), UNIT_ENTRIES);
+        let all: usize = p.units.iter().map(Vec::len).sum();
+        assert_eq!(all, 71);
+        // One thread, or a format that is one stream: no plan.
+        assert!(plan(&r, 1).is_none());
+        assert!(plan(&Planned::new(FormatId::TarGz, &named), 4).is_none());
+    }
+
+    #[test]
+    fn entries_landing_on_one_file_extract_on_one_thread() {
+        let mut files: Vec<(String, u64)> = (0..70).map(|i| (format!("f{i:02}"), 10)).collect();
+        // The same file, differently written: case and a `./` prefix.
+        files.push(("./F00".into(), 10));
+        let named: Vec<(&str, u64)> = files.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        let r = Planned::new(FormatId::Zip, &named);
+        assert_eq!(
+            plan(&r, 4).is_none(),
+            cfg!(any(windows, target_os = "macos"))
+        );
+        files.push(("f01".into(), 10));
+        let named: Vec<(&str, u64)> = files.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        assert!(plan(&Planned::new(FormatId::Zip, &named), 4).is_none());
+    }
+
+    #[test]
+    fn solid_blocks_are_units_of_their_own() {
+        // Block 1 holds the most bytes.
+        let named: Vec<(String, u64)> = (0..10)
+            .map(|i| (format!("f{i}"), if (3..7).contains(&i) { 500 } else { 100 }))
+            .collect();
+        let named: Vec<(&str, u64)> = named.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        let mut r = Planned::new(FormatId::SevenZ, &named);
+        r.info.solid = true;
+        // One block: nothing to share out.
+        r.blocks = Some(vec![0; 10]);
+        assert!(plan(&r, 4).is_none());
+        r.blocks = Some(vec![0, 0, 0, 1, 1, 1, 1, 2, 2, 0]);
+        let p = plan(&r, 4).expect("a plan");
+        assert_eq!(
+            p.units,
+            vec![vec![3, 4, 5, 6], vec![0, 1, 2, 9], vec![7, 8]]
+        );
+    }
 }
