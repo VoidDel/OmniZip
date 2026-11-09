@@ -111,6 +111,9 @@ fn map_err(e: sevenz_rust2::Error, path: &Path) -> Error {
     }
 }
 
+/// Blocks smaller than this decode on one thread (see [`SevenZReader::threads`]).
+const MT_MIN_BLOCK: u64 = 8 << 20;
+
 /// An opened 7z archive.
 pub struct SevenZReader {
     /// Clones share the open files, the parsed header and the entry lists.
@@ -284,7 +287,19 @@ impl SevenZReader {
         })
     }
 
-    fn threads() -> u32 {
+    /// Decoder threads for block `b`. A multi-threaded LZMA2 stream splits into chunks no
+    /// smaller than its dictionary (megabytes), so a smaller block has nothing to share out: one
+    /// thread spares starting workers and their buffers for every block, which is what a
+    /// non-solid archive of many small files costs most.
+    fn threads(&self, b: usize) -> u32 {
+        let size = self
+            .archive
+            .blocks
+            .get(b)
+            .map_or(0, |k| k.get_unpack_size());
+        if size < MT_MIN_BLOCK {
+            return 1;
+        }
         std::thread::available_parallelism().map_or(1, |n| n.get() as u32)
     }
 
@@ -445,7 +460,7 @@ impl ArchiveReader for SevenZReader {
             let mut k = 0usize;
             let mut sink_error: Option<Error> = None;
             let mut stop = false;
-            let dec = BlockDecoder::new(Self::threads(), b, &self.archive, &pw, &mut self.source);
+            let dec = BlockDecoder::new(self.threads(b), b, &self.archive, &pw, &mut self.source);
             let res = dec.for_each_entries(&mut |_e, reader| {
                 let Some(&idx) = order.get(k) else {
                     return Ok(false);
