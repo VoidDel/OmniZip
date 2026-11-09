@@ -89,6 +89,21 @@ pub trait ArchiveReader: Send {
         None
     }
 
+    /// Another reader of the same archive, which decodes on another thread while this one does:
+    /// a mount decodes several entries or solid blocks at once this way (`docs/12-mount.md`
+    /// §5). It shares what was parsed and the open files where the engine can. `None` when the
+    /// engine cannot.
+    fn try_clone(&self) -> Option<Box<dyn ArchiveReader>> {
+        None
+    }
+
+    /// The solid block holding a file's data, in archives with several: the files of one block
+    /// decode only together, from the block's start, while different blocks decode
+    /// independently. `None` for entries decoded on their own, and when not known.
+    fn solid_block(&self, _id: EntryId) -> Option<u32> {
+        None
+    }
+
     /// Verifies every entry. The default decodes everything into a [`TestSink`].
     fn test(&mut self, selection: Selection, ctx: &JobCtx) -> Result<Report> {
         let mut sink = TestSink::new(selection);

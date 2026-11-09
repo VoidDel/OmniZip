@@ -5,16 +5,17 @@ use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use omnizip_core::{
-    ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryKind, Error,
+    ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryId, EntryKind, Error,
     ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Secret,
     Source, SourceKind, WriteOptions,
     job::MAX_PASSWORD_ATTEMPTS,
     sink::drain,
     source,
-    volume::{self, Output, ReadSeek},
+    volume::{self, Output, SharedInput},
 };
 use sevenz_rust2::{
     Archive, ArchiveEntry, ArchiveWriter, BlockDecoder, EncoderConfiguration, EncoderMethod,
@@ -112,16 +113,17 @@ fn map_err(e: sevenz_rust2::Error, path: &Path) -> Error {
 
 /// An opened 7z archive.
 pub struct SevenZReader {
-    source: Box<dyn ReadSeek>,
-    archive: Archive,
+    /// Clones share the open files, the parsed header and the entry lists.
+    source: SharedInput,
+    archive: Arc<Archive>,
     info: ArchiveInfo,
-    entries: Vec<Entry>,
+    entries: Arc<[Entry]>,
     /// Entry indices of each block, in decode order.
-    block_files: Vec<Vec<usize>>,
+    block_files: Arc<[Vec<usize>]>,
     /// Blocks that need the password.
-    block_encrypted: Vec<bool>,
+    block_encrypted: Arc<[bool]>,
     /// Indices of entries without data (directories, empty files).
-    streamless: Vec<usize>,
+    streamless: Arc<[usize]>,
     password: Option<Secret>,
     password_verified: bool,
     display_name: String,
@@ -129,7 +131,7 @@ pub struct SevenZReader {
 
 impl SevenZReader {
     fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Self> {
-        let mut source = volume::open_input(path)?;
+        let mut source = SharedInput::open(path)?;
         let archive_size = volume::input_size(path)?;
         let display_name = path
             .file_name()
@@ -269,12 +271,12 @@ impl SevenZReader {
 
         Ok(Self {
             source,
-            archive,
+            archive: Arc::new(archive),
             info,
-            entries,
-            block_files,
-            block_encrypted,
-            streamless,
+            entries: entries.into(),
+            block_files: block_files.into(),
+            block_encrypted: block_encrypted.into(),
+            streamless: streamless.into(),
             password,
             // A key that decrypted the file list is proven; others are probed on first use.
             password_verified: header_encrypted,
@@ -365,9 +367,70 @@ impl ArchiveReader for SevenZReader {
         &self.entries
     }
 
+    fn try_clone(&self) -> Option<Box<dyn ArchiveReader>> {
+        Some(Box::new(Self {
+            source: self.source.clone(),
+            archive: self.archive.clone(),
+            info: self.info.clone(),
+            entries: self.entries.clone(),
+            block_files: self.block_files.clone(),
+            block_encrypted: self.block_encrypted.clone(),
+            streamless: self.streamless.clone(),
+            password: self.password.clone(),
+            password_verified: self.password_verified,
+            display_name: self.display_name.clone(),
+        }))
+    }
+
+    fn solid_block(&self, id: EntryId) -> Option<u32> {
+        let b = self
+            .archive
+            .stream_map
+            .file_block_index
+            .get(id as usize)
+            .copied()
+            .flatten()?;
+        u32::try_from(b).ok()
+    }
+
     fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> Result<()> {
         let path = self.info.path.clone();
-        for b in 0..self.block_files.len() {
+        // When the sink names what it wants, only the blocks holding those entries are looked
+        // at, and only those of the entries without data: a mount decodes a non-solid archive
+        // one entry at a time.
+        let wanted = sink.wanted();
+        let file_block = |id: usize| -> Option<usize> {
+            self.archive
+                .stream_map
+                .file_block_index
+                .get(id)
+                .copied()
+                .flatten()
+        };
+        let (blocks, streamless): (Vec<usize>, Arc<[usize]>) = match &wanted {
+            Some(ids) => {
+                let ids: Vec<usize> = ids
+                    .iter()
+                    .map(|&id| id as usize)
+                    .filter(|&id| id < self.entries.len())
+                    .collect();
+                let mut blocks: Vec<usize> = ids.iter().filter_map(|&id| file_block(id)).collect();
+                blocks.sort_unstable();
+                blocks.dedup();
+                let mut none: Vec<usize> = ids
+                    .into_iter()
+                    .filter(|&id| file_block(id).is_none())
+                    .collect();
+                none.sort_unstable();
+                none.dedup();
+                (blocks, none.into())
+            }
+            None => (
+                (0..self.block_files.len()).collect(),
+                self.streamless.clone(),
+            ),
+        };
+        for b in blocks {
             ctx.check()?;
             // Blocks without wanted entries are skipped entirely.
             if !self.block_files[b]
@@ -411,7 +474,7 @@ impl ArchiveReader for SevenZReader {
                 return Ok(());
             }
         }
-        for &i in &self.streamless.clone() {
+        for &i in streamless.iter() {
             ctx.check()?;
             let entry = &self.entries[i];
             if sink.wants(entry) {

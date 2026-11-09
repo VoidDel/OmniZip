@@ -6,6 +6,7 @@ use std::{
     fs::File,
     io::{self, Read},
     path::Path,
+    sync::Arc,
 };
 
 use omnizip_core::{
@@ -15,7 +16,7 @@ use omnizip_core::{
     encoding::{self, NameEncoding},
     job::{MAX_PASSWORD_ATTEMPTS, ProgressReader},
     source, timeutil,
-    volume::{self, Output, ReadSeek},
+    volume::{self, Output, SharedInput},
 };
 use zip::{
     AesMode, CompressionMethod, DateTime, HasZipMetadata, System, ZipArchive, ZipReadOptions,
@@ -179,16 +180,17 @@ fn decide_names(
 
 /// An opened ZIP archive.
 pub struct ZipReader {
-    archive: ZipArchive<Box<dyn ReadSeek>>,
+    /// Clones share the parsed central directory and the open file.
+    archive: ZipArchive<SharedInput>,
     info: ArchiveInfo,
-    entries: Vec<Entry>,
+    entries: Arc<[Entry]>,
     password: Option<Secret>,
     display_name: String,
 }
 
 impl ZipReader {
     fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Self> {
-        let input = volume::open_input(path)?;
+        let input = SharedInput::open(path)?;
         let archive_size = volume::input_size(path)?;
         let archive = ZipArchive::new(input).map_err(|e| map_err(e, path))?;
         ctx.policy.check_entries(archive.len() as u64)?;
@@ -278,7 +280,7 @@ impl ZipReader {
         Ok(Self {
             archive,
             info,
-            entries,
+            entries: entries.into(),
             password: opts.password.clone(),
             display_name: path
                 .file_name()
@@ -356,8 +358,33 @@ impl ArchiveReader for ZipReader {
         &self.entries
     }
 
+    fn try_clone(&self) -> Option<Box<dyn ArchiveReader>> {
+        Some(Box::new(Self {
+            archive: self.archive.clone(),
+            info: self.info.clone(),
+            entries: self.entries.clone(),
+            password: self.password.clone(),
+            display_name: self.display_name.clone(),
+        }))
+    }
+
     fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> Result<()> {
-        for i in 0..self.entries.len() {
+        // Every entry can be reached directly: go straight to the wanted ones when the sink
+        // names them, in archive order.
+        let order: Vec<usize> = match sink.wanted() {
+            Some(ids) => {
+                let mut v: Vec<usize> = ids
+                    .into_iter()
+                    .map(|id| id as usize)
+                    .filter(|&i| i < self.entries.len())
+                    .collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            }
+            None => (0..self.entries.len()).collect(),
+        };
+        for i in order {
             ctx.check()?;
             if !sink.wants(&self.entries[i]) {
                 continue;

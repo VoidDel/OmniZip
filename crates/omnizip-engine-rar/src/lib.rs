@@ -72,6 +72,7 @@ fn map_err(e: UnrarError, path: &Path) -> Error {
 
 /// An opened RAR archive. The native handle is reopened per operation, so the reader itself
 /// holds no C++ state and is `Send`.
+#[derive(Clone)]
 pub struct RarReader {
     path: PathBuf,
     info: ArchiveInfo,
@@ -332,6 +333,12 @@ impl ArchiveReader for RarReader {
 
     fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    /// Every operation opens its own native handle, and the library reports errors per handle,
+    /// so clones decode side by side.
+    fn try_clone(&self) -> Option<Box<dyn ArchiveReader>> {
+        Some(Box::new(self.clone()))
     }
 
     fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> Result<()> {

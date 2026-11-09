@@ -43,6 +43,14 @@ pub enum EntryData<'a> {
 pub trait ExtractSink {
     /// Whether the engine should deliver this entry (selection filter).
     fn wants(&self, entry: &Entry) -> bool;
+    /// Every entry wanted, when the sink knows them up front. An engine that can reach any
+    /// entry directly (ZIP) then goes straight to them instead of asking [`wants`](Self::wants)
+    /// about each entry before: a mount decodes one entry at a time, and asking about all
+    /// entries up to it every time adds up to the square of their number. `None` (the default):
+    /// ask about each.
+    fn wanted(&self) -> Option<Vec<EntryId>> {
+        None
+    }
     /// Handles one entry.
     fn entry(&mut self, entry: &Entry, data: EntryData<'_>, ctx: &JobCtx) -> Result<()>;
     /// Whether the engine may stop early (everything wanted has been handled).
@@ -974,6 +982,10 @@ impl CaptureSink {
 impl ExtractSink for CaptureSink {
     fn wants(&self, entry: &Entry) -> bool {
         entry.id == self.id && self.data.is_none()
+    }
+
+    fn wanted(&self) -> Option<Vec<EntryId>> {
+        Some(vec![self.id])
     }
 
     fn entry(&mut self, entry: &Entry, data: EntryData<'_>, _ctx: &JobCtx) -> Result<()> {

@@ -144,7 +144,9 @@ fn decode_err(e: io::Error, path: &Path) -> Error {
     }
 }
 
-/// An opened tar or single-stream file.
+/// An opened tar or single-stream file. Each extraction opens the stream anew, so a clone is
+/// an independent reader.
+#[derive(Clone)]
 pub struct TarReader {
     info: ArchiveInfo,
     entries: Vec<Entry>,
@@ -385,6 +387,10 @@ impl ArchiveReader for TarReader {
 
     fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    fn try_clone(&self) -> Option<Box<dyn ArchiveReader>> {
+        Some(Box::new(self.clone()))
     }
 
     fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> Result<()> {

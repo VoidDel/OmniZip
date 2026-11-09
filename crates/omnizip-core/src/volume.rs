@@ -7,6 +7,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crate::{Error, ErrorCode, Result};
@@ -118,17 +119,177 @@ impl MultiVolumeReader {
     }
 
     fn volume_at(&self, pos: u64) -> usize {
-        match self.starts.binary_search(&pos) {
-            Ok(i) => {
-                // Skip empty volumes that share a start offset.
-                let mut i = i;
-                while i + 1 < self.starts.len() && self.starts[i + 1] == pos {
-                    i += 1;
-                }
-                i
+        volume_at(&self.starts, pos)
+    }
+}
+
+/// The volume holding joined offset `pos`, given each volume's start offset.
+fn volume_at(starts: &[u64], pos: u64) -> usize {
+    match starts.binary_search(&pos) {
+        Ok(i) => {
+            // Skip empty volumes that share a start offset.
+            let mut i = i;
+            while i + 1 < starts.len() && starts[i + 1] == pos {
+                i += 1;
             }
-            Err(i) => i - 1,
+            i
         }
+        Err(i) => i - 1,
+    }
+}
+
+/// Reads at `offset` of `f` without moving a shared cursor: safe from several threads at once.
+#[cfg(windows)]
+fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    std::os::windows::fs::FileExt::seek_read(f, buf, offset)
+}
+
+#[cfg(unix)]
+fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    std::os::unix::fs::FileExt::read_at(f, buf, offset)
+}
+
+/// The open files of an archive input (one, or the volumes of a split set).
+#[derive(Debug)]
+struct Volumes {
+    files: Vec<File>,
+    starts: Vec<u64>,
+    len: u64,
+}
+
+impl Volumes {
+    /// Reads at joined offset `pos`, within one volume.
+    fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
+        if pos >= self.len || buf.is_empty() {
+            return Ok(0);
+        }
+        let v = volume_at(&self.starts, pos);
+        let end = self.starts.get(v + 1).copied().unwrap_or(self.len);
+        let want = buf.len().min((end - pos) as usize);
+        loop {
+            match read_at(&self.files[v], &mut buf[..want], pos - self.starts[v]) {
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                r => return r,
+            }
+        }
+    }
+}
+
+/// Read buffer of a [`SharedInput`]. Kept small: an entry of a ZIP often needs only a few KiB,
+/// and the buffer is filled from wherever the decoder seeks to.
+const INPUT_BUFFER: usize = 64 << 10;
+
+/// An archive input (split volumes joined) that is cheap to clone: clones share the open files
+/// and each keeps its own position and buffer, reading at positions rather than through a
+/// shared cursor. Several threads can so decode one archive at once
+/// ([`ArchiveReader::try_clone`](crate::ArchiveReader::try_clone)), on the very files the
+/// archive was parsed from. A seek within the buffered range keeps the buffer.
+#[derive(Debug)]
+pub struct SharedInput {
+    volumes: Arc<Volumes>,
+    pos: u64,
+    buf: Box<[u8]>,
+    /// Joined offset of `buf[0]`, and how much of `buf` holds data.
+    buf_start: u64,
+    filled: usize,
+}
+
+impl SharedInput {
+    /// Opens `path`, or every volume when it is the first of a split set.
+    pub fn open(path: &Path) -> Result<Self> {
+        let paths = split_volumes(path)
+            .filter(|v| v.len() > 1)
+            .unwrap_or_else(|| vec![path.to_owned()]);
+        let mut files = Vec::with_capacity(paths.len());
+        let mut starts = Vec::with_capacity(paths.len());
+        let mut len = 0;
+        for p in &paths {
+            let f = File::open(p).map_err(|e| Error::io(e, p))?;
+            starts.push(len);
+            len += f.metadata().map_err(|e| Error::io(e, p))?.len();
+            files.push(f);
+        }
+        Ok(Self {
+            volumes: Arc::new(Volumes { files, starts, len }),
+            pos: 0,
+            buf: Box::default(),
+            buf_start: 0,
+            filled: 0,
+        })
+    }
+
+    /// Total length of the input.
+    pub fn len(&self) -> u64 {
+        self.volumes.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Clone for SharedInput {
+    /// The same files, at the same position, with a buffer of its own.
+    fn clone(&self) -> Self {
+        Self {
+            volumes: self.volumes.clone(),
+            pos: self.pos,
+            buf: Box::default(),
+            buf_start: 0,
+            filled: 0,
+        }
+    }
+}
+
+impl Read for SharedInput {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if out.is_empty() || self.pos >= self.volumes.len {
+            return Ok(0);
+        }
+        let buffered = self.pos >= self.buf_start && self.pos < self.buf_start + self.filled as u64;
+        if !buffered {
+            if out.len() >= INPUT_BUFFER {
+                let n = self.volumes.read_at(self.pos, out)?;
+                self.pos += n as u64;
+                return Ok(n);
+            }
+            if self.buf.is_empty() {
+                self.buf = vec![0; INPUT_BUFFER].into_boxed_slice();
+            }
+            self.buf_start = self.pos;
+            self.filled = 0;
+            self.filled = self.volumes.read_at(self.pos, &mut self.buf)?;
+            if self.filled == 0 {
+                return Ok(0);
+            }
+        }
+        let at = (self.pos - self.buf_start) as usize;
+        let n = out.len().min(self.filled - at);
+        out[..n].copy_from_slice(&self.buf[at..at + n]);
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl Seek for SharedInput {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let new = match pos {
+            SeekFrom::Start(p) => p as i128,
+            SeekFrom::End(d) => self.volumes.len as i128 + d as i128,
+            SeekFrom::Current(d) => self.pos as i128 + d as i128,
+        };
+        if new < 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "seek before start",
+            ));
+        }
+        self.pos = new as u64;
+        Ok(self.pos)
+    }
+
+    fn stream_position(&mut self) -> io::Result<u64> {
+        Ok(self.pos)
     }
 }
 
@@ -406,6 +567,54 @@ mod tests {
         r.read_exact(&mut b).unwrap();
         assert_eq!(&b, &data[99_998..100_002]);
         assert_eq!(input_size(&first).unwrap(), 300_000);
+    }
+
+    #[test]
+    fn shared_input_clones_read_on_their_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let mut out = Output::create(&dir.path().join("data.bin"), Some(100_000)).unwrap();
+        out.write_all(&data).unwrap();
+        out.commit().unwrap();
+        let single = dir.path().join("single.bin");
+        fs::write(&single, &data).unwrap();
+        for path in [dir.path().join("data.bin.001"), single] {
+            let mut a = SharedInput::open(&path).unwrap();
+            assert_eq!(a.len(), 300_000);
+            let mut back = Vec::new();
+            a.read_to_end(&mut back).unwrap();
+            assert_eq!(back, data);
+            // Across a volume boundary, after seeking back within the buffer and out of it.
+            a.seek(SeekFrom::Start(99_990)).unwrap();
+            let mut b = [0u8; 20];
+            a.read_exact(&mut b).unwrap();
+            assert_eq!(&b, &data[99_990..100_010]);
+            a.seek(SeekFrom::Current(-15)).unwrap();
+            a.read_exact(&mut b).unwrap();
+            assert_eq!(&b, &data[99_995..100_015]);
+            // A clone starts where the original is and moves on its own; both keep reading
+            // the same files from other threads.
+            let mut c = a.clone();
+            a.seek(SeekFrom::Start(0)).unwrap();
+            let t = std::thread::spawn(move || {
+                let mut b = [0u8; 10];
+                c.read_exact(&mut b).unwrap();
+                b
+            });
+            let mut x = [0u8; 10];
+            a.read_exact(&mut x).unwrap();
+            assert_eq!(&x, &data[..10]);
+            assert_eq!(&t.join().unwrap(), &data[100_015..100_025]);
+            // Large reads bypass the buffer; reading at the end gives nothing.
+            a.seek(SeekFrom::End(-(INPUT_BUFFER as i64) - 5)).unwrap();
+            let mut big = vec![0u8; INPUT_BUFFER + 10];
+            let mut n = 0;
+            while let Ok(k @ 1..) = a.read(&mut big[n..]) {
+                n += k;
+            }
+            assert_eq!(&big[..n], &data[data.len() - INPUT_BUFFER - 5..]);
+            assert_eq!(a.read(&mut x).unwrap(), 0);
+        }
     }
 
     #[test]
