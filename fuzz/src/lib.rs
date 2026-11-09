@@ -111,6 +111,7 @@ pub fn mount_and_walk(data: &[u8]) {
             memory: 8 << 20,
             disk: 32 << 20,
             inline_max: 1 << 20,
+            ..CacheLimits::default()
         },
         ..Default::default()
     };

@@ -26,7 +26,7 @@ use std::{
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, CancelToken, Entry, EntryData, EntryId, EntryKind, Error,
     ErrorCode, ExtractSink, FixedPassword, Interaction, JobCtx, MountClass, NoInteraction,
-    NullProgress, TreeIndex, path::logical_components,
+    NullProgress, SecurityPolicy, TreeIndex, path::logical_components,
 };
 
 use crate::{
@@ -66,6 +66,8 @@ pub struct FsOptions {
     pub password: Option<String>,
     /// Decode a whole solid archive on first access when it fits the disk budget.
     pub warm_solid: bool,
+    /// Limits on untrusted content: the expansion ratio caps what one entry may unpack to.
+    pub policy: SecurityPolicy,
     /// A read waiting on a background decode fails with [`FsError::Io`] when the decoder makes
     /// no progress for this long (`docs/12-mount.md` §7).
     pub stall_timeout: Duration,
@@ -87,6 +89,7 @@ impl Default for FsOptions {
             password: None,
             warm_solid: true,
             stall_timeout: STALL_TIMEOUT,
+            policy: SecurityPolicy::default(),
         }
     }
 }
@@ -256,6 +259,7 @@ impl ArchiveFs {
     fn ctx(&self) -> JobCtx {
         JobCtx::new(Arc::new(NullProgress), self.interaction.clone())
             .with_cancel(self.cancel.clone())
+            .with_policy(self.opts.policy.clone())
     }
 
     /// Whether an entry is read while a background thread decodes it: a large file with its
@@ -708,6 +712,7 @@ fn decode(
         cache,
         pending: targets,
         partial,
+        archive_size: reader.info().archive_size,
     };
     match reader.extract_to(&mut sink, ctx) {
         Ok(()) => Ok(()),
@@ -726,6 +731,8 @@ struct CacheSink<'a> {
     pending: HashSet<EntryId>,
     /// The entry being streamed, and its readers.
     partial: Option<(EntryId, &'a Arc<Partial>)>,
+    /// For the expansion-ratio limit.
+    archive_size: u64,
 }
 
 /// Copies an entry in chunks of up to 1 MiB (no larger than the entry), checking for
@@ -770,12 +777,16 @@ impl ExtractSink for CacheSink<'_> {
             .filter(|(id, _)| *id == entry.id)
             .map(|(_, p)| p);
         let limits = cache.limits();
-        // Never more than declared (bomb guard); unknown sizes are bounded by the disk budget.
-        let cap = if entry.size_known {
+        // Never more than declared, and never past the expansion ratio extraction would ask
+        // about (bomb guard: the declared size comes from the archive too, and a mounted volume
+        // is read by thumbnailers and virus scanners as soon as it is browsed). Unknown sizes
+        // are also bounded by the disk budget.
+        let declared = if entry.size_known {
             entry.size
         } else {
             limits.disk
         };
+        let cap = declared.min(ctx.policy.max_unpacked(self.archive_size));
         let oversize = |e: io::Error| {
             if ContentBuilder::is_oversize(&e) {
                 Error::new(ErrorCode::CompressionBomb).with("path", &entry.path)

@@ -667,11 +667,13 @@ name = "omnizip-vfs"
 version = "0.1.0"
 dependencies = [
  "bitflags",
+ "libc",
  "omnizip-core",
  "serde",
  "tempfile",
  "tracing",
  "windows-registry",
+ "windows-sys",
 ]
 
 [[package]]

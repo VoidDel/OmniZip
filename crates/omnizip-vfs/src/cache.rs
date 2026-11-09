@@ -33,6 +33,10 @@ pub struct CacheLimits {
     pub disk: u64,
     /// Entries up to this size are kept in memory (default 8 MiB).
     pub inline_max: u64,
+    /// Free space spool files leave on the disk holding them (default 1 GiB). The budgets
+    /// above are kept by dropping finished entries, and one entry may be larger than the whole
+    /// pool (a film in a ZIP): this is what keeps a large or lying entry from filling the disk.
+    pub disk_reserve: u64,
 }
 
 impl Default for CacheLimits {
@@ -41,6 +45,7 @@ impl Default for CacheLimits {
             memory: 256 << 20,
             disk: 2 << 30,
             inline_max: 8 << 20,
+            disk_reserve: 1 << 30,
         }
     }
 }
@@ -230,7 +235,9 @@ impl Partial {
 
 /// Collects decoded bytes, moving to a spool file once they outgrow memory.
 ///
-/// Writing past `cap` fails: an entry may not produce more than it declared (bomb guard).
+/// Writing past `cap` fails: an entry may not produce more than it declared, nor more than
+/// the expansion-ratio limit allows (bomb guard). Spooling fails when the disk would be left
+/// with less than the reserve ([`CacheLimits::disk_reserve`]).
 pub struct ContentBuilder {
     mem: Vec<u8>,
     file: Option<NamedTempFile>,
@@ -238,6 +245,9 @@ pub struct ContentBuilder {
     inline_max: u64,
     cap: u64,
     dir: PathBuf,
+    reserve: u64,
+    /// The spool file may grow to this length before the free space is looked at again.
+    checked_to: u64,
     /// Readers of the entry while it is being decoded: the spool file starts with the first
     /// byte, and every write is published.
     partial: Option<Arc<Partial>>,
@@ -246,10 +256,33 @@ pub struct ContentBuilder {
 /// Error text when an entry outgrows its cap (see [`ContentBuilder`]).
 pub const OVERSIZE: &str = "entry produced more data than it declared";
 
+/// Error text when spooling would eat into the disk reserve.
+pub const NO_SPACE: &str = "the disk holding the mount cache is nearly full";
+
+/// Spool bytes written between two looks at the free space.
+const SPACE_CHECK_EVERY: u64 = 64 << 20;
+
 impl ContentBuilder {
     /// Whether this builder's cap was hit.
     pub fn is_oversize(e: &io::Error) -> bool {
         e.kind() == io::ErrorKind::FileTooLarge
+    }
+
+    /// Fails before the spool file grows by `more` bytes when that could leave the disk with
+    /// less than the reserve. The free space is looked at once per stretch of
+    /// [`SPACE_CHECK_EVERY`] bytes, and the whole stretch has to fit.
+    fn ensure_space(&mut self, more: u64) -> io::Result<()> {
+        if self.len + more <= self.checked_to {
+            return Ok(());
+        }
+        let stretch = SPACE_CHECK_EVERY.max(more);
+        if let Some(free) = crate::pos::free_space(&self.dir)
+            && free < self.reserve.saturating_add(stretch)
+        {
+            return Err(io::Error::new(io::ErrorKind::StorageFull, NO_SPACE));
+        }
+        self.checked_to = self.len + stretch;
+        Ok(())
     }
 
     /// Finishes into content.
@@ -292,9 +325,13 @@ impl Write for ContentBuilder {
         if self.len + buf.len() as u64 > self.cap {
             return Err(io::Error::new(io::ErrorKind::FileTooLarge, OVERSIZE));
         }
-        if self.file.is_none()
-            && (self.partial.is_some() || self.len + buf.len() as u64 > self.inline_max)
-        {
+        let spool = self.file.is_some()
+            || self.partial.is_some()
+            || self.len + buf.len() as u64 > self.inline_max;
+        if spool {
+            self.ensure_space(buf.len() as u64)?;
+        }
+        if spool && self.file.is_none() {
             let f = tempfile::Builder::new()
                 .prefix("entry-")
                 .tempfile_in(&self.dir)?;
@@ -390,6 +427,8 @@ impl ContentCache {
             inline_max: self.limits.inline_max,
             cap,
             dir: self.dir.path().to_owned(),
+            reserve: self.limits.disk_reserve,
+            checked_to: 0,
             partial: None,
         }
     }
@@ -510,6 +549,7 @@ mod tests {
                 memory,
                 disk,
                 inline_max,
+                disk_reserve: 0,
             },
             None,
         )
@@ -544,6 +584,26 @@ mod tests {
         b.write_all(b"12345678").unwrap();
         let e = b.write_all(b"9").unwrap_err();
         assert!(ContentBuilder::is_oversize(&e));
+    }
+
+    #[test]
+    fn spooling_keeps_the_disk_reserve() {
+        let free = crate::pos::free_space(std::env::temp_dir().as_path()).expect("free space");
+        let c = ContentCache::new(
+            CacheLimits {
+                inline_max: 4,
+                // More than the disk has: no spool file may grow.
+                disk_reserve: free.saturating_add(1 << 40),
+                ..CacheLimits::default()
+            },
+            None,
+        )
+        .unwrap();
+        let mut b = c.builder(u64::MAX);
+        b.write_all(b"1234").unwrap(); // in memory
+        let e = b.write_all(b"5").unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::StorageFull);
+        assert_eq!(std::fs::read_dir(c.dir()).unwrap().count(), 0);
     }
 
     #[test]

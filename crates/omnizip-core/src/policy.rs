@@ -41,6 +41,23 @@ impl SecurityPolicy {
         unpacked / archive_size.max(1) > self.max_ratio
     }
 
+    /// The most an archive of `archive_size` bytes may unpack to before
+    /// [`is_high_ratio`](Self::is_high_ratio) trips: a hard cap where nobody can be asked to
+    /// confirm (a mounted volume).
+    pub fn max_unpacked(&self, archive_size: u64) -> u64 {
+        if self.allow_high_ratio {
+            return u64::MAX;
+        }
+        // Below (ratio + 1) × size the integer ratio is at most `max_ratio`.
+        match archive_size
+            .max(1)
+            .checked_mul(self.max_ratio.saturating_add(1))
+        {
+            Some(limit) => self.ratio_min_bytes.max(limit - 1),
+            None => u64::MAX,
+        }
+    }
+
     /// Error used when the ratio check fails and the user did not confirm.
     pub fn bomb_error(&self, unpacked: u64, archive_size: u64) -> Error {
         Error::new(ErrorCode::CompressionBomb)
@@ -72,5 +89,23 @@ mod tests {
             ..p
         };
         assert!(!p.is_high_ratio(4 << 30, 1));
+        assert_eq!(p.max_unpacked(1), u64::MAX);
+    }
+
+    #[test]
+    fn max_unpacked_is_the_last_size_that_passes() {
+        let p = SecurityPolicy::default();
+        for size in [0, 1, 1000, 1 << 20, 3 << 20, 7_777_777, 1 << 40, u64::MAX] {
+            let max = p.max_unpacked(size);
+            assert!(!p.is_high_ratio(max, size), "{size}");
+            if max < u64::MAX {
+                assert!(p.is_high_ratio(max + 1, size), "{size}");
+            }
+        }
+        assert_eq!(
+            p.max_unpacked(1 << 10),
+            1 << 30,
+            "small archives get the floor"
+        );
     }
 }

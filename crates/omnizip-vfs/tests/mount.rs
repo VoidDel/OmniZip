@@ -14,7 +14,7 @@ use std::{
 
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, CollectOptions, Entry, EntryData, EntryKind, ExtractSink, FormatId,
-    JobCtx, Level, MountClass, OpenOptions, WriteOptions, source,
+    JobCtx, Level, MountClass, OpenOptions, SecurityPolicy, WriteOptions, source,
 };
 use omnizip_vfs::{
     ArchiveFs, CacheLimits, FileType, FsError, FsOptions, LinkMode, NameRules, OpenFlags, ROOT,
@@ -39,6 +39,7 @@ fn small_cache() -> CacheLimits {
         memory: 1 << 20,
         disk: 64 << 20,
         inline_max: 64 << 10,
+        ..CacheLimits::default()
     }
 }
 
@@ -555,6 +556,34 @@ fn entries_may_not_outgrow_their_declared_size() {
         16,
         "known once decoded"
     );
+}
+
+/// The declared size comes from the archive too: an entry may not unpack past the expansion
+/// ratio extraction would ask about, whatever it declares.
+#[test]
+fn entries_may_not_pass_the_expansion_ratio() {
+    let (mut reader, _) = Scripted::new(vec![
+        ("bomb.bin", vec![0; 300_000], Some(300_000)),
+        ("fine.bin", vec![1; 900], Some(900)),
+    ]);
+    reader.info.archive_size = 100;
+    let fs = ArchiveFs::new(
+        Box::new(reader),
+        FsOptions {
+            policy: SecurityPolicy {
+                max_ratio: 10,
+                ratio_min_bytes: 1000,
+                ..SecurityPolicy::default()
+            },
+            ..opts()
+        },
+    )
+    .unwrap();
+    let bomb = resolve(&fs, "bomb.bin").unwrap();
+    assert_eq!(bomb.size, 300_000, "the declared size is still shown");
+    assert_eq!(read_all(&fs, bomb.node, 4096), Err(FsError::Io));
+    let fine = resolve(&fs, "fine.bin").unwrap();
+    assert_eq!(read_all(&fs, fine.node, 4096).unwrap(), vec![1; 900]);
 }
 
 #[test]

@@ -3234,6 +3234,7 @@ name = "omnizip-vfs"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
+ "libc",
  "omnizip-core",
  "omnizip-formats",
  "serde",
@@ -3241,6 +3242,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "windows-registry",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
