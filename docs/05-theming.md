@@ -1,5 +1,7 @@
 # 05 · 主题系统
 
+> **实现位置（2026-11-09 起）**：令牌 `tokens.css`、内置主题 JSON 与 Schema、`resolveTheme` 的 TypeScript 实现、基础组件与窗口骨架样式都在共享仓库 [omni-ui](https://github.com/VoidDel/omni-ui)，Omni Download 与 OmniZip 共用。本仓库的 `themes/` 是它的副本，`pnpm sync:omni-ui` 从已安装的包同步，Rust 主题服务（`apps/desktop/src-tauri/src/theme.rs`）从该副本 `include_str!`。本文仍是规范的叙述版本；改令牌或组件请改 omni-ui，再在两个应用里 `pnpm update omni-ui`。
+
 ## 1. 目标
 
 - 浅色 / 深色 / 跟随系统三种模式，切换无闪烁、无需重启。

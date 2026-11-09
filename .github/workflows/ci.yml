@@ -48,7 +48,22 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # omni-ui is a git dependency and the lockfile names it by SSH, which runners have no key
+      # for: fetch it over HTTPS instead, with the OMNI_UI_TOKEN secret while the repo is private.
+      - name: Fetch omni-ui over HTTPS
+        shell: bash
+        env:
+          OMNI_UI_TOKEN: ${{ secrets.OMNI_UI_TOKEN }}
+        run: |
+          base="https://github.com/"
+          if [ -n "$OMNI_UI_TOKEN" ]; then base="https://x-access-token:${OMNI_UI_TOKEN}@github.com/"; fi
+          git config --global url."$base".insteadOf "ssh://git@github.com/"
+          git config --global --add url."$base".insteadOf "git@github.com:"
       - run: pnpm install --frozen-lockfile
+      - name: Built-in themes match omni-ui
+        run: |
+          pnpm sync:omni-ui
+          git diff --exit-code -- themes
       - name: Translations complete in every language
         run: pnpm i18n-check
       - name: TypeScript
@@ -90,6 +105,17 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # omni-ui is a git dependency and the lockfile names it by SSH, which runners have no key
+      # for: fetch it over HTTPS instead, with the OMNI_UI_TOKEN secret while the repo is private.
+      - name: Fetch omni-ui over HTTPS
+        shell: bash
+        env:
+          OMNI_UI_TOKEN: ${{ secrets.OMNI_UI_TOKEN }}
+        run: |
+          base="https://github.com/"
+          if [ -n "$OMNI_UI_TOKEN" ]; then base="https://x-access-token:${OMNI_UI_TOKEN}@github.com/"; fi
+          git config --global url."$base".insteadOf "ssh://git@github.com/"
+          git config --global --add url."$base".insteadOf "git@github.com:"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter omnizip-desktop build
       - name: Rust tests (core, engines, CLI, mount core, shell, desktop)
@@ -120,6 +146,17 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # omni-ui is a git dependency and the lockfile names it by SSH, which runners have no key
+      # for: fetch it over HTTPS instead, with the OMNI_UI_TOKEN secret while the repo is private.
+      - name: Fetch omni-ui over HTTPS
+        shell: bash
+        env:
+          OMNI_UI_TOKEN: ${{ secrets.OMNI_UI_TOKEN }}
+        run: |
+          base="https://github.com/"
+          if [ -n "$OMNI_UI_TOKEN" ]; then base="https://x-access-token:${OMNI_UI_TOKEN}@github.com/"; fi
+          git config --global url."$base".insteadOf "ssh://git@github.com/"
+          git config --global --add url."$base".insteadOf "git@github.com:"
       - run: pnpm install --frozen-lockfile
       - name: NSIS installer (builds the CLI and the shell DLL through prepare-bundle)
         run: pnpm bundle:windows

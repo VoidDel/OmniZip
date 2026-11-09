@@ -1,7 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import './styles/tokens.css';
+// Shared Omni design system (tokens, base, window shell, components), then OmniZip's own styles.
+import 'omni-ui/styles.css';
 import './styles/app.css';
 
 import { App } from './App';

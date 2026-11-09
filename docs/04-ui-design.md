@@ -333,5 +333,6 @@ Shift / Ctrl 多选；Ctrl+A 全选；类型筛选器（图片 / 文档 / 代码
 ## 10. 设计交付
 
 - 设计令牌（见 05）为唯一真相来源，Figma 与代码通过 Tokens Studio 同步。
+- 令牌、窗口骨架样式、基础组件与图标的代码在共享仓库 [omni-ui](https://github.com/VoidDel/omni-ui)（`omni-ui/styles.css`、`omni-ui` 包），与 Omni Download 共用；本仓库 `apps/desktop/src/components/ui.tsx` 与 `Icon.tsx` 只是接上翻译、store 与应用图标的薄适配层，`styles/app.css` 只保留压缩包特有的样式（目录树、面包屑、文件列表列、格式表、冲突对话框等）。
 - 组件清单：Button、IconButton、SegmentedControl、Input、PasswordInput、Select、Slider、Checkbox、Switch、Tabs、Breadcrumb、DataGrid、TreeView、Dialog、Toast、ProgressBar、Badge、Tooltip、ContextMenu、EmptyState、Skeleton。
 - 每个组件提供：默认 / hover / active / focus-visible / disabled 五态，浅色与深色两套截图作为视觉回归基线。

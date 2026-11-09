@@ -12,6 +12,7 @@
     "lint": "pnpm --filter omnizip-desktop lint",
     "test": "pnpm --filter omnizip-desktop test",
     "i18n-check": "node scripts/i18n-check.mjs",
+    "sync:omni-ui": "node scripts/sync-omni-ui.mjs",
     "bundle:windows": "pnpm --filter omnizip-desktop bundle:windows",
     "bundle:macos": "pnpm --filter omnizip-desktop bundle:macos"
   },
