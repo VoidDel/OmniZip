@@ -101,7 +101,7 @@ omnizip unmount --all
 | `--progress auto\|bar\|plain\|none` | 进度显示方式 |
 | `--color auto\|always\|never` | 遵循 `NO_COLOR`、`CLICOLOR_FORCE` |
 | `--lang <tag>` | 覆盖输出语言 |
-| `--threads <n>` | 0 = 自动 |
+| `--threads <n>` | 压缩与解压的工作线程数，0 = 自动（解压最多 8 个；ZIP 与 7z 的解压按条目或固实块分给各线程） |
 | `--config <file>` / `--preset <name>` | 配置与预设 |
 | `--dry-run` | 只显示将执行的操作 |
 | `--log-file <f>` | 详细日志 |
