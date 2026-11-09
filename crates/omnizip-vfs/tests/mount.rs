@@ -446,6 +446,49 @@ fn tar_names_links_and_collisions() {
     assert_eq!(read_all(&as_files, n.node, 64).unwrap(), b"Target.txt");
 }
 
+/// A link is resolved through the archive's other links, as the system resolves it once shown as
+/// a link: with `sub/up -> ..`, the target `../up/..` of `sub/x/esc` reads as `sub` but leads
+/// out of the volume, so it is shown as a file holding its target.
+#[test]
+fn links_leading_out_through_other_links_are_files() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("chain.tar");
+    let mut b = tar::Builder::new(File::create(&path).unwrap());
+    let mut add = |name: &str, target: Option<&str>| {
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o777);
+        h.set_mtime(1_700_000_000);
+        h.set_size(0);
+        match target {
+            Some(t) => {
+                h.set_entry_type(tar::EntryType::Symlink);
+                b.append_link(&mut h, name, t).unwrap();
+            }
+            None => {
+                h.set_entry_type(tar::EntryType::Regular);
+                b.append_data(&mut h, name, &[][..]).unwrap();
+            }
+        }
+    };
+    add("sub/x/file.txt", None);
+    add("sub/x/esc", Some("../up/.."));
+    add("sub/up", Some(".."));
+    add("sub/x/ok", Some("../up/sub/x/file.txt"));
+    b.into_inner().unwrap();
+    let fs = mount(
+        &path,
+        FsOptions {
+            links: LinkMode::Native,
+            ..opts()
+        },
+    );
+    assert_eq!(resolve(&fs, "sub/up").unwrap().kind, FileType::Symlink);
+    assert_eq!(resolve(&fs, "sub/x/ok").unwrap().kind, FileType::Symlink);
+    let esc = resolve(&fs, "sub/x/esc").unwrap();
+    assert_eq!(esc.kind, FileType::File);
+    assert_eq!(read_all(&fs, esc.node, 64).unwrap(), b"../up/..");
+}
+
 /// A reader that serves scripted entries and counts decoding passes.
 struct Scripted {
     info: ArchiveInfo,

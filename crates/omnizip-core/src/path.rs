@@ -87,6 +87,59 @@ pub fn logical_components(name: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Symbolic links followed while resolving one link before it counts as a loop (Linux `ELOOP`).
+const MAX_LINK_HOPS: usize = 40;
+
+/// Whether a link target is absolute or names a drive (`/x`, `\x`, `C:`), never inside a root.
+fn absolute_target(t: &str) -> bool {
+    t.starts_with(['/', '\\']) || t.as_bytes().get(1) == Some(&b':')
+}
+
+/// Resolves the target of a symbolic link in the directory `base` (components below a root)
+/// as the system would: components that are themselves links are followed (`link_at` gives the
+/// target of the link at a path, `None` for anything else), and `..` after a followed link
+/// leaves where that link points, not where it is. Comparing the target text alone is not
+/// enough: with `sub/up -> ..`, the target `../up/..` of a link in `sub/x/` reads as `sub` but
+/// leads to the root's parent.
+///
+/// Returns the components the target resolves to, or `None` when it leaves the root, is
+/// absolute, or loops.
+pub fn resolve_link(
+    base: &[String],
+    target: &str,
+    mut link_at: impl FnMut(&[String]) -> Option<String>,
+) -> Option<Vec<String>> {
+    if absolute_target(target) {
+        return None;
+    }
+    let mut at = base.to_vec();
+    let mut todo: std::collections::VecDeque<String> =
+        target.split(['/', '\\']).map(str::to_owned).collect();
+    let mut hops = 0;
+    while let Some(c) = todo.pop_front() {
+        match c.as_str() {
+            "" | "." => {}
+            ".." => {
+                at.pop()?;
+            }
+            _ => {
+                at.push(c);
+                if let Some(t) = link_at(&at) {
+                    hops += 1;
+                    if hops > MAX_LINK_HOPS || absolute_target(&t) {
+                        return None;
+                    }
+                    at.pop();
+                    for part in t.split(['/', '\\']).rev() {
+                        todo.push_front(part.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    Some(at)
+}
+
 /// Sanitizes an archive entry name.
 pub fn sanitize(name: &str, os: TargetOs, mode: UnsafePathMode) -> Result<SanitizedPath, Error> {
     let reject = |issue: PathIssue| {
@@ -292,6 +345,49 @@ pub fn numbered_name(file_name: &str, n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_resolve_through_other_links() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let links: std::collections::HashMap<&str, &str> = [
+            ("sub/up", ".."),
+            ("cur", "releases/v2"),
+            ("loop", "loop"),
+            ("abs", "/etc"),
+            ("drive", "C:\\Windows"),
+        ]
+        .into();
+        let at = |p: &[String]| links.get(p.join("/").as_str()).map(|t| t.to_string());
+        // Plain targets.
+        assert_eq!(
+            resolve_link(&s(&["a"]), "../b.txt", at),
+            Some(s(&["b.txt"]))
+        );
+        assert_eq!(
+            resolve_link(&s(&["a"]), "c/./d", at),
+            Some(s(&["a", "c", "d"]))
+        );
+        assert_eq!(resolve_link(&s(&["a"]), "../../etc/passwd", at), None);
+        assert_eq!(resolve_link(&[], "/etc/passwd", at), None);
+        assert_eq!(resolve_link(&[], "\\server\\share", at), None);
+        assert_eq!(resolve_link(&[], "C:\\Windows", at), None);
+        // `..` after a link leaves where the link points: `sub/up` is the root, so its parent
+        // is outside, though the text `sub/x/../up/..` reads as `sub`.
+        assert_eq!(resolve_link(&s(&["sub", "x"]), "../up/..", at), None);
+        assert_eq!(
+            resolve_link(&s(&["sub", "x"]), "../up/file", at),
+            Some(s(&["file"]))
+        );
+        assert_eq!(resolve_link(&s(&["sub"]), "up", at), Some(vec![]));
+        assert_eq!(
+            resolve_link(&s(&["bin"]), "../cur/bin/app", at),
+            Some(s(&["releases", "v2", "bin", "app"]))
+        );
+        // Links that loop or lead to an absolute path.
+        assert_eq!(resolve_link(&[], "loop/x", at), None);
+        assert_eq!(resolve_link(&[], "abs/passwd", at), None);
+        assert_eq!(resolve_link(&[], "drive", at), None);
+    }
 
     fn ok(name: &str, os: TargetOs) -> String {
         sanitize(name, os, UnsafePathMode::Reject)

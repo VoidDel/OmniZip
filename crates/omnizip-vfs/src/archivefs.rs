@@ -26,7 +26,8 @@ use std::{
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, CancelToken, Entry, EntryData, EntryId, EntryKind, Error,
     ErrorCode, ExtractSink, FixedPassword, Interaction, JobCtx, MountClass, NoInteraction,
-    NullProgress, SecurityPolicy, TreeIndex, path::logical_components,
+    NullProgress, SecurityPolicy, TreeIndex,
+    path::{logical_components, resolve_link},
 };
 
 use crate::{
@@ -380,26 +381,31 @@ impl ArchiveFs {
     }
 
     /// Resolves a link target to a node: relative to the link's directory for symbolic links,
-    /// relative to the archive root for hard links. `None` when it leaves the volume.
+    /// relative to the archive root for hard links (archive member names, taken literally).
+    /// `None` when it leaves the volume. A symbolic link is resolved as the system resolves it
+    /// once shown as a link: through other links of the archive, so that `..` after one of them
+    /// cannot lead out of the volume while the text reads as inside.
     fn link_node(&self, node: NodeId, target: &str, from_root: bool) -> Option<NodeId> {
-        if target.starts_with('/') || target.starts_with('\\') || target.contains(':') {
+        if target.contains(':') {
             return None;
         }
-        let mut parts: Vec<String> = Vec::new();
-        if !from_root {
+        let base: Vec<String> = if from_root {
+            Vec::new()
+        } else {
             let parent = self.tree.node(node)?.parent?;
-            let base = self.tree.path(parent);
-            parts.extend(logical_components(&base).into_iter().map(str::to_owned));
-        }
-        for comp in target.split(['/', '\\']) {
-            match comp {
-                "" | "." => {}
-                ".." => {
-                    parts.pop()?;
-                }
-                c => parts.push(c.to_owned()),
+            logical_components(&self.tree.path(parent))
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        };
+        let parts = resolve_link(&base, target, |at| {
+            if from_root {
+                return None;
             }
-        }
+            let e = self.tree.node(self.tree.find(&at.join("/"))?)?.entry?;
+            let e = self.entries.get(e as usize)?;
+            (e.kind == EntryKind::Symlink).then(|| e.link_target.clone().unwrap_or_default())
+        })?;
         self.tree.find(&parts.join("/"))
     }
 

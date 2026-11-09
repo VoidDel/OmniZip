@@ -25,7 +25,7 @@ use crate::{
     },
     options::{ExtractOptions, OverwriteMode, PathMode, SymlinkPolicy},
     origin::{self, Origin},
-    path::{TargetOs, UnsafePathMode, numbered_name, sanitize},
+    path::{TargetOs, UnsafePathMode, numbered_name, resolve_link, sanitize},
 };
 
 /// How an engine delivers an entry's content.
@@ -229,9 +229,16 @@ impl FsSink {
     /// Creates deferred links, applies directory modes and times and returns the report.
     pub fn finish(mut self, ctx: &JobCtx) -> Result<Report> {
         let links = std::mem::take(&mut self.links);
+        // Every symbolic link of this extraction, whether created before or after the one being
+        // checked: the order they are created in must not decide where a link leads.
+        let pending: HashMap<String, String> = links
+            .iter()
+            .filter(|l| l.kind == EntryKind::Symlink)
+            .filter_map(|l| Some((link_key(&below(&self.root, &l.path)?), l.target.clone())))
+            .collect();
         for l in links {
             ctx.check()?;
-            self.create_link(l);
+            self.create_link(l, &pending);
         }
         for (p, mode) in &self.dir_modes {
             apply_dir_mode(p, *mode);
@@ -560,7 +567,31 @@ impl FsSink {
         self.check_streaming_ratio(ctx)
     }
 
-    fn create_link(&mut self, l: DeferredLink) {
+    /// Whether the symbolic link `l` leads somewhere inside the destination, following the
+    /// links of this extraction (`pending`) and links already on disk through every component.
+    fn link_inside(&self, l: &DeferredLink, pending: &HashMap<String, String>) -> bool {
+        let Some(base) = l.path.parent().and_then(|p| below(&self.root, p)) else {
+            return false;
+        };
+        resolve_link(&base, &l.target, |at| {
+            if let Some(t) = pending.get(&link_key(at)) {
+                return Some(t.clone());
+            }
+            let p = self.root.join(at.iter().collect::<PathBuf>());
+            match fs::symlink_metadata(&p) {
+                // An unreadable link counts as leading out.
+                Ok(m) if m.file_type().is_symlink() => Some(
+                    fs::read_link(&p)
+                        .map(|t| t.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| "/".into()),
+                ),
+                _ => None,
+            }
+        })
+        .is_some()
+    }
+
+    fn create_link(&mut self, l: DeferredLink, pending: &HashMap<String, String>) {
         let policy = self.opts.symlinks;
         match l.kind {
             EntryKind::Hardlink => {
@@ -597,7 +628,7 @@ impl FsSink {
                     }
                     return;
                 }
-                if !link_stays_inside(&self.root, &l.path, &l.target) {
+                if !self.link_inside(&l, pending) {
                     self.report
                         .warn(ErrorCode::UnsafeLink, &l.entry_path, Some(l.target));
                     self.report.skipped += 1;
@@ -814,34 +845,27 @@ fn make_symlink(target: &str, link: &Path) -> io::Result<()> {
     }
 }
 
-/// Lexically resolves `target` relative to the link's directory and checks it stays in `root`.
-pub fn link_stays_inside(root: &Path, link: &Path, target: &str) -> bool {
-    let t = target.replace('\\', "/");
-    if t.starts_with('/') || t.len() >= 2 && t.as_bytes()[1] == b':' {
-        return false;
-    }
-    let Ok(rel_dir) = link.parent().unwrap_or(root).strip_prefix(root) else {
-        return false;
-    };
-    let mut stack: Vec<String> = rel_dir
+/// The components of `path` below `root`; `None` when it is not below it.
+fn below(root: &Path, path: &Path) -> Option<Vec<String>> {
+    path.strip_prefix(root)
+        .ok()?
         .components()
-        .filter_map(|c| match c {
+        .map(|c| match c {
             Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
             _ => None,
         })
-        .collect();
-    for part in t.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                if stack.pop().is_none() {
-                    return false;
-                }
-            }
-            p => stack.push(p.to_owned()),
-        }
+        .collect()
+}
+
+/// How a path below the destination is looked up among the links being created: names differing
+/// only in case are the same file on Windows and (by default) macOS.
+fn link_key(components: &[String]) -> String {
+    let key = components.join("/");
+    if cfg!(any(windows, target_os = "macos")) {
+        key.to_lowercase()
+    } else {
+        key
     }
-    true
 }
 
 /// Reads entries without writing anything (integrity test). Checksum failures are recorded as
@@ -1413,30 +1437,51 @@ mod tests {
         assert!(d.path().join("ui/a.tsx").exists());
     }
 
+    /// A link whose target text stays inside but which leads out through another link of the
+    /// same archive is not created, whichever of the two comes first.
     #[test]
-    fn symlink_escape_detection() {
-        let root = Path::new("/out");
-        assert!(link_stays_inside(
-            root,
-            Path::new("/out/a/link"),
-            "../b.txt"
-        ));
-        assert!(link_stays_inside(root, Path::new("/out/a/link"), "c/d"));
-        assert!(!link_stays_inside(
-            root,
-            Path::new("/out/a/link"),
-            "../../etc/passwd"
-        ));
-        assert!(!link_stays_inside(
-            root,
-            Path::new("/out/link"),
-            "/etc/passwd"
-        ));
-        assert!(!link_stays_inside(
-            root,
-            Path::new("/out/link"),
-            "C:\\Windows"
-        ));
+    fn links_leading_out_through_other_links_are_refused() {
+        for order in [["sub/up", "sub/x/esc"], ["sub/x/esc", "sub/up"]] {
+            let d = tempfile::tempdir().unwrap();
+            let ctx = JobCtx::default();
+            let mut s = sink(
+                d.path(),
+                ExtractOptions {
+                    symlinks: SymlinkPolicy::CreateIfInside,
+                    ..Default::default()
+                },
+            );
+            for (i, path) in order.iter().enumerate() {
+                let mut e = Entry::new(i as u32, (*path).into(), EntryKind::Symlink);
+                e.link_target = Some(if *path == "sub/up" { ".." } else { "../up/.." }.into());
+                s.entry(&e, EntryData::None, &ctx).unwrap();
+            }
+            let report = s.finish(&ctx).unwrap();
+            let refused: Vec<&str> = report
+                .warnings
+                .iter()
+                .filter(|w| w.code == ErrorCode::UnsafeLink)
+                .map(|w| w.path.as_str())
+                .collect();
+            assert_eq!(refused, ["sub/x/esc"], "{order:?}");
+            assert!(fs::symlink_metadata(d.path().join("sub/x/esc")).is_err());
+        }
+    }
+
+    /// Links already in the destination are followed too.
+    #[test]
+    #[cfg(unix)]
+    fn links_leading_out_through_existing_links_are_refused() {
+        let d = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("/etc", d.path().join("etc")).unwrap();
+        let ctx = JobCtx::default();
+        let mut s = sink(d.path(), ExtractOptions::default());
+        let mut e = Entry::new(0, "passwd".into(), EntryKind::Symlink);
+        e.link_target = Some("etc/passwd".into());
+        s.entry(&e, EntryData::None, &ctx).unwrap();
+        let report = s.finish(&ctx).unwrap();
+        assert_eq!(report.warnings[0].code, ErrorCode::UnsafeLink);
+        assert!(fs::symlink_metadata(d.path().join("passwd")).is_err());
     }
 
     #[test]
