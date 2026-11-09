@@ -216,6 +216,17 @@ pub fn run() {
         Some("--unregister-shell") => {
             std::process::exit(i32::from(integration::unregister().is_err()))
         }
+        // The menu for the file manager's extension when OmniZip runs as an AppImage: the CLI
+        // inside it has no path that stays (`integration`).
+        #[cfg(target_os = "linux")]
+        Some("--shell-menu") => {
+            use omnizip_shell::menu;
+            println!(
+                "{}",
+                menu::menu_json(&menu::read_paths(std::io::stdin().lock()))
+            );
+            std::process::exit(0)
+        }
         _ => {}
     }
 

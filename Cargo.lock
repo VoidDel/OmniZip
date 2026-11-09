@@ -3222,6 +3222,7 @@ dependencies = [
  "omnizip-core",
  "omnizip-i18n",
  "serde",
+ "serde_json",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
  "windows",

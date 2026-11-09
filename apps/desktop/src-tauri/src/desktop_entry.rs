@@ -58,7 +58,7 @@ fn installed_by_package() -> bool {
 
 /// The program to start: the AppImage itself rather than the folder it is unpacked to, which
 /// changes on every run.
-fn program() -> Option<PathBuf> {
+pub fn program() -> Option<PathBuf> {
     env_dir("APPIMAGE").or_else(|| std::env::current_exe().ok())
 }
 

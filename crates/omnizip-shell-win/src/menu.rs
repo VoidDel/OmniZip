@@ -384,6 +384,32 @@ pub fn write_list(paths: &[PathBuf]) -> std::io::Result<PathBuf> {
     Ok(file)
 }
 
+/// The menu for a selection as file managers' extensions read it (`omnizip shell-menu`): the
+/// items that apply, by the rules, titles and settings of the Windows menu, in the language of
+/// OmniZip's settings.
+pub fn menu_json(paths: &[PathBuf]) -> String {
+    let cfg = MenuConfig::load();
+    let l = cfg.localizer();
+    let sel = classify(paths);
+    let items: Vec<serde_json::Value> = Verb::ALL
+        .into_iter()
+        .filter(|v| cfg.enabled(*v) && applies(*v, &sel))
+        .map(|v| serde_json::json!({ "verb": v.cli(), "title": title(v, &sel, &l) }))
+        .collect();
+    serde_json::json!({ "flat": cfg.flat(), "root": l.get("menu-root"), "items": items })
+        .to_string()
+}
+
+/// The paths a file manager's extension sends for [`menu_json`]: one per line.
+pub fn read_paths(input: impl std::io::BufRead) -> Vec<PathBuf> {
+    input
+        .lines()
+        .map_while(Result::ok)
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// Arguments for `omnizip-desktop`.
 pub fn arguments(verb: Verb, list: &Path, cwd: Option<&Path>) -> Vec<String> {
     let mut v = vec!["--shell".to_owned(), verb.cli().to_owned()];

@@ -86,7 +86,8 @@ pub use linux::{refresh_classic, register, status, unregister};
 ///
 /// * Nautilus (GNOME Files): an extension through nautilus-python. It asks `omnizip
 ///   shell-menu` (the CLI next to the app) for the items of a selection and starts this app
-///   with `--shell <verb>`.
+///   with `--shell <verb>`. An AppImage is unpacked to a new folder on every run, so there both
+///   are the AppImage itself (`$APPIMAGE`), which answers `--shell-menu`.
 /// * Dolphin (KDE): service menus generated from the menu settings
 ///   (`omnizip_shell::servicemenu`), written again when those change. They start this app with
 ///   `--shell <verb>` and the selection.
@@ -181,30 +182,41 @@ mod linux {
         if installed_service_menus().is_empty() {
             return;
         }
-        if let Ok(app) = std::env::current_exe()
+        if let Some(app) = app()
             && let Err(e) = write_service_menus(&app)
         {
             tracing::warn!("service menus: {e}");
         }
     }
 
-    /// The CLI next to this executable, which the extension asks for the menu items.
-    fn cli() -> Option<PathBuf> {
+    /// The program the menus start: the AppImage itself when OmniZip runs as one, not the
+    /// folder it is unpacked to, which is gone once it exits and named anew on every run.
+    fn app() -> Option<PathBuf> {
+        crate::desktop_entry::program()
+    }
+
+    /// The program the extension asks for the menu items, and the argument that asks: the CLI
+    /// next to this executable, or the AppImage (whose CLI has no lasting path).
+    fn menu_command() -> Option<(PathBuf, &'static str)> {
+        if std::env::var_os("APPIMAGE").is_some() {
+            return Some((app()?, "--shell-menu"));
+        }
         let p = std::env::current_exe().ok()?.with_file_name("omnizip");
-        p.is_file().then_some(p)
+        p.is_file().then_some((p, "shell-menu"))
     }
 
     /// The extension for this install: the placeholders become Python string literals.
-    fn extension(cli: &Path, app: &Path) -> String {
-        let literal = |p: &Path| format!("{:?}", p.to_string_lossy());
+    fn extension((cli, menu): &(PathBuf, &str), app: &Path) -> String {
+        let literal = |s: &str| format!("{s:?}");
         EXTENSION
-            .replace("\"@CLI@\"", &literal(cli))
-            .replace("\"@APP@\"", &literal(app))
+            .replace("\"@CLI@\"", &literal(&cli.to_string_lossy()))
+            .replace("\"@MENU@\"", &literal(menu))
+            .replace("\"@APP@\"", &literal(&app.to_string_lossy()))
     }
 
     pub fn status() -> ShellStatus {
-        let cli = cli();
-        let app = std::env::current_exe().ok();
+        let cli = menu_command();
+        let app = app();
         let installed = extension_file().and_then(|f| std::fs::read_to_string(f).ok());
         let menus = installed_service_menus();
         let stale = match (&installed, &cli, &app) {
@@ -216,17 +228,18 @@ mod linux {
         ShellStatus {
             supported: true,
             registered: installed.is_some() || !menus.is_empty(),
-            dll: cli.map(|p| p.to_string_lossy().into_owned()),
+            dll: cli.map(|(p, _)| p.to_string_lossy().into_owned()),
             stale,
             win11: Win11Menu::None,
         }
     }
 
     pub fn register() -> Result<(), Error> {
-        let cli = cli()
+        let cli = menu_command()
             .ok_or_else(|| Error::new(ErrorCode::MissingDependency).with("path", "omnizip"))?;
-        let app =
-            std::env::current_exe().map_err(|e| Error::io(e, Path::new("omnizip-desktop")))?;
+        let app = app().ok_or_else(|| {
+            Error::new(ErrorCode::MissingDependency).with("path", "omnizip-desktop")
+        })?;
         let file = extension_file().ok_or_else(|| Error::internal("no home folder"))?;
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir).map_err(|e| Error::io(e, dir))?;
@@ -240,6 +253,30 @@ mod linux {
         match extension_file() {
             Some(f) if f.exists() => std::fs::remove_file(&f).map_err(|e| Error::io(e, &f)),
             _ => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// An AppImage's extension asks and starts the AppImage itself: nothing in it points
+        /// into the folder the AppImage is unpacked to.
+        #[test]
+        fn extension_for_an_appimage() {
+            let image = Path::new("/home/u/Apps/OmniZip \"x\".AppImage");
+            let text = extension(&(image.to_owned(), "--shell-menu"), image);
+            assert!(text.contains(r#"CLI = "/home/u/Apps/OmniZip \"x\".AppImage""#));
+            assert!(text.contains(r#"MENU = "--shell-menu""#));
+            assert!(text.contains(r#"APP = "/home/u/Apps/OmniZip \"x\".AppImage""#));
+            assert!(!text.contains('@'), "every placeholder is filled");
+
+            let text = extension(
+                &(PathBuf::from("/opt/OmniZip/omnizip"), "shell-menu"),
+                Path::new("/opt/OmniZip/omnizip-desktop"),
+            );
+            assert!(text.contains(r#"MENU = "shell-menu""#));
+            assert!(text.contains("[CLI, MENU]"));
         }
     }
 }

@@ -5,7 +5,9 @@
 # or a flat list, the items turned off in the settings) comes from `omnizip shell-menu`, by the
 # same rules as the Windows menu. Choosing an item starts `omnizip-desktop --shell <verb>` with
 # the selection in a list file, as the Windows extension does. OmniZip installs this file
-# (settings, context menu) with the paths of its programs filled in below.
+# (settings, context menu) with the paths of its programs filled in below: for an AppImage both
+# are the AppImage itself (`--shell-menu` gives the menu), since the folder it unpacks to changes
+# on every run.
 
 import json
 import os
@@ -15,6 +17,7 @@ import tempfile
 from gi.repository import GObject, Nautilus
 
 CLI = "@CLI@"
+MENU = "@MENU@"
 APP = "@APP@"
 
 
@@ -22,7 +25,7 @@ def _menu(paths):
     """The items for a selection, or None when OmniZip cannot tell."""
     try:
         out = subprocess.run(
-            [CLI, "shell-menu"],
+            [CLI, MENU],
             input="\n".join(paths),
             capture_output=True,
             text=True,
