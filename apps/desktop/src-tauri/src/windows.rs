@@ -131,7 +131,7 @@ pub fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     if let Some(fx) = current_effects(app) {
         b = b.effects(fx);
     }
-    b.build()
+    with_icons(b.build())
 }
 
 /// A small progress window for jobs started from the file manager (`docs/04-ui-design.md` §4.4).
@@ -159,7 +159,7 @@ pub fn mini_window(app: &AppHandle, job_id: u32) -> tauri::Result<WebviewWindow>
         .transparent(system::material_supported());
     #[cfg(all(not(windows), not(target_os = "macos")))]
     let b = b.decorations(false);
-    with_material(app, b).build()
+    with_icons(with_material(app, b).build())
 }
 
 /// A standalone dialog window for "Extract to…" / "Add to archive…" started from the file
@@ -186,7 +186,25 @@ pub fn shell_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow
         .transparent(system::material_supported());
     #[cfg(all(not(windows), not(target_os = "macos")))]
     let b = b.decorations(false);
-    with_material(app, b).build()
+    with_icons(with_material(app, b).build())
+}
+
+/// A new window with its taskbar and title icons at its DPI.
+fn with_icons(w: tauri::Result<WebviewWindow>) -> tauri::Result<WebviewWindow> {
+    if let Ok(w) = &w {
+        icons(&w.as_ref().window());
+    }
+    w
+}
+
+/// Windows: a window's icons at its DPI (see `win_icon`); elsewhere nothing.
+pub fn icons(window: &tauri::Window) {
+    #[cfg(windows)]
+    if let Ok(h) = window.hwnd() {
+        crate::win_icon::apply(h.0 as isize);
+    }
+    #[cfg(not(windows))]
+    let _ = window;
 }
 
 /// Adds the current material to a window that is being built.

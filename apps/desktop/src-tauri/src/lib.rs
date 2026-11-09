@@ -20,6 +20,8 @@ pub mod state;
 pub mod system;
 pub mod theme;
 pub mod tray;
+#[cfg(windows)]
+mod win_icon;
 pub mod windows;
 
 use std::path::{Path, PathBuf};
@@ -256,6 +258,16 @@ pub fn run() {
         )
         .manage(AppState::new())
         .on_window_event(|window, event| {
+            // Moved to a display with another scale: icons for the new DPI.
+            if let tauri::WindowEvent::ScaleFactorChanged { .. } = event {
+                crate::windows::icons(window);
+            }
+            #[cfg(windows)]
+            if let tauri::WindowEvent::Destroyed = event
+                && let Ok(h) = window.hwnd()
+            {
+                win_icon::forget(h.0 as isize);
+            }
             // With the notification-area icon the main window hides instead of closing; the
             // icon's menu quits.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
