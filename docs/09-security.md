@@ -28,7 +28,7 @@
 5. **Unicode**：NFC 规范化；检测并提示 bidi 控制字符（如 U+202E 伪装扩展名）与零宽字符。
 6. **大小写冲突**：目标文件系统不区分大小写时检测同目录冲突，按覆盖策略处理。
 7. **最终校验**：目标路径 canonicalize 后必须以目标目录为前缀。
-8. **防 TOCTOU**：Linux / macOS 用 `openat` + `O_NOFOLLOW` 逐级打开；Windows 用 `FILE_FLAG_OPEN_REPARSE_POINT` 检测重解析点；目标目录中途被换成符号链接时中止。
+8. **防 TOCTOU**：Linux / macOS 用 `openat` + `O_NOFOLLOW` 逐级打开；Windows 用 `FILE_FLAG_OPEN_REPARSE_POINT` 检测重解析点；目标目录中途被换成符号链接时中止。**当前实施**（`omnizip_core::dirguard`，2026-11-09）：当前目录从目标文件夹起逐级打开并保持。Unix 上每级以 `openat(O_NOFOLLOW)` 从上一级打开，当前目录中的创建、查看、删除、改名、建链接都相对于打开的目录（`openat` / `mkdirat` / `fstatat` / `unlinkat` / `renameat` / `symlinkat` / `linkat`），目录被换成链接后写入仍落在进入时的目录；权限与目录时间经句柄设置。Windows 上每级以不跟随重解析点的方式打开、是重解析点即拒绝，并且不带 `FILE_SHARE_DELETE` 持有：它与上面各级都不能被改名、移动或删除；空目录仍可能被设为目录联接，所以每个创建的目录与文件都按句柄的最终路径（卷序列号 + 卷内路径）核对在目标文件夹下，不在则删除并拒绝。目标文件夹本身可以是链接（用户的选择）。只能按路径写的引擎（RAR）在 Linux 上经 `/proc/self/fd` 写入打开的目录，macOS 上仍按路径。
 
 其他规则：
 - **符号链接**：默认只创建目标在目标目录内的链接，且**全部延后到解压末尾创建**（防止"先建链接再经链接写入"）；硬链接同理；Windows 默认不创建符号链接（需特权），改写为普通文件。
@@ -43,7 +43,7 @@
 |---|---|
 | 高膨胀比 | 单条目或总体膨胀比 > 1000:1 且输出 > 1 GB 时暂停询问（GUI）或拒绝（CLI，`--allow-high-ratio` 覆盖） |
 | 嵌套炸弹 | 嵌套自动展开深度 ≤ 8；挂载不递归 |
-| 重叠条目（overlap / quine） | ZIP 中央目录中 local header 偏移范围重叠 → 标记可疑并拒绝一次性全部解压 |
+| 重叠条目（overlap / quine） | ZIP 中央目录中 local header 偏移范围重叠 → 标记可疑并拒绝一次性全部解压（已实现：打开时按中央目录记录的本地头与压缩数据范围标记 `Entry::overlaps`，所选内容含两个以上即拒绝，CLI `--allow-high-ratio` 可覆盖） |
 | 超大字典 | 7z 字典 > 1.5 GB 需确认；> 可用内存 70% 拒绝 |
 | 条目数 / 声明大小 | 上限可配置；超过阈值 UI 显示警示横幅 |
 | CPU 时间 | 所有作业可取消；UI 线程永不执行解码 |
@@ -51,7 +51,7 @@
 
 ## 5. 密码与凭据
 
-- 内存中使用 `SecretString` + `zeroize`；不写日志、崩溃报告、IPC 日志；CLI 行内 `-p<pw>` 给出进程列表可见的警告。
+- 内存中使用 `SecretString` + `zeroize`；不写日志、崩溃报告、IPC 日志；CLI 行内 `-p<pw>` 给出进程列表可见的警告。当前实施为 `omnizip_core::Secret`（`Zeroizing<String>`，释放时清零，`Debug` 显示为 `Secret(***)`，经 IPC 序列化为普通字符串），用于打开 / 写入选项、读取器、作业与提问的回答、挂载请求与守护进程的挂载记录；压缩库内部的副本、WebView 中的字符串与命令行参数原文不在其内。
 - 可选保存到系统钥匙串（Credential Manager / Keychain / Secret Service），按用户命名或压缩包哈希索引；设置页可管理与清除。
 - 尝试顺序：会话缓存 → 钥匙串（用户允许）→ 询问用户；无网络、无遥测。
 - 写入仅支持 AES-256（ZIP AE-2、7z）；读取 ZipCrypto 时显示"弱加密"徽标并建议转换。
