@@ -48,6 +48,11 @@ pub struct Entry {
     /// Target of a symbolic or hard link, when known without reading data.
     pub link_target: Option<String>,
     pub comment: Option<String>,
+    /// Its data overlaps another entry's in the archive file. Archivers never write that; an
+    /// overlap bomb does, to unpack the same compressed bytes many times over
+    /// (`docs/09-security.md` §4).
+    #[serde(default)]
+    pub overlaps: bool,
 }
 
 impl Entry {
@@ -69,6 +74,7 @@ impl Entry {
             method: None,
             link_target: None,
             comment: None,
+            overlaps: false,
         }
     }
 

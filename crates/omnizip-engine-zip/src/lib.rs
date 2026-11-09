@@ -213,9 +213,15 @@ impl ZipReader {
         }
 
         let mut entries = Vec::with_capacity(archive.len());
+        let mut ranges = Vec::with_capacity(archive.len());
         for (i, ((raw_name, _), name)) in raw.into_iter().zip(names).enumerate() {
             ctx.check()?;
             let z = archive.by_index_data(i).map_err(|e| map_err(e, path))?;
+            ranges.push(data_range(
+                z.header_start(),
+                raw_name.len(),
+                z.compressed_size(),
+            ));
             let kind = if z.is_dir() {
                 EntryKind::Dir
             } else if z.is_symlink() {
@@ -266,6 +272,9 @@ impl ZipReader {
             }
             entries.push(e);
         }
+        for i in overlapping(&ranges) {
+            entries[i].overlaps = true;
+        }
         Ok(Self {
             archive,
             info,
@@ -288,6 +297,42 @@ impl ZipReader {
         self.password = Some(p.clone());
         Ok(p)
     }
+}
+
+/// Where an entry lies in the archive file by its central-directory record: the local header
+/// (30 bytes and the name; its extra field is not counted, so the range is never too long) and
+/// the compressed data.
+fn data_range(header_start: u64, name_len: usize, compressed: u64) -> (u64, u64) {
+    let end = header_start
+        .saturating_add(30 + name_len as u64)
+        .saturating_add(compressed);
+    (header_start, end)
+}
+
+/// Indexes of the entries whose ranges overlap another's.
+fn overlapping(ranges: &[(u64, u64)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..ranges.len()).collect();
+    order.sort_by_key(|&i| ranges[i]);
+    let mut out = Vec::new();
+    // The entry reaching furthest so far, and how far.
+    let mut reach: Option<(usize, u64)> = None;
+    for i in order {
+        let (start, end) = ranges[i];
+        if let Some((j, far)) = reach {
+            if start < far {
+                out.push(i);
+                out.push(j);
+            }
+            if end > far {
+                reach = Some((i, end));
+            }
+        } else {
+            reach = Some((i, end));
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 impl ArchiveReader for ZipReader {

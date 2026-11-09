@@ -352,6 +352,61 @@ fn gbk_names_are_detected_and_overridable() {
 }
 
 #[test]
+fn overlap_detection() {
+    assert!(overlapping(&[(0, 10), (10, 20), (20, 25)]).is_empty());
+    assert_eq!(overlapping(&[(20, 25), (0, 10), (5, 30)]), [0, 1, 2]);
+    assert_eq!(overlapping(&[(0, 100), (40, 50), (100, 120)]), [0, 1]);
+    assert_eq!(
+        overlapping(&[(7, 9), (7, 9)]),
+        [0, 1],
+        "the same data twice"
+    );
+}
+
+/// Entries pointing at the same data (an overlap bomb) are marked, and are not extracted
+/// together.
+#[test]
+fn overlapping_entries_are_not_extracted_together() {
+    let d = tempfile::tempdir().unwrap();
+    let mut bytes = raw_zip(&[
+        (b"a.txt", b"same"),
+        (b"b.txt", b"same"),
+        (b"c.txt", b"else"),
+    ]);
+    // Point the second central record at the first entry's local header.
+    let records: Vec<usize> = bytes
+        .windows(4)
+        .enumerate()
+        .filter(|(_, w)| *w == b"PK\x01\x02")
+        .map(|(i, _)| i)
+        .collect();
+    bytes[records[1] + 42..records[1] + 46].copy_from_slice(&0u32.to_le_bytes());
+    let p = d.path().join("overlap.zip");
+    fs::write(&p, bytes).unwrap();
+    let mut r = open(&p);
+    let marked: Vec<bool> = r.entries().iter().map(|e| e.overlaps).collect();
+    assert_eq!(marked, [true, true, false]);
+
+    let o = ExtractOptions {
+        destination: d.path().join("out"),
+        ..Default::default()
+    };
+    let e = extract(r.as_mut(), &o, Selection::all(), &ctx()).unwrap_err();
+    assert_eq!(e.code(), ErrorCode::CompressionBomb);
+    assert_eq!(e.param("issue"), Some("overlapping-entries"));
+    assert!(!d.path().join("out").exists(), "nothing written");
+    // One of them at a time is fine.
+    extract(r.as_mut(), &o, Selection::of([0, 2], ""), &ctx()).unwrap();
+    let mut names: Vec<String> = walk(&d.path().join("out"))
+        .iter()
+        .filter(|p| p.is_file())
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    names.sort();
+    assert_eq!(names, ["a.txt", "c.txt"]);
+}
+
+#[test]
 fn hostile_paths_never_escape() {
     let d = tempfile::tempdir().unwrap();
     let bytes = raw_zip(&[

@@ -198,6 +198,19 @@ pub fn extract(
     let (bytes, files) = selection_totals(reader.entries(), &selection);
     let archive_size = reader.info().archive_size;
     ctx.policy.check_entries(reader.entries().len() as u64)?;
+    // Entries sharing their data (an overlap bomb) are extracted one at a time at most.
+    let overlapping = reader
+        .entries()
+        .iter()
+        .filter(|e| e.overlaps && !e.is_dir() && selection.contains(e.id))
+        .count();
+    if overlapping > 1 && !ctx.policy.allow_high_ratio {
+        return Err(ctx
+            .policy
+            .bomb_error(bytes, archive_size)
+            .with("issue", "overlapping-entries")
+            .with("count", overlapping));
+    }
     let confirmed = ctx.policy.is_high_ratio(bytes, archive_size);
     if confirmed {
         let ratio = bytes / archive_size.max(1);
