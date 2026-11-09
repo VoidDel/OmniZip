@@ -14,12 +14,13 @@ use std::{
     ffi::OsStr,
     fs::File,
     io::{self, Write},
+    panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
     sync::{
         Arc, Mutex, OnceLock, RwLock,
         atomic::{AtomicBool, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use omnizip_core::{
@@ -30,7 +31,7 @@ use omnizip_core::{
 
 use crate::{
     Attr, DirEntry, FileHandle, FileType, FsError, FsResult, FsStats, NodeId, OpenFlags, VirtualFs,
-    cache::{CacheLimits, Content, ContentBuilder, ContentCache, Partial},
+    cache::{CacheLimits, Content, ContentBuilder, ContentCache, Partial, STALL_TIMEOUT},
     names::{NameRules, assign},
 };
 
@@ -65,6 +66,9 @@ pub struct FsOptions {
     pub password: Option<String>,
     /// Decode a whole solid archive on first access when it fits the disk budget.
     pub warm_solid: bool,
+    /// A read waiting on a background decode fails with [`FsError::Io`] when the decoder makes
+    /// no progress for this long (`docs/12-mount.md` §7).
+    pub stall_timeout: Duration,
 }
 
 impl Default for FsOptions {
@@ -82,6 +86,7 @@ impl Default for FsOptions {
             max_handles: 1 << 20,
             password: None,
             warm_solid: true,
+            stall_timeout: STALL_TIMEOUT,
         }
     }
 }
@@ -268,7 +273,7 @@ impl ArchiveFs {
         if let Some(p) = decoding.get(&id) {
             return Ok(p.clone());
         }
-        let partial = Arc::new(Partial::new());
+        let partial = Arc::new(Partial::new(self.opts.stall_timeout));
         decoding.insert(id, partial.clone());
         drop(decoding);
         let (reader, cache, decoding) = (
@@ -281,8 +286,11 @@ impl ArchiveFs {
         let spawned = std::thread::Builder::new()
             .name("omnizip-decode".into())
             .spawn(move || {
-                let decoded = {
+                // A decoder may panic on corrupt data: the readers then get an error instead
+                // of waiting for an end that never comes.
+                let decoded = catch_unwind(AssertUnwindSafe(|| {
                     let mut reader = reader.lock().unwrap_or_else(|e| e.into_inner());
+                    p.start();
                     match cache.get(id) {
                         // Decoded meanwhile.
                         Some(c) => {
@@ -297,7 +305,11 @@ impl ArchiveFs {
                             &ctx,
                         ),
                     }
-                };
+                }))
+                .unwrap_or_else(|_| {
+                    tracing::error!("mount: the decoder panicked");
+                    Err(FsError::Io)
+                });
                 // The sink ends it with the content; whatever stopped it short ends it here.
                 p.end(decoded.and(Err(FsError::Io)));
                 decoding

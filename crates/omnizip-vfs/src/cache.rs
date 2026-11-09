@@ -16,6 +16,7 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use omnizip_core::EntryId;
@@ -106,25 +107,45 @@ impl Content {
     }
 }
 
+/// How long a read waits on a decoder that makes no progress before it fails
+/// (`docs/12-mount.md` §7): Explorer and other programs hang while a read is pending.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// An entry being decoded into a spool file, readable as far as it has been written.
-#[derive(Default)]
 pub struct Partial {
     /// A handle on the spool file, set when it is created.
     file: OnceLock<File>,
     state: Mutex<PartialState>,
     grew: Condvar,
+    /// A read fails when the decoder, once started, produces nothing for this long.
+    stall: Duration,
 }
 
 #[derive(Default)]
 struct PartialState {
+    /// The decoder has the archive and is decoding (before that it waits for another decode to
+    /// let go of the archive, which is that decode's progress, not this one's).
+    started: bool,
     written: u64,
     /// The finished content, or why decoding stopped.
     done: Option<FsResult<Content>>,
 }
 
+impl Default for Partial {
+    fn default() -> Self {
+        Self::new(STALL_TIMEOUT)
+    }
+}
+
 impl Partial {
-    pub fn new() -> Self {
-        Self::default()
+    /// A decode whose readers give up after `stall` without progress.
+    pub fn new(stall: Duration) -> Self {
+        Self {
+            file: OnceLock::new(),
+            state: Mutex::default(),
+            grew: Condvar::new(),
+            stall,
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, PartialState> {
@@ -133,6 +154,13 @@ impl Partial {
 
     fn advance(&self, written: u64) {
         self.lock().written = written;
+        self.grew.notify_all();
+    }
+
+    /// The decoder has started: from now on a read that sees no progress for the stall time
+    /// fails instead of waiting for good (a decoder stuck on corrupt data).
+    pub fn start(&self) {
+        self.lock().started = true;
         self.grew.notify_all();
     }
 
@@ -152,12 +180,35 @@ impl Partial {
     }
 
     /// Copies up to `buf.len()` bytes at `offset` into `buf`, waiting until they are decoded
-    /// (or decoding ends); the number copied, fewer only at the end of the entry.
+    /// (or decoding ends); the number copied, fewer only at the end of the entry. Fails with
+    /// [`FsError::Io`] when the started decoder makes no progress for the stall time.
     pub fn read_into(&self, offset: u64, buf: &mut [u8]) -> FsResult<usize> {
         let want = offset.saturating_add(buf.len() as u64);
         let mut st = self.lock();
+        let mut seen = (st.started, st.written);
+        let mut since = Instant::now();
         while st.written < want && st.done.is_none() {
-            st = self.grew.wait(st).unwrap_or_else(|e| e.into_inner());
+            if (st.started, st.written) != seen {
+                seen = (st.started, st.written);
+                since = Instant::now();
+            }
+            if !st.started {
+                st = self.grew.wait(st).unwrap_or_else(|e| e.into_inner());
+                continue;
+            }
+            let left = self.stall.saturating_sub(since.elapsed());
+            if left.is_zero() {
+                tracing::warn!(
+                    secs = self.stall.as_secs(),
+                    "mount: the decoder made no progress, failing the read"
+                );
+                return Err(FsError::Io);
+            }
+            st = self
+                .grew
+                .wait_timeout(st, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
         }
         match &st.done {
             Some(Ok(c)) => {

@@ -725,3 +725,127 @@ fn large_files_are_read_while_they_decode() {
     }
     assert_eq!(fs.cache().len(), 1);
 }
+
+/// One large file whose decoder panics after `good` bytes (a decoder choking on corrupt data).
+struct Panicky {
+    info: ArchiveInfo,
+    entries: Vec<Entry>,
+    good: usize,
+}
+
+struct PanickyRead {
+    pos: usize,
+    good: usize,
+}
+
+impl std::io::Read for PanickyRead {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        assert!(self.pos < self.good, "corrupt data");
+        let n = buf.len().min(self.good - self.pos);
+        buf[..n].fill(7);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+impl ArchiveReader for Panicky {
+    fn info(&self) -> &ArchiveInfo {
+        &self.info
+    }
+
+    fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    fn extract_to(&mut self, sink: &mut dyn ExtractSink, ctx: &JobCtx) -> omnizip_core::Result<()> {
+        let e = self.entries[0].clone();
+        if sink.wants(&e) {
+            let mut r = PanickyRead {
+                pos: 0,
+                good: self.good,
+            };
+            sink.entry(&e, EntryData::Stream(&mut r), ctx)?;
+        }
+        Ok(())
+    }
+}
+
+/// Runs `f` on a thread and waits for it at most `secs` seconds.
+fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(secs))
+        .expect("the read came back")
+}
+
+/// A background decoder that panics fails the reads waiting on it, now and later, instead of
+/// leaving them (and the program reading) hanging.
+#[test]
+fn a_panicking_decoder_fails_the_read() {
+    let mut e = Entry::new(0, "video.bin".into(), EntryKind::File);
+    e.size = 6 << 20;
+    e.size_known = true;
+    let reader = Panicky {
+        info: ArchiveInfo::new(Path::new("panicky.zip"), FormatId::Zip, 0),
+        entries: vec![e],
+        good: 1 << 20,
+    };
+    let fs = Arc::new(ArchiveFs::new(Box::new(reader), opts()).unwrap());
+    let node = resolve(fs.as_ref(), "video.bin").unwrap().node;
+    let fh = fs.open(node, OpenFlags::default()).unwrap();
+    for _ in 0..2 {
+        let f = fs.clone();
+        let got = within(10, move || f.read(fh, 5 << 20, 4096));
+        assert_eq!(got, Err(FsError::Io));
+    }
+    fs.release(fh);
+}
+
+/// A decoder stuck without progress fails the read after the stall time; bytes it did
+/// produce stay readable.
+#[test]
+fn a_stuck_decoder_fails_the_read_after_the_stall_time() {
+    let data = Arc::new(noise(6 << 20, 11));
+    let open = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let mut e = Entry::new(0, "video.bin".into(), EntryKind::File);
+    e.size = data.len() as u64;
+    e.size_known = true;
+    let reader = Gated {
+        info: ArchiveInfo::new(Path::new("stuck.zip"), FormatId::Zip, 0),
+        entries: vec![e],
+        data: data.clone(),
+        gate: 1 << 20,
+        open: open.clone(),
+    };
+    let fs = Arc::new(
+        ArchiveFs::new(
+            Box::new(reader),
+            FsOptions {
+                stall_timeout: std::time::Duration::from_millis(300),
+                ..opts()
+            },
+        )
+        .unwrap(),
+    );
+    let node = resolve(fs.as_ref(), "video.bin").unwrap().node;
+    let fh = fs.open(node, OpenFlags::default()).unwrap();
+    let f = fs.clone();
+    let started = Instant::now();
+    assert_eq!(
+        within(10, move || f.read(fh, 3 << 20, 4096)),
+        Err(FsError::Io)
+    );
+    assert!(started.elapsed() >= std::time::Duration::from_millis(300));
+    let f = fs.clone();
+    assert_eq!(
+        within(10, move || f.read(fh, 100, 16)).unwrap(),
+        &data[100..116]
+    );
+    // Let the decoder finish so the thread ends with the test.
+    let (lock, cv) = &*open;
+    *lock.lock().unwrap() = true;
+    cv.notify_all();
+    fs.release(fh);
+}
