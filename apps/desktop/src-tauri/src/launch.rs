@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! omnizip-desktop [--open <archive>]
-//!                 [--shell open|extract-here|extract-smart|extract-to|extract-each|test|mount|
+//!                 [--shell open|extract-smart|extract-folder|extract-to|extract-each|test|mount|
 //!                          add-zip|add-7z|add|convert|unmount]
 //!                 [--cwd <dir>] [--files-from <list-file>] [<paths>…]
 //! ```
@@ -16,8 +16,8 @@ use serde::Serialize;
 #[serde(rename_all = "kebab-case")]
 pub enum Verb {
     Open,
-    ExtractHere,
     ExtractSmart,
+    ExtractFolder,
     ExtractTo,
     ExtractEach,
     Test,
@@ -34,8 +34,8 @@ impl Verb {
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "open" => Verb::Open,
-            "extract-here" => Verb::ExtractHere,
             "extract-smart" => Verb::ExtractSmart,
+            "extract-folder" => Verb::ExtractFolder,
             "extract-to" => Verb::ExtractTo,
             "extract-each" => Verb::ExtractEach,
             "test" => Verb::Test,
@@ -62,8 +62,8 @@ impl Verb {
     pub fn is_background(self) -> bool {
         matches!(
             self,
-            Verb::ExtractHere
-                | Verb::ExtractSmart
+            Verb::ExtractSmart
+                | Verb::ExtractFolder
                 | Verb::ExtractEach
                 | Verb::Test
                 | Verb::AddZip
@@ -204,11 +204,11 @@ mod tests {
         assert_eq!(inv.verb, Verb::Open);
         assert_eq!(inv.paths, vec![cwd.join("a.zip")]);
         let inv = parse(
-            &args(&["--shell", "extract-here", "--cwd", "/x", "b.7z"]),
+            &args(&["--shell", "extract-smart", "--cwd", "/x", "b.7z"]),
             &cwd,
         )
         .unwrap();
-        assert_eq!(inv.verb, Verb::ExtractHere);
+        assert_eq!(inv.verb, Verb::ExtractSmart);
         assert_eq!(inv.paths, vec![PathBuf::from("/x").join("b.7z")]);
         assert!(inv.verb.is_background());
         // "Extract to…", "Add to archive…", "Convert to…" and "Mount" get a standalone dialog
@@ -222,7 +222,12 @@ mod tests {
         ] {
             assert!(v.is_dialog() && !v.is_background());
         }
-        for v in [Verb::Open, Verb::ExtractHere, Verb::Add7z] {
+        for v in [
+            Verb::Open,
+            Verb::ExtractSmart,
+            Verb::ExtractFolder,
+            Verb::Add7z,
+        ] {
             assert!(!v.is_dialog());
         }
     }

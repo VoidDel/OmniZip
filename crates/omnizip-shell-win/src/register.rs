@@ -24,6 +24,9 @@ const TARGET: &str = r"AllFilesystemObjects\shell";
 const VERB_KEY: &str = "OmniZip";
 /// Drives: "Eject" on the drives OmniZip mounted (hidden on the others), like a mounted ISO.
 const DRIVE_VERB: &str = r"Drive\shell\OmniZip.unmount";
+/// Flat-layout verbs of earlier versions, removed on registration so they do not linger
+/// ("Extract here", replaced by "Smart extract" on 2026-11-11).
+const RETIRED_KEYS: &[&str] = &["extract_here"];
 
 /// `{6F1E7A52-3C4B-4D1E-9A7F-0B2C3D4E5F00}`
 pub fn guid_string(g: GUID) -> String {
@@ -124,6 +127,9 @@ pub fn unregister_at(base: &str) -> std::io::Result<()> {
         let _ =
             CURRENT_USER.remove_tree(format!(r"{base}\CLSID\{}", guid_string(clsid_for(Some(v)))));
         let _ = CURRENT_USER.remove_tree(format!(r"{base}\{TARGET}\{VERB_KEY}.{}", v.key()));
+    }
+    for key in RETIRED_KEYS {
+        let _ = CURRENT_USER.remove_tree(format!(r"{base}\{TARGET}\{VERB_KEY}.{key}"));
     }
     let _ = CURRENT_USER.remove_tree(format!(r"{base}\{TARGET}\{VERB_KEY}"));
     let _ = CURRENT_USER.remove_tree(format!(r"{base}\{DRIVE_VERB}"));

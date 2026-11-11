@@ -15,8 +15,11 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Verb {
     Open,
-    ExtractHere,
+    /// Smart extraction next to the archive: no extra folder when the archive has a single
+    /// top-level item, a folder named after the archive otherwise.
     ExtractSmart,
+    /// Always into a folder named after the archive.
+    ExtractFolder,
     ExtractTo,
     ExtractEach,
     Mount,
@@ -33,8 +36,8 @@ impl Verb {
     /// Menu order. New verbs go last: the class id of a verb follows its place here.
     pub const ALL: [Verb; 12] = [
         Verb::Open,
-        Verb::ExtractHere,
         Verb::ExtractSmart,
+        Verb::ExtractFolder,
         Verb::ExtractTo,
         Verb::ExtractEach,
         Verb::Mount,
@@ -50,8 +53,8 @@ impl Verb {
     pub const fn key(self) -> &'static str {
         match self {
             Verb::Open => "open",
-            Verb::ExtractHere => "extract_here",
             Verb::ExtractSmart => "extract_smart",
+            Verb::ExtractFolder => "extract_folder",
             Verb::ExtractTo => "extract_to",
             Verb::ExtractEach => "extract_each",
             Verb::Mount => "mount",
@@ -68,8 +71,8 @@ impl Verb {
     pub const fn cli(self) -> &'static str {
         match self {
             Verb::Open => "open",
-            Verb::ExtractHere => "extract-here",
             Verb::ExtractSmart => "extract-smart",
+            Verb::ExtractFolder => "extract-folder",
             Verb::ExtractTo => "extract-to",
             Verb::ExtractEach => "extract-each",
             Verb::Mount => "mount",
@@ -86,8 +89,8 @@ impl Verb {
     pub const fn message(self) -> &'static str {
         match self {
             Verb::Open => "menu-open",
-            Verb::ExtractHere => "menu-extract-here",
             Verb::ExtractSmart => "menu-extract-smart",
+            Verb::ExtractFolder => "menu-extract-folder",
             Verb::ExtractTo => "menu-extract-to",
             Verb::ExtractEach => "menu-extract-each",
             Verb::Mount => "menu-mount",
@@ -275,10 +278,9 @@ pub fn classify(paths: &[PathBuf]) -> Selection {
 pub fn applies(verb: Verb, sel: &Selection) -> bool {
     let only_archives = sel.archives > 0 && sel.others == 0;
     match verb {
-        Verb::Open | Verb::Mount => sel.archives == 1 && sel.others == 0,
-        Verb::ExtractHere | Verb::ExtractSmart | Verb::ExtractTo | Verb::Test | Verb::Convert => {
-            only_archives
-        }
+        // Several archives go each to its own folder with "Extract each".
+        Verb::Open | Verb::Mount | Verb::ExtractFolder => sel.archives == 1 && sel.others == 0,
+        Verb::ExtractSmart | Verb::ExtractTo | Verb::Test | Verb::Convert => only_archives,
         Verb::ExtractEach => sel.archives > 1 && sel.others == 0,
         Verb::AddZip | Verb::Add7z | Verb::Add => sel.others > 0,
         Verb::Unmount => sel.mount_root,
@@ -294,7 +296,7 @@ pub fn title(verb: Verb, sel: &Selection, l: &Localizer) -> String {
     };
     match verb {
         // A folder: its name ends with the platform's separator (`photos\` / `photos/`).
-        Verb::ExtractSmart => tr!(
+        Verb::ExtractFolder => tr!(
             l,
             verb.message(),
             name = format!("{name}{}", std::path::MAIN_SEPARATOR)
@@ -448,8 +450,8 @@ mod tests {
         );
         for v in [
             Verb::Open,
-            Verb::ExtractHere,
             Verb::ExtractSmart,
+            Verb::ExtractFolder,
             Verb::Mount,
             Verb::Test,
         ] {
@@ -460,12 +462,14 @@ mod tests {
 
         let two = classify(&[p("photos.zip"), p("backup.tar.zst")]);
         assert!(applies(Verb::ExtractEach, &two));
+        assert!(applies(Verb::ExtractSmart, &two));
         assert!(!applies(Verb::Open, &two));
+        assert!(!applies(Verb::ExtractFolder, &two));
 
         let files = classify(&[p("notes.txt"), p("folder")]);
         assert_eq!(files.archives, 0);
         assert!(applies(Verb::AddZip, &files));
-        assert!(!applies(Verb::ExtractHere, &files));
+        assert!(!applies(Verb::ExtractSmart, &files));
         assert_eq!(files.name, d.path().file_name().unwrap().to_string_lossy());
 
         let folder = classify(&[p("folder")]);
@@ -480,7 +484,7 @@ mod tests {
 
         let mixed = classify(&[p("photos.zip"), p("notes.txt")]);
         assert!(applies(Verb::Add, &mixed));
-        assert!(!applies(Verb::ExtractHere, &mixed));
+        assert!(!applies(Verb::ExtractSmart, &mixed));
     }
 
     #[cfg(target_os = "linux")]
@@ -533,8 +537,12 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            title(Verb::ExtractSmart, &sel, &Localizer::new("zh-CN")),
+            title(Verb::ExtractFolder, &sel, &Localizer::new("zh-CN")),
             format!("解压到“photos{}”", std::path::MAIN_SEPARATOR)
+        );
+        assert_eq!(
+            title(Verb::ExtractSmart, &sel, &Localizer::new("zh-CN")),
+            "智能解压"
         );
         assert_eq!(
             title(Verb::AddZip, &sel, &Localizer::new("en-US")),
@@ -570,8 +578,11 @@ mod tests {
             std::fs::read_to_string(&list).unwrap(),
             "C:\\a b\\x.zip\nC:\\中文\\y.7z\n"
         );
-        let args = arguments(Verb::ExtractHere, &list, None);
-        assert_eq!(args[..2], ["--shell".to_owned(), "extract-here".to_owned()]);
+        let args = arguments(Verb::ExtractSmart, &list, None);
+        assert_eq!(
+            args[..2],
+            ["--shell".to_owned(), "extract-smart".to_owned()]
+        );
         assert_eq!(args.last().unwrap(), &list.to_string_lossy());
         std::fs::remove_file(list).unwrap();
         for v in Verb::ALL {

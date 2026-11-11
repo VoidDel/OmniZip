@@ -1,8 +1,8 @@
 menu-root = OmniZip
 menu-open = 用 OmniZip 打开
-menu-extract-here = 解压到此处
-menu-extract-smart = 解压到“{ $name }”
-menu-extract-smart-folder = 解压到同名文件夹
+menu-extract-smart = 智能解压
+menu-extract-folder = 解压到“{ $name }”
+menu-extract-folder-any = 解压到同名文件夹
 menu-extract-to = 解压到…
 menu-extract-each = 分别解压到独立文件夹
 menu-mount = 挂载

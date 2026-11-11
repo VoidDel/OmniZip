@@ -21,8 +21,8 @@ const BOX = 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9';
 
 /** Verb (`--shell` value) → SVG shapes on the 24 px grid. */
 const GLYPHS = {
-  'extract-here': [`<path d="M12 4v11M8 11l4 4 4-4"/>`, `<path d="${TRAY}"/>`],
-  'extract-smart': [`<path d="${FOLDER}"/>`, `<path d="M12 10.5v6M9.5 14l2.5 2.5 2.5-2.5"/>`],
+  'extract-smart': [`<path d="M12 4v11M8 11l4 4 4-4"/>`, `<path d="${TRAY}"/>`],
+  'extract-folder': [`<path d="${FOLDER}"/>`, `<path d="M12 10.5v6M9.5 14l2.5 2.5 2.5-2.5"/>`],
   'extract-to': [
     `<path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1"/>`,
     `<path d="M3.5 7.5V18a1.5 1.5 0 0 0 1.5 1.5h12.6a1.5 1.5 0 0 0 1.4-1l2-6a1 1 0 0 0-.9-1.3H7.3a1.5 1.5 0 0 0-1.4 1L3.5 18"/>`,

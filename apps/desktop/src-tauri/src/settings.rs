@@ -157,8 +157,8 @@ pub struct Shell {
     /// `cascade` or `flat`.
     pub style: String,
     pub icons: bool,
-    /// Visible menu items (`open`, `extract_here`, `extract_smart`, `extract_to`, `mount`,
-    /// `test`, `convert`, `add_zip`, `add_7z`, `add`).
+    /// Visible menu items (`open`, `extract_smart`, `extract_folder`, `extract_to`,
+    /// `extract_each`, `mount`, `test`, `convert`, `add_zip`, `add_7z`, `add`, `unmount`).
     pub items: BTreeMap<String, bool>,
 }
 
@@ -166,8 +166,8 @@ impl Default for Shell {
     fn default() -> Self {
         let items = [
             ("open", true),
-            ("extract_here", true),
             ("extract_smart", true),
+            ("extract_folder", true),
             ("extract_to", true),
             ("extract_each", true),
             ("mount", true),

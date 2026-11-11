@@ -106,17 +106,19 @@ fn handle_invocation(app: &AppHandle, inv: Invocation, startup: bool) {
         ..Default::default()
     };
     let (kind, title, work) = match inv.verb {
-        Verb::ExtractHere | Verb::ExtractSmart | Verb::ExtractEach => {
+        // "Smart extraction" next to the archive; "Extract to "name\"" and "Extract each"
+        // always into a folder named after each archive.
+        Verb::ExtractSmart | Verb::ExtractFolder | Verb::ExtractEach => {
             let req = ExtractRequest {
                 archive_id: None,
                 paths,
                 nodes: Vec::new(),
                 relative_to: None,
                 destination: parent.to_string_lossy().into_owned(),
-                path_mode: if inv.verb == Verb::ExtractHere {
-                    "full".into()
-                } else {
+                path_mode: if inv.verb == Verb::ExtractSmart {
                     "smart".into()
+                } else {
+                    "full".into()
                 },
                 overwrite: OverwriteMode::Ask,
                 password: None,
@@ -124,7 +126,7 @@ fn handle_invocation(app: &AppHandle, inv: Invocation, startup: bool) {
                 open_after: false,
                 delete_after: false,
                 keep_broken: false,
-                each_to_folder: inv.verb == Verb::ExtractEach,
+                each_to_folder: inv.verb != Verb::ExtractSmart,
             };
             match ops::extract_work(app, req) {
                 Ok((t, w)) => ("extract", t, w),

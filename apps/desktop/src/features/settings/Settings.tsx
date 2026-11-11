@@ -90,20 +90,20 @@ function ThemeCard({ th, selected, onPick, lang }: { th: ThemeSummary; selected:
 
 /** Registration state of the Windows context menu, with register / remove actions. */
 /** Context-menu items in menu order (`Verb::ALL` in crates/omnizip-shell-win/src/menu.rs). */
-const MENU_ITEMS = ['open', 'extract_here', 'extract_smart', 'extract_to', 'extract_each', 'mount', 'test', 'convert', 'add_zip', 'add_7z', 'add', 'unmount'] as const;
+const MENU_ITEMS = ['open', 'extract_smart', 'extract_folder', 'extract_to', 'extract_each', 'mount', 'test', 'convert', 'add_zip', 'add_7z', 'add', 'unmount'] as const;
 type MenuItem = (typeof MENU_ITEMS)[number];
 
 /** What the preview menu is opened on, and the items that apply to it (`applies` in menu.rs). */
 const MENU_TARGETS: Record<'archive' | 'archives' | 'files', readonly MenuItem[]> = {
-  archive: ['open', 'extract_here', 'extract_smart', 'extract_to', 'mount', 'test', 'convert'],
-  archives: ['extract_here', 'extract_smart', 'extract_to', 'extract_each', 'test', 'convert'],
+  archive: ['open', 'extract_smart', 'extract_folder', 'extract_to', 'mount', 'test', 'convert'],
+  archives: ['extract_smart', 'extract_to', 'extract_each', 'test', 'convert'],
   files: ['add_zip', 'add_7z', 'add'],
 };
 
 /** Item icons: the glyphs of the real menu (scripts/gen-menu-icons.mjs); `open` has the app icon. */
 const MENU_ICONS: Record<Exclude<MenuItem, 'open'>, IconName> = {
-  extract_here: 'extract',
-  extract_smart: 'menuExtractSmart',
+  extract_smart: 'extract',
+  extract_folder: 'menuExtractSmart', // the folder glyph (omni-ui)
   extract_to: 'menuExtractTo',
   extract_each: 'menuExtractEach',
   mount: 'drive',
@@ -122,7 +122,7 @@ const itemOn = (shell: S['shell'], k: MenuItem) => shell.items[k] ?? k !== 'conv
 function itemTitle(t: TFunction, k: MenuItem) {
   const sep = document.documentElement.dataset.platform === 'win' ? '\\' : '/';
   const name = t('settings.shell.name');
-  return t(`settings.shell.items_${k}`, { name: k === 'extract_smart' ? name + sep : name });
+  return t(`settings.shell.items_${k}`, { name: k === 'extract_folder' ? name + sep : name });
 }
 
 /** The context menu as the file manager shows it for the chosen selection. */

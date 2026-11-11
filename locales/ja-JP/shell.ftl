@@ -1,8 +1,8 @@
 menu-root = OmniZip
 menu-open = OmniZip で開く
-menu-extract-here = ここに展開
-menu-extract-smart = 「{ $name }」に展開
-menu-extract-smart-folder = 同じ名前のフォルダーに展開
+menu-extract-smart = スマート展開
+menu-extract-folder = 「{ $name }」に展開
+menu-extract-folder-any = 同じ名前のフォルダーに展開
 menu-extract-to = 展開先を指定…
 menu-extract-each = それぞれ別のフォルダーに展開
 menu-mount = マウント

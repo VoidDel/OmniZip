@@ -4,7 +4,8 @@
 //!
 //! A service menu is static: Dolphin shows its actions when every selected item has one of its
 //! MIME types and the number of items fits. So there is one file per rule of [`applies`]
-//! (one archive; archives; several archives; anything), and titles that cannot name the
+//! (one archive; archives; several archives; anything; split where the menu order asks for it),
+//! and titles that cannot name the
 //! selection ("Add to a ZIP archive" instead of "Add to "photos.zip""). "Eject" needs to know
 //! whether a folder is a mount, which a service menu cannot ask: Dolphin has no such item. The
 //! files are written again whenever the menu settings change.
@@ -62,7 +63,7 @@ struct Group {
 }
 
 /// In menu order, as far as the rules allow.
-const GROUPS: [Group; 4] = [
+const GROUPS: [Group; 6] = [
     Group {
         file: "omnizip-1-archive.desktop",
         verbs: &[Verb::Open, Verb::Mount],
@@ -70,25 +71,31 @@ const GROUPS: [Group; 4] = [
         count: Count::Exactly(1),
     },
     Group {
-        file: "omnizip-2-archives.desktop",
-        verbs: &[
-            Verb::ExtractHere,
-            Verb::ExtractSmart,
-            Verb::ExtractTo,
-            Verb::Test,
-            Verb::Convert,
-        ],
+        file: "omnizip-2-smart.desktop",
+        verbs: &[Verb::ExtractSmart],
         archives: true,
         count: Count::AtLeast(1),
     },
     Group {
-        file: "omnizip-3-each.desktop",
+        file: "omnizip-3-folder.desktop",
+        verbs: &[Verb::ExtractFolder],
+        archives: true,
+        count: Count::Exactly(1),
+    },
+    Group {
+        file: "omnizip-4-archives.desktop",
+        verbs: &[Verb::ExtractTo, Verb::Test, Verb::Convert],
+        archives: true,
+        count: Count::AtLeast(1),
+    },
+    Group {
+        file: "omnizip-5-each.desktop",
         verbs: &[Verb::ExtractEach],
         archives: true,
         count: Count::AtLeast(2),
     },
     Group {
-        file: "omnizip-4-add.desktop",
+        file: "omnizip-6-add.desktop",
         verbs: &[Verb::AddZip, Verb::Add7z, Verb::Add],
         archives: false,
         count: Count::AtLeast(1),
@@ -99,7 +106,7 @@ const GROUPS: [Group; 4] = [
 fn icon(verb: Verb) -> &'static str {
     match verb {
         Verb::Open => "document-open",
-        Verb::ExtractHere | Verb::ExtractSmart | Verb::ExtractTo | Verb::ExtractEach => {
+        Verb::ExtractSmart | Verb::ExtractFolder | Verb::ExtractTo | Verb::ExtractEach => {
             "archive-extract"
         }
         Verb::Mount => "drive-removable-media",
@@ -113,7 +120,7 @@ fn icon(verb: Verb) -> &'static str {
 /// A title that does not name the selection.
 fn title(verb: Verb, l: &omnizip_i18n::Localizer) -> String {
     l.get(match verb {
-        Verb::ExtractSmart => "menu-extract-smart-folder",
+        Verb::ExtractFolder => "menu-extract-folder-any",
         Verb::AddZip => "menu-add-zip-any",
         Verb::Add7z => "menu-add-7z-any",
         v => v.message(),
@@ -236,9 +243,11 @@ mod tests {
             files,
             [
                 "omnizip-1-archive.desktop",
-                "omnizip-2-archives.desktop",
-                "omnizip-3-each.desktop",
-                "omnizip-4-add.desktop"
+                "omnizip-2-smart.desktop",
+                "omnizip-3-folder.desktop",
+                "omnizip-4-archives.desktop",
+                "omnizip-5-each.desktop",
+                "omnizip-6-add.desktop"
             ]
         );
         let one = &menus[0].1;
@@ -253,14 +262,14 @@ mod tests {
         );
         assert!(one.contains("MimeType=application/zip;"));
         // "Convert" is off unless turned on.
-        assert!(
-            menus[1]
-                .1
-                .contains("Actions=extract-here;extract-smart;extract-to;test;\n")
-        );
-        assert!(menus[1].1.contains("Name=解压到同名文件夹\n"));
-        assert!(menus[2].1.contains("X-KDE-MinNumberOfUrls=2\n"));
-        let add = &menus[3].1;
+        assert!(menus[1].1.contains("Actions=extract-smart;\n"));
+        assert!(menus[1].1.contains("Name=智能解压\n"));
+        assert!(menus[1].1.contains("X-KDE-MinNumberOfUrls=1\n"));
+        assert!(menus[2].1.contains("Name=解压到同名文件夹\n"));
+        assert!(menus[2].1.contains("X-KDE-RequiredNumberOfUrls=1\n"));
+        assert!(menus[3].1.contains("Actions=extract-to;test;\n"));
+        assert!(menus[4].1.contains("X-KDE-MinNumberOfUrls=2\n"));
+        let add = &menus[5].1;
         assert!(add.contains("MimeType=all/all;\n"));
         assert!(add.contains("Name=添加为 ZIP 压缩包\n"));
         // No item has a name in it, and none ejects.
@@ -277,7 +286,7 @@ mod tests {
             &config("flat", false, &["extract_each", "open"]),
             Path::new("/tmp/a b/omnizip-desktop"),
         );
-        assert_eq!(menus.len(), 3);
+        assert_eq!(menus.len(), 5);
         assert!(
             !menus
                 .iter()

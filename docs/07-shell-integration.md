@@ -10,17 +10,17 @@
 
 | 选区 | 菜单项 |
 |---|---|
-| 单个压缩包 | 用 OmniZip 打开 · 解压到此处 · 解压到 "名称\"（智能）· 解压到… · **挂载** · 测试 · 转换为… · 校验哈希 |
-| 多个压缩包 | 分别解压到独立文件夹 · 全部解压到此处 · 全部挂载 · 全部测试 |
+| 单个压缩包 | 用 OmniZip 打开 · 智能解压 · 解压到 "名称\" · 解压到… · **挂载** · 测试 · 转换为… · 校验哈希 |
+| 多个压缩包 | 智能解压 · 解压到… · 分别解压到独立文件夹 · 全部挂载 · 全部测试 |
 | 非压缩包文件 / 文件夹 | 添加到 "名称.zip" · 添加到 "名称.7z" · 添加到压缩包… · 压缩并分享（v1.x，邮件 / AirDrop / 附近共享） |
 | 混合 | 上述两组并列 |
 | 文件夹背景 | 在此新建压缩包…（可选） |
 | OmniZip 挂载的盘（Windows） | **弹出**：独立的一项（不在 OmniZip 子菜单里），像挂载的 ISO 一样；Windows 11 在"显示更多选项"里 |
 
 - **布局**：级联（默认，一个 "OmniZip" 顶级项展开子菜单）或平铺（最多 4 项置顶，其余入子菜单），用户可勾选显示哪些项、是否显示图标。
-- **行为**："解压到此处" / "添加到 名称.zip" 直接以默认预设执行并显示轻量进度窗；带 "…" 的项（"解压到…"、"添加到压缩包…"、"转换为…"，见 04 §4.11）与"挂载"（04 §4.10）只弹出对应对话框的独立小窗，不打开主窗口，窗口高度随内容自适应；点"开始"后同一窗口转为进度窗，取消则直接关闭。"挂载"成功后小窗关闭并在文件管理器中打开挂载的盘；压缩包已挂载时小窗显示挂载点与"打开 / 卸载"，卸载时要保存改动则同一窗口转为保存的进度窗。"弹出"（2026-10-30）：没有未保存改动时直接卸载，不出现窗口；有改动时小窗询问保存或丢弃，保存时转为进度窗。系统自带的"弹出"只出现在可移动盘与光驱上，WinFsp 的卷是固定磁盘，所以由 OmniZip 自己的菜单项提供：外壳扩展只在选中的是盘符根、驱动器类型为固定磁盘且文件系统名为 "OmniZip" 时显示它（注册在 `Drive\shell`）。Windows 11 顶层菜单的包清单只支持文件类型与文件夹（`desktop5:ItemType` 的 Type 按架构只能是 `*`、`.扩展名`、`Directory`、`Directory\Background`，`Drive` 被 makeappx 拒绝），所以它在"显示更多选项"里；注册了右键菜单包时经典菜单的其他项会移除，盘上的"弹出"仍单独留在注册表（`register_drive`）。挂载到文件夹的挂载点暂不提供。
+- **行为**："智能解压" / "解压到 "名称\"" / "分别解压到独立文件夹" / "添加到 名称.zip" 直接以默认预设执行并显示轻量进度窗；带 "…" 的项（"解压到…"、"添加到压缩包…"、"转换为…"，见 04 §4.11）与"挂载"（04 §4.10）只弹出对应对话框的独立小窗，不打开主窗口，窗口高度随内容自适应；点"开始"后同一窗口转为进度窗，取消则直接关闭。"挂载"成功后小窗关闭并在文件管理器中打开挂载的盘；压缩包已挂载时小窗显示挂载点与"打开 / 卸载"，卸载时要保存改动则同一窗口转为保存的进度窗。"弹出"（2026-10-30）：没有未保存改动时直接卸载，不出现窗口；有改动时小窗询问保存或丢弃，保存时转为进度窗。系统自带的"弹出"只出现在可移动盘与光驱上，WinFsp 的卷是固定磁盘，所以由 OmniZip 自己的菜单项提供：外壳扩展只在选中的是盘符根、驱动器类型为固定磁盘且文件系统名为 "OmniZip" 时显示它（注册在 `Drive\shell`）。Windows 11 顶层菜单的包清单只支持文件类型与文件夹（`desktop5:ItemType` 的 Type 按架构只能是 `*`、`.扩展名`、`Directory`、`Directory\Background`，`Drive` 被 makeappx 拒绝），所以它在"显示更多选项"里；注册了右键菜单包时经典菜单的其他项会移除，盘上的"弹出"仍单独留在注册表（`register_drive`）。挂载到文件夹的挂载点暂不提供。
 - **名称推导**：单文件去扩展名（`a.tar.gz` → `a`）；多选取公共父目录名；目标已存在时自动加序号。
-- **智能解压**：顶层单目录则不再套一层文件夹（见 03 §6.2）。
+- **智能解压**：解压到压缩包所在文件夹，顶层只有一项（目录或文件）则直接放出，否则新建以压缩包名命名的文件夹（见 03 §6.2）。"解压到 "名称\"" 与 "分别解压到独立文件夹" 不做判断，总是新建以压缩包名命名的文件夹（2026-11-11 起；此前的"解压到此处"——原样铺到当前文件夹——已从菜单移除）。
 
 所有平台的菜单文件 / 代码都从同一份 `platform/shell-menu.toml` + `locales/*/shell.ftl` 生成，避免三处手改不一致。
 
@@ -133,7 +133,7 @@
 
 **当前实现**（Nautilus）：`platform/linux/nautilus/omnizip.py` 是 nautilus-python 扩展，只做一层外壳：右键时把所选路径交给 `omnizip shell-menu`（命令行的隐藏子命令，读标准输入、输出 JSON），由它按 Windows 菜单同一套规则（`omnizip_shell::menu`：哪些选择显示哪些项、按设置的界面语言生成标题、子菜单或平铺、设置里关掉的项）给出菜单项，设置改动无需重新注册；选中某项时把选择写入临时列表文件，启动 `omnizip-desktop --shell <verb> --cwd <目录> --files-from <列表>`。设置页"添加到右键菜单"或 `omnizip-desktop --register-shell` 把它装到 `$XDG_DATA_HOME/nautilus-python/extensions/`（填入本机两个程序的路径），需要 python3-nautilus，`nautilus -q` 后生效。以 AppImage 运行时，AppImage 每次运行解包到不同的临时目录、退出即消失，因此扩展与 Dolphin 服务菜单都指向 `$APPIMAGE` 本身，菜单项由它的 `--shell-menu`（在启动界面之前处理，输出与 `omnizip shell-menu` 相同）给出（2026-11-09）。"解压到‘名称’"中的路径分隔符由代码按平台补上（Linux 为 `/`）。
 
-**当前实现**（Dolphin，2026-11-03）：同一次注册还把 KDE 服务菜单写到 `$XDG_DATA_HOME/kio/servicemenus/omnizip-*.desktop`（可执行权限，否则 Dolphin 不加载），内容由 `omnizip_shell::servicemenu` 按同一套设置生成（界面语言、子菜单 `X-KDE-Submenu` 或平铺、关掉的项、图标开关；`X-KDE-Priority=TopLevel` 放在顶层而不是"动作"子菜单里），设置页改动菜单设置时重写。服务菜单是静态的，Dolphin 只能按 MIME 类型与所选个数筛选，因此按 `applies` 的规则分成四个文件：一个压缩包（打开、挂载）、一个或多个压缩包（解压到此处、解压到同名文件夹、解压到…、测试、转换）、两个以上压缩包（分别解压）、任意文件与文件夹（添加为 ZIP / 7z、添加到压缩包…；只选压缩包时也显示，因为排除压缩包会让"压缩包加普通文件"的选择也看不到）；标题不含所选名称（"添加为 ZIP 压缩包"而非"添加到‘photos.zip’"，`menu-*-any` / `menu-extract-smart-folder`）；只用于本机文件（`X-KDE-Protocols=file`），程序被删除后菜单随之消失（`TryExec`）。选中某项启动 `omnizip-desktop --shell <verb> <所选路径…>`。"弹出"需要判断文件夹是否为挂载点，服务菜单做不到，Dolphin 中不提供（在应用侧栏或托盘卸载）。其他文件管理器尚未接入。
+**当前实现**（Dolphin，2026-11-03）：同一次注册还把 KDE 服务菜单写到 `$XDG_DATA_HOME/kio/servicemenus/omnizip-*.desktop`（可执行权限，否则 Dolphin 不加载），内容由 `omnizip_shell::servicemenu` 按同一套设置生成（界面语言、子菜单 `X-KDE-Submenu` 或平铺、关掉的项、图标开关；`X-KDE-Priority=TopLevel` 放在顶层而不是"动作"子菜单里），设置页改动菜单设置时重写。服务菜单是静态的，Dolphin 只能按 MIME 类型与所选个数筛选，因此按 `applies` 的规则（并为保持菜单顺序）分成六个文件：一个压缩包（打开、挂载）、一个或多个压缩包（智能解压）、一个压缩包（解压到同名文件夹）、一个或多个压缩包（解压到…、测试、转换）、两个以上压缩包（分别解压）、任意文件与文件夹（添加为 ZIP / 7z、添加到压缩包…；只选压缩包时也显示，因为排除压缩包会让"压缩包加普通文件"的选择也看不到）；标题不含所选名称（"添加为 ZIP 压缩包"而非"添加到‘photos.zip’"，`menu-*-any`）；只用于本机文件（`X-KDE-Protocols=file`），程序被删除后菜单随之消失（`TryExec`）。选中某项启动 `omnizip-desktop --shell <verb> <所选路径…>`。"弹出"需要判断文件夹是否为挂载点，服务菜单做不到，Dolphin 中不提供（在应用侧栏或托盘卸载）。其他文件管理器尚未接入。
 
 **桌面项与图标**（2026-11-03）：Wayland 下任务栏按窗口的 app id 找同名桌面项取图标（OmniZip 的 app id 为程序名 `omnizip-desktop`），窗口自己设置的图标只对 X11 有效。软件包安装 `platform/linux/omnizip-desktop.desktop` 与图标；不经软件包运行时（开发构建、AppImage、压缩包），应用启动时把桌面项（`Exec` 指向自身，AppImage 取 `$APPIMAGE`）与 hicolor 图标装到 `$XDG_DATA_HOME`，内容变化才重写（`apps/desktop/src-tauri/src/desktop_entry.rs`）；开发构建的桌面项不出现在应用菜单（`NoDisplay`），但同样声明压缩包类型，才能在设置页设为默认程序。桌面项的 `MimeType` 与 Dolphin 服务菜单共用 `servicemenu::ARCHIVE_MIME_TYPES`，单元测试保证一致。
 
@@ -157,7 +157,7 @@ GUI 可执行文件接受：
 
 ```
 omnizip-desktop [--open <archive>]
-                [--shell open|extract-here|extract-smart|extract-to|add-zip|add-7z|add|test|mount|convert]
+                [--shell open|extract-smart|extract-folder|extract-to|extract-each|add-zip|add-7z|add|test|mount|convert|unmount]
                 [--cwd <dir>] [--files-from <list-file>] [<paths>…]
 ```
 

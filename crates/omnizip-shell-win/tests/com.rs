@@ -99,20 +99,20 @@ fn explorer_command_behaves_like_explorer_expects() {
             .iter()
             .map(|c| unsafe { c.GetCanonicalName() }.unwrap())
             .collect();
-        assert!(names.contains(&clsid_for(Some(Verb::ExtractHere))));
+        assert!(names.contains(&clsid_for(Some(Verb::ExtractSmart))));
         assert!(!names.contains(&clsid_for(Some(Verb::Convert))));
         assert!(!names.contains(&clsid_for(Some(Verb::Unmount))));
 
         // An archive shows extraction verbs and hides "Add to".
         let a = items(&zip);
         assert_eq!(state(&root, &a), ECS_ENABLED.0);
-        let here = command(clsid_for(Some(Verb::ExtractHere)));
-        let smart = command(clsid_for(Some(Verb::ExtractSmart)));
+        let here = command(clsid_for(Some(Verb::ExtractSmart)));
+        let folder = command(clsid_for(Some(Verb::ExtractFolder)));
         let add = command(clsid_for(Some(Verb::AddZip)));
         assert_eq!(state(&here, &a), ECS_ENABLED.0);
         assert_eq!(state(&add, &a), ECS_HIDDEN.0);
         assert_eq!(
-            text(unsafe { smart.GetTitle(&a) }.unwrap()),
+            text(unsafe { folder.GetTitle(&a) }.unwrap()),
             "Extract to \"photos-2026\\\""
         );
 
@@ -201,7 +201,7 @@ fn registration_round_trip_in_a_scratch_key() {
     assert!(
         windows_registry::CURRENT_USER
             .open(format!(
-                r"{BASE}\AllFilesystemObjects\shell\OmniZip.extract_here"
+                r"{BASE}\AllFilesystemObjects\shell\OmniZip.extract_smart"
             ))
             .is_ok()
     );
