@@ -41,6 +41,21 @@ pub enum Viewer {
 #[cfg(windows)]
 const OMNILOOK_PROTOCOL: u32 = 1;
 
+/// The call protocol of the Omni Look installed: 1 = `preview <file> --title`; 2 adds
+/// `--nav <pipe>` (the previous / next file inside an archive). 0 when there is none.
+#[cfg(windows)]
+pub fn omnilook_protocol() -> u32 {
+    windows_registry::CURRENT_USER
+        .open(r"Software\OmniLook")
+        .and_then(|k| k.get_u32("ProtocolVersion"))
+        .unwrap_or(0)
+}
+
+#[cfg(not(windows))]
+pub fn omnilook_protocol() -> u32 {
+    0
+}
+
 #[cfg(windows)]
 fn omnilook() -> Option<PathBuf> {
     let key = windows_registry::CURRENT_USER
@@ -184,19 +199,24 @@ fn spawn(program: impl AsRef<std::ffi::OsStr>, args: &[&std::ffi::OsStr]) -> std
     c.spawn().map(drop)
 }
 
-/// Shows `file` with `viewer`; `title` is what Omni Look displays instead of the cache path.
-pub fn launch(viewer: &Viewer, file: &Path, title: &str) -> std::io::Result<()> {
+/// Shows `file` with `viewer`; `title` is what Omni Look displays instead of the cache path,
+/// `nav` the pipe it asks for the previous / next file (protocol 2).
+pub fn launch(viewer: &Viewer, file: &Path, title: &str, nav: Option<&str>) -> std::io::Result<()> {
     match viewer {
         Viewer::Builtin => Ok(()),
-        Viewer::OmniLook(exe) => spawn(
-            exe,
-            &[
+        Viewer::OmniLook(exe) => {
+            let mut args: Vec<&std::ffi::OsStr> = vec![
                 "preview".as_ref(),
                 file.as_os_str(),
                 "--title".as_ref(),
                 title.as_ref(),
-            ],
-        ),
+            ];
+            if let Some(n) = nav {
+                args.push(std::ffi::OsStr::new("--nav"));
+                args.push(std::ffi::OsStr::new(n));
+            }
+            spawn(exe, &args)
+        }
         Viewer::App(exe) => spawn(exe, &[file.as_os_str()]),
         Viewer::Command(line) => {
             let (program, args) = command_line(line, file).ok_or_else(|| {

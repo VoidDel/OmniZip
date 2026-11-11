@@ -12,6 +12,8 @@ pub mod dragout;
 pub mod integration;
 pub mod jobs;
 pub mod launch;
+#[cfg(windows)]
+pub mod look_nav;
 pub mod mounts;
 pub mod ops;
 pub mod preview;

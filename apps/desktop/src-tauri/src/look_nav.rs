@@ -1,0 +1,204 @@
+//! OmniZip's side of Omni Look's protocol 2 (OmniLook `docs/development-plan.md` §6.3): a preview
+//! of an archive's entry asks, with the arrow keys, for the previous or next file. The answer is
+//! the file beside it in its folder, in the order the list shows, unpacked into the cache like the
+//! first; the list's selection follows.
+//!
+//! One pipe per OmniZip process, `\\.\pipe\omnizip-nav-<pid>-<user SID>`, open to the user only.
+//! One JSON line each way per connection:
+//!
+//! ```text
+//! → {"op":"next","path":"<the cache file shown>"}
+//! ← {"path":"<the next file's cache file>","title":"<archive> › <path inside>"}  or  {"end":true}
+//! ```
+
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufRead, BufReader, Write},
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
+
+use omnizip_core::{NodeId, SortKey};
+use omnizip_mountd::pipe::{self, Access};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::state::AppState;
+
+/// What a cache file handed to Omni Look is: an entry, and the order its folder was listed in.
+#[derive(Debug, Clone, Copy)]
+pub struct Served {
+    pub archive: u32,
+    pub node: NodeId,
+    pub key: SortKey,
+    pub desc: bool,
+}
+
+struct Nav {
+    name: String,
+    served: Mutex<HashMap<PathBuf, Served>>,
+}
+
+static NAV: OnceLock<Nav> = OnceLock::new();
+
+#[derive(Deserialize)]
+struct Ask {
+    op: String,
+    path: PathBuf,
+}
+
+#[derive(Serialize, Default)]
+struct Answer {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    end: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// The selection follows the preview (the browser selects and shows the entry).
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Moved {
+    archive: u32,
+    node: NodeId,
+}
+
+/// Notes what `file` is, for later questions about its neighbours.
+pub fn record(file: PathBuf, served: Served) {
+    if let Some(n) = NAV.get()
+        && let Ok(mut m) = n.served.lock()
+    {
+        m.insert(file, served);
+    }
+}
+
+/// The pipe's name, serving it from the first call on.
+pub fn pipe(app: &AppHandle) -> Option<String> {
+    if let Some(n) = NAV.get() {
+        return Some(n.name.clone());
+    }
+    let name = format!(
+        r"\\.\pipe\omnizip-nav-{}-{}",
+        std::process::id(),
+        pipe::user_sid().ok()?
+    );
+    let first = pipe::server(&name, true, Access::User).ok()?;
+    let nav = NAV.get_or_init(|| Nav {
+        name: name.clone(),
+        served: Mutex::new(HashMap::new()),
+    });
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("look-nav".into())
+        .spawn(move || {
+            let mut next = first;
+            loop {
+                if pipe::accept(&next).is_ok() {
+                    let conn = File::from(next);
+                    let app = app.clone();
+                    std::thread::spawn(move || connection(&app, conn));
+                }
+                next = match pipe::server(&name, false, Access::User) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("look navigation pipe: {e}");
+                        return;
+                    }
+                };
+            }
+        })
+        .ok()?;
+    Some(nav.name.clone())
+}
+
+fn connection(app: &AppHandle, conn: File) {
+    let mut line = String::new();
+    if BufReader::new(&conn).read_line(&mut line).is_err() {
+        return;
+    }
+    let answer = match serde_json::from_str::<Ask>(&line) {
+        Ok(ask) => answer(app, &ask),
+        Err(e) => Answer {
+            error: Some(e.to_string()),
+            ..Default::default()
+        },
+    };
+    let mut out = serde_json::to_string(&answer).unwrap_or_default();
+    out.push('\n');
+    let _ = (&conn).write_all(out.as_bytes());
+}
+
+fn answer(app: &AppHandle, ask: &Ask) -> Answer {
+    let fail = |e: String| Answer {
+        error: Some(e),
+        ..Default::default()
+    };
+    let Some(nav) = NAV.get() else {
+        return fail("not serving".into());
+    };
+    let Some(cur) = nav
+        .served
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&ask.path).copied())
+    else {
+        return fail("not a file OmniZip gave".into());
+    };
+    let state = app.state::<AppState>();
+    let Some(a) = state.archive(cur.archive) else {
+        return fail("the archive was closed".into());
+    };
+    let Some(cache) = state.cache_dir.clone() else {
+        return fail("no cache".into());
+    };
+    let Some(parent) = a.tree.node(cur.node).and_then(|n| n.parent) else {
+        return fail("no such entry".into());
+    };
+    // The folder's files in the list's order (folders come first there; they are skipped).
+    let page = a.tree.list(parent, cur.key, cur.desc, 0, usize::MAX);
+    let files: Vec<NodeId> = page
+        .items
+        .into_iter()
+        .filter(|&id| a.tree.node(id).is_some_and(|n| !n.is_dir))
+        .collect();
+    let Some(i) = files.iter().position(|&id| id == cur.node) else {
+        return fail("not in its folder".into());
+    };
+    let j = match ask.op.as_str() {
+        "prev" => i.checked_sub(1),
+        _ => Some(i + 1).filter(|&j| j < files.len()),
+    };
+    let Some(node) = j.map(|j| files[j]) else {
+        return Answer {
+            end: true,
+            ..Default::default()
+        };
+    };
+    match crate::commands::cache_entry(&a, node, &cache) {
+        Ok(file) => {
+            record(file.clone(), Served { node, ..cur });
+            let _ = app.emit(
+                "look://moved",
+                Moved {
+                    archive: cur.archive,
+                    node,
+                },
+            );
+            Answer {
+                title: Some(format!(
+                    "{} › {}",
+                    crate::ops::file_name(&a.path),
+                    a.tree.path(node)
+                )),
+                path: Some(file),
+                ..Default::default()
+            }
+        }
+        Err(e) => fail(e.to_string()),
+    }
+}

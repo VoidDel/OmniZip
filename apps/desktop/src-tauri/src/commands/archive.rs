@@ -258,7 +258,7 @@ fn row(a: &OpenedArchive, id: NodeId, with_parent: bool) -> Option<Row> {
     })
 }
 
-fn sort_key(s: &str) -> SortKey {
+pub(crate) fn sort_key(s: &str) -> SortKey {
     match s {
         "size" => SortKey::Size,
         "packed" => SortKey::Packed,
@@ -534,7 +534,7 @@ pub fn archive_set_password(
 /// the entry and the archive as they are now, so asking again reuses the file (Omni Look closes
 /// its preview when given the same file again), while an edited archive gets a new one. The file
 /// appears under its name only once complete, and carries the archive's "from the internet" mark.
-fn cache_entry(a: &OpenedArchive, node: NodeId, cache: &Path) -> Result<PathBuf, Error> {
+pub(crate) fn cache_entry(a: &OpenedArchive, node: NodeId, cache: &Path) -> Result<PathBuf, Error> {
     use std::hash::{Hash, Hasher};
     let n = a
         .tree
@@ -626,7 +626,14 @@ pub async fn archive_open_external(
 /// Previews one entry with the app chosen in the settings (`viewer.rs`). Returns `false` when the
 /// built-in preview is the one: nothing is extracted then, and the page shows its dialog.
 #[tauri::command]
-pub async fn archive_look(state: State<'_, AppState>, id: u32, node: NodeId) -> CmdResult<bool> {
+pub async fn archive_look(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: u32,
+    node: NodeId,
+    sort: String,
+    desc: bool,
+) -> CmdResult<bool> {
     let general = state.settings().general;
     let viewer = viewer::resolve(
         &general.preview,
@@ -642,7 +649,30 @@ pub async fn archive_look(state: State<'_, AppState>, id: u32, node: NodeId) -> 
         let file = cache_entry(&a, node, &cache)?;
         // Shown instead of the cache path: "archive.zip › folder/file.txt".
         let title = format!("{} › {}", ops::file_name(&a.path), a.tree.path(node));
-        viewer::launch(&viewer, &file, &title).map_err(|e| Error::io(e, &file))?;
+        // Omni Look 2 asks for the previous / next file in the list's order (`look_nav`).
+        #[cfg(windows)]
+        let nav = match &viewer {
+            viewer::Viewer::OmniLook(_) if viewer::omnilook_protocol() >= 2 => {
+                crate::look_nav::pipe(&app).inspect(|_| {
+                    crate::look_nav::record(
+                        file.clone(),
+                        crate::look_nav::Served {
+                            archive: a.id,
+                            node,
+                            key: sort_key(&sort),
+                            desc,
+                        },
+                    )
+                })
+            }
+            _ => None,
+        };
+        #[cfg(not(windows))]
+        let nav: Option<String> = {
+            let _ = (&app, &sort, desc);
+            None
+        };
+        viewer::launch(&viewer, &file, &title, nav.as_deref()).map_err(|e| Error::io(e, &file))?;
         Ok::<_, Error>(true)
     })
     .await

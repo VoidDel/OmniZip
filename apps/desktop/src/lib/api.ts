@@ -69,7 +69,7 @@ export const api = {
   setArchivePassword: (id: number, password: string) => invoke<void>('archive_set_password', { id, password }),
   openExternal: (id: number, node: number) => invoke<string>('archive_open_external', { id, node }),
   /** Previews an entry with the app the settings name; `false`: the built-in preview is the one. */
-  look: (id: number, node: number) => invoke<boolean>('archive_look', { id, node }),
+  look: (id: number, node: number, sort: string, desc: boolean) => invoke<boolean>('archive_look', { id, node, sort, desc }),
   previewViewers: () => invoke<Viewers>('preview_viewers'),
 
   extract: (request: ExtractRequest, window?: string) => invoke<number>('job_extract', { request, window: window ?? null }),

@@ -3,6 +3,7 @@
 // no more than a hundred.
 
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -167,8 +168,9 @@ export function Browser() {
     const slow = window.setTimeout(() => {
       toast = app.toast({ tone: 'info', text: t('preview.preparing'), sticky: true });
     }, 500);
+    const { key, desc } = useApp.getState().sort;
     api
-      .look(archive.id, node)
+      .look(archive.id, node, key, desc)
       .then((external) => {
         if (!external) openDialogSpec({ kind: 'preview', node });
       })
@@ -386,6 +388,26 @@ export function Browser() {
   };
 
   const scrollToIndex = (i: number) => virt.scrollToIndex(viewMode === 'grid' ? Math.floor(i / cols) : i, { align: 'auto' });
+
+  // Omni Look moved to the previous / next file of this archive (arrow keys in its window): the
+  // selection follows, as Explorer's does with its preview.
+  const followLook = useRef<(node: number) => void>(() => {});
+  followLook.current = (node: number) => {
+    select(new Set([node]), node);
+    const i = indexOf(node);
+    if (i >= 0) scrollToIndex(i);
+  };
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    void listen<{ archive: number; node: number }>('look://moved', (e) => {
+      if (e.payload.archive === archive.id) followLook.current(e.payload.node);
+    }).then((u) => (gone ? u() : (off = u)));
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, [archive.id]);
 
   // ---- box selection: the items are found by the same layout the list is drawn with.
   const boxBase = useRef<{ nodes: Set<number>; bytes: number; mode: 'replace' | 'add' | 'toggle' }>({ nodes: new Set(), bytes: 0, mode: 'replace' });
