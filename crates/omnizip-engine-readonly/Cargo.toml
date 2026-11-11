@@ -13,7 +13,6 @@ omnizip-core.workspace = true
 omnizip-engine-tar.workspace = true
 flate2.workspace = true
 roxmltree = "0.21"
-cab = "0.6"
 delharc = { version = "0.8", features = ["lhx"] }
 crc32fast.workspace = true
 lzxd = "0.2"

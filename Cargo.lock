@@ -469,18 +469,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cab"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171228650e6721d5acc0868a462cd864f49ac5f64e4a42cde270406e64e404d2"
-dependencies = [
- "byteorder",
- "flate2",
- "lzxd",
- "time",
-]
-
-[[package]]
 name = "cairo-rs"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3156,7 +3144,6 @@ dependencies = [
 name = "omnizip-engine-readonly"
 version = "0.1.0"
 dependencies = [
- "cab",
  "crc32fast",
  "delharc",
  "flate2",
