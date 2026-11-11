@@ -371,6 +371,7 @@
   },
   "preview": {
     "title": "预览",
+    "preparing": "正在准备预览…",
     "unsupported": "此类文件暂不支持预览",
     "openWith": "用默认程序打开",
     "truncated": "只显示文件开头部分",
@@ -409,7 +410,18 @@
       "closeTrayHint": "通知区域的图标可打开 OmniZip、卸载挂载和退出；任务在后台继续运行。",
       "notify": "任务完成时发送通知",
       "notifyHint": "仅在 OmniZip 处于后台时",
-      "openAfter": "解压后打开目标文件夹"
+      "openAfter": "解压后打开目标文件夹",
+      "preview": "预览方式",
+      "previewAuto": "自动",
+      "previewBuiltin": "内置预览",
+      "previewMissing": "{app}（未安装）",
+      "previewCustom": "自定义命令",
+      "previewSystem": "用默认程序打开",
+      "previewAutoLook": "已安装 Omni Look，按空格时用它预览",
+      "previewAutoBuiltin": "装有 Omni Look 时用它预览，否则用内置预览",
+      "previewSystemHint": "按空格时用系统为该类型设定的程序打开",
+      "previewCustomHint": "文件先解压到缓存，再交给命令；'{file}' 代表文件路径",
+      "previewCommand": "预览命令"
     },
     "appearance": {
       "mode": "模式",
@@ -560,6 +572,7 @@
       "family": "同家族应用",
       "familyHint": "共用同一套设计系统与主题",
       "omniDownloadHint": "Omni Download 下载管理器，共用设计系统与主题",
+      "omniLookHint": "Omni Look 快速预览工具，按快捷键预览文件，共用设计系统与主题",
       "learnAbout": "了解 {app}"
     }
   },

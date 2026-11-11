@@ -20,6 +20,7 @@ pub mod state;
 pub mod system;
 pub mod theme;
 pub mod tray;
+pub mod viewer;
 #[cfg(windows)]
 mod win_icon;
 pub mod windows;
@@ -354,6 +355,8 @@ pub fn run() {
             commands::archive_preview,
             commands::archive_set_password,
             commands::archive_open_external,
+            commands::archive_look,
+            commands::preview_viewers,
             commands::draft_new,
             commands::draft_mkdir,
             commands::job_extract,

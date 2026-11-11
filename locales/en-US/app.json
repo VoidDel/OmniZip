@@ -371,6 +371,7 @@
   },
   "preview": {
     "title": "Preview",
+    "preparing": "Preparing the preview…",
     "unsupported": "No preview for this kind of file",
     "openWith": "Open with default app",
     "truncated": "Showing the beginning of the file",
@@ -409,7 +410,18 @@
       "closeTrayHint": "The notification-area icon opens OmniZip, unmounts archives and quits; tasks keep running in the background.",
       "notify": "Notify when a task finishes",
       "notifyHint": "Only when OmniZip is in the background",
-      "openAfter": "Open the folder after extracting"
+      "openAfter": "Open the folder after extracting",
+      "preview": "Preview with",
+      "previewAuto": "Automatic",
+      "previewBuiltin": "Built-in preview",
+      "previewMissing": "{app} (not installed)",
+      "previewCustom": "Custom command",
+      "previewSystem": "Default app",
+      "previewAutoLook": "Omni Look is installed: Space previews with it",
+      "previewAutoBuiltin": "Omni Look when it is installed, the built-in preview otherwise",
+      "previewSystemHint": "Space opens the file with the app Windows uses for its type",
+      "previewCustomHint": "The file is extracted to the cache, then given to the command; '{file}' stands for its path",
+      "previewCommand": "Preview command"
     },
     "appearance": {
       "mode": "Mode",
@@ -560,6 +572,7 @@
       "family": "Also in the family",
       "familyHint": "Sharing one design system and its themes",
       "omniDownloadHint": "Omni Download, the download manager, with the same design and themes",
+      "omniLookHint": "Omni Look, the quick previewer: a hotkey previews files, with the same design and themes",
       "learnAbout": "Learn about {app}"
     }
   },

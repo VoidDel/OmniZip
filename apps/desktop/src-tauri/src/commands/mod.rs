@@ -32,7 +32,7 @@ use crate::{
     state::{AppState, OpenedArchive, RecentItem},
     system::{self, SystemInfo},
     theme::{self, ResolveOptions, ResolvedTheme, ThemeSummary},
-    windows,
+    viewer, windows,
 };
 
 mod app;

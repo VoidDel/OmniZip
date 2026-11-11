@@ -203,9 +203,17 @@ pub fn open_homepage() -> CmdResult<()> {
 pub fn open_family_app(app: String) -> CmdResult<()> {
     let url = match app.as_str() {
         "omni-download" => "https://github.com/VoidDel/OmniDownloadeManager",
+        "omni-look" => "https://github.com/VoidDel/OmniLook",
         _ => return Err(err(Error::internal(format!("no such app: {app}")))),
     };
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| err(Error::internal(e)))
+}
+
+/// The preview apps installed (Settings › General › Preview with). A few file checks and a
+/// registry read, off the main thread all the same.
+#[tauri::command]
+pub async fn preview_viewers() -> CmdResult<viewer::Viewers> {
+    off_main(viewer::detect).await
 }
 
 /// Opens the download page of the mount driver (WinFsp), for the settings page.

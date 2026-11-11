@@ -19,6 +19,16 @@ export interface ErrorReport {
   message: string;
 }
 
+export type PreviewWith = 'auto' | 'builtin' | 'omnilook' | 'peek' | 'quicklook' | 'seer' | 'custom' | 'system';
+
+/** The preview apps installed: their executables, `null` when not found. */
+export interface Viewers {
+  omnilook: string | null;
+  peek: string | null;
+  quicklook: string | null;
+  seer: string | null;
+}
+
 export interface Settings {
   schema_version: number;
   general: {
@@ -27,6 +37,10 @@ export interface Settings {
     close_behavior: 'exit' | 'tray';
     notify: boolean;
     open_after_extract: boolean;
+    /** Who previews an entry (Space); `auto` is Omni Look when installed (`viewer.rs`). */
+    preview: PreviewWith;
+    /** The command for `custom`; `{file}` stands for the file. */
+    preview_command: string;
   };
   appearance: {
     mode: 'system' | 'light' | 'dark';

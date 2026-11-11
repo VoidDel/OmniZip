@@ -28,6 +28,7 @@ import type {
   MountTarget,
   ShellStatus,
   ThemeSummary,
+  Viewers,
   TreeItem,
 } from './types';
 
@@ -67,6 +68,9 @@ export const api = {
   preview: (id: number, node: number) => invoke<Preview>('archive_preview', { id, node }),
   setArchivePassword: (id: number, password: string) => invoke<void>('archive_set_password', { id, password }),
   openExternal: (id: number, node: number) => invoke<string>('archive_open_external', { id, node }),
+  /** Previews an entry with the app the settings name; `false`: the built-in preview is the one. */
+  look: (id: number, node: number) => invoke<boolean>('archive_look', { id, node }),
+  previewViewers: () => invoke<Viewers>('preview_viewers'),
 
   extract: (request: ExtractRequest, window?: string) => invoke<number>('job_extract', { request, window: window ?? null }),
   compress: (request: CompressRequest, window?: string) => invoke<number>('job_compress', { request, window: window ?? null }),
@@ -123,7 +127,7 @@ export const api = {
   formatSetDefault: (keys: string[], on: boolean) => invoke<Record<string, boolean>>('format_set_default', { keys, on }),
   openHomepage: () => invoke<void>('open_homepage'),
   /** The page of another app of the Omni family (Settings › About). */
-  openFamilyApp: (app: 'omni-download') => invoke<void>('open_family_app', { app }),
+  openFamilyApp: (app: 'omni-download' | 'omni-look') => invoke<void>('open_family_app', { app }),
   shellStatus: () => invoke<ShellStatus>('shell_status'),
   mountProbe: () => invoke<MountProbe>('mount_probe'),
   mounts: () => invoke<MountInfo[]>('mount_list'),

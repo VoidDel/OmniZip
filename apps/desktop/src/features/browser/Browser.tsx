@@ -155,9 +155,34 @@ export function Browser() {
     }
   };
 
+  // Space / Enter on a file: the app the settings name (Omni Look, Peek, …) gets it from the cache,
+  // otherwise the built-in dialog shows it. One at a time: the same file twice while it is still
+  // being written would write it twice. A large entry takes a while: say so after a moment.
+  const looking = useRef(false);
+  const preview = (node: number) => {
+    if (looking.current) return;
+    looking.current = true;
+    const app = useApp.getState();
+    let toast: number | null = null;
+    const slow = window.setTimeout(() => {
+      toast = app.toast({ tone: 'info', text: t('preview.preparing'), sticky: true });
+    }, 500);
+    api
+      .look(archive.id, node)
+      .then((external) => {
+        if (!external) openDialogSpec({ kind: 'preview', node });
+      })
+      .catch((e) => app.reportError(e))
+      .finally(() => {
+        window.clearTimeout(slow);
+        if (toast != null) app.dismissToast(toast);
+        looking.current = false;
+      });
+  };
+
   const openRow = (r: Row) => {
     if (r.isDir) navigate(r.node);
-    else openDialogSpec({ kind: 'preview', node: r.node });
+    else preview(r.node);
   };
 
   // ---- commands
@@ -501,7 +526,7 @@ export function Browser() {
         break;
       case e.key === ' ':
         e.preventDefault();
-        if (focused && !focused.isDir) openDialogSpec({ kind: 'preview', node: focused.node });
+        if (focused && !focused.isDir) preview(focused.node);
         break;
       case mod && e.key.toLowerCase() === 'a':
         e.preventDefault();

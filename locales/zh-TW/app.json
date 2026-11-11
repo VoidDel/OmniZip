@@ -371,6 +371,7 @@
   },
   "preview": {
     "title": "預覽",
+    "preparing": "正在準備預覽…",
     "unsupported": "此類檔案暫不支援預覽",
     "openWith": "以預設程式開啟",
     "truncated": "只顯示檔案開頭部分",
@@ -409,7 +410,18 @@
       "closeTrayHint": "通知區域的圖示可開啟 OmniZip、卸載掛載和結束；工作在背景繼續執行。",
       "notify": "工作完成時傳送通知",
       "notifyHint": "僅在 OmniZip 位於背景時",
-      "openAfter": "解壓縮後開啟目標資料夾"
+      "openAfter": "解壓縮後開啟目標資料夾",
+      "preview": "預覽方式",
+      "previewAuto": "自動",
+      "previewBuiltin": "內建預覽",
+      "previewMissing": "{app}（未安裝）",
+      "previewCustom": "自訂命令",
+      "previewSystem": "用預設程式開啟",
+      "previewAutoLook": "已安裝 Omni Look，按空白鍵時用它預覽",
+      "previewAutoBuiltin": "裝有 Omni Look 時用它預覽，否則用內建預覽",
+      "previewSystemHint": "按空白鍵時用系統為該類型設定的程式開啟",
+      "previewCustomHint": "檔案先解壓縮到快取，再交給命令；'{file}' 代表檔案路徑",
+      "previewCommand": "預覽命令"
     },
     "appearance": {
       "mode": "模式",
@@ -560,6 +572,7 @@
       "family": "同家族應用程式",
       "familyHint": "共用同一套設計系統與主題",
       "omniDownloadHint": "Omni Download 下載管理器，共用設計系統與主題",
+      "omniLookHint": "Omni Look 快速預覽工具，按快速鍵預覽檔案，共用設計系統與主題",
       "learnAbout": "了解 {app}"
     }
   },

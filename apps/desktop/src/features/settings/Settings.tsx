@@ -1,6 +1,7 @@
 // Settings (docs/04-ui-design.md §4.9, docs/05-theming.md, docs/06-i18n.md).
 
 import omniDownloadIcon from '@icons/family/omni-download.svg';
+import omniLookIcon from '@icons/family/omni-look.svg';
 import { open } from '@tauri-apps/plugin-dialog';
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
@@ -11,7 +12,7 @@ import { Segmented, Select as Choice, Switch } from '../../components/ui';
 import { normalizeLang } from '../../i18n';
 import { api } from '../../lib/api';
 import { useFmt } from '../../lib/hooks';
-import type { Bootstrap, MountProbe, Settings as S, ShellStatus, ThemeSummary } from '../../lib/types';
+import type { Bootstrap, MountProbe, PreviewWith, Settings as S, ShellStatus, ThemeSummary, Viewers } from '../../lib/types';
 import { type SettingsTab, mountRoot, useApp } from '../../store/app';
 
 /** Sections of the settings page: listed in the sidebar, and above the page in narrow windows. */
@@ -30,9 +31,74 @@ const ACCENTS = ['#2F6FED', '#5B8CFF', '#7A5AF8', '#C2410C', '#B8641B', '#D4587A
 
 /** The Omni family's other apps (Settings › About): name, icon, a line about it, and the id
  *  `open_family_app` knows. One entry per app as more join. */
-const FAMILY: { id: 'omni-download'; name: string; icon: string; hint: string }[] = [
+const FAMILY: { id: 'omni-download' | 'omni-look'; name: string; icon: string; hint: string }[] = [
   { id: 'omni-download', name: 'Omni Download', icon: omniDownloadIcon, hint: 'settings.about.omniDownloadHint' },
+  { id: 'omni-look', name: 'Omni Look', icon: omniLookIcon, hint: 'settings.about.omniLookHint' },
 ];
+
+/** Settings › General › Preview with: the apps found are offered, the others only while chosen
+ *  (so a setting never shows blank); a custom command gets a field, saved when left. */
+function PreviewWithRow({ settings, set }: { settings: S; set: (f: (s: S) => void) => void }) {
+  const { t } = useTranslation();
+  const [found, setFound] = useState<Viewers | null>(null);
+  const [command, setCommand] = useState(settings.general.preview_command);
+  useEffect(() => {
+    void api.previewViewers().then(setFound).catch(() => setFound(null));
+  }, []);
+  const value = settings.general.preview;
+  const apps: [PreviewWith, string, keyof Viewers][] = [
+    ['omnilook', 'Omni Look', 'omnilook'],
+    ['peek', 'PowerToys Peek', 'peek'],
+    ['quicklook', 'QuickLook', 'quicklook'],
+    ['seer', 'Seer', 'seer'],
+  ];
+  const options: [PreviewWith, string][] = [
+    ['auto', t('settings.general.previewAuto')],
+    ['builtin', t('settings.general.previewBuiltin')],
+    ...apps
+      .filter(([v, , key]) => found?.[key] || v === value)
+      .map(([v, name, key]): [PreviewWith, string] => [v, found?.[key] ? name : t('settings.general.previewMissing', { app: name })]),
+    ['custom', t('settings.general.previewCustom')],
+    ['system', t('settings.general.previewSystem')],
+  ];
+  const hint =
+    value === 'auto'
+      ? found?.omnilook
+        ? t('settings.general.previewAutoLook')
+        : t('settings.general.previewAutoBuiltin')
+      : value === 'system'
+        ? t('settings.general.previewSystemHint')
+        : value === 'custom'
+          ? t('settings.general.previewCustomHint')
+          : undefined;
+  const save = () => {
+    if (command !== settings.general.preview_command) set((s) => (s.general.preview_command = command));
+  };
+  return (
+    <>
+      <Row label={t('settings.general.preview')} hint={hint}>
+        <Select label={t('settings.general.preview')} value={value} onChange={(v) => set((s) => (s.general.preview = v))} options={options} />
+      </Row>
+      {value === 'custom' && (
+        <Row label={t('settings.general.previewCommand')}>
+          <input
+            className="inp mono"
+            value={command}
+            placeholder='"C:\Tools\viewer.exe" "{file}"'
+            aria-label={t('settings.general.previewCommand')}
+            spellCheck={false}
+            style={{ width: 'min(360px, 100%)' }}
+            onChange={(e) => setCommand(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') save();
+            }}
+          />
+        </Row>
+      )}
+    </>
+  );
+}
 
 function Row({ label, hint, children, col }: { label: ReactNode; hint?: ReactNode; children?: ReactNode; col?: boolean }) {
   return (
@@ -450,6 +516,7 @@ export function SettingsView() {
               <Row label={t('settings.general.openAfter')}>
                 <Switch label={t('settings.general.openAfter')} checked={settings.general.open_after_extract} onChange={(v) => set((s) => (s.general.open_after_extract = v))} />
               </Row>
+              <PreviewWithRow settings={settings} set={set} />
               <Row label={t('settings.general.notify')} hint={t('settings.general.notifyHint')}>
                 <Switch label={t('settings.general.notify')} checked={settings.general.notify} onChange={(v) => set((s) => (s.general.notify = v))} />
               </Row>

@@ -371,6 +371,7 @@
   },
   "preview": {
     "title": "プレビュー",
+    "preparing": "プレビューを準備しています…",
     "unsupported": "この種類のファイルはプレビューできません",
     "openWith": "既定のアプリで開く",
     "truncated": "ファイルの先頭部分のみ表示しています",
@@ -409,7 +410,18 @@
       "closeTrayHint": "通知領域のアイコンから OmniZip を開く・アンマウント・終了ができます。タスクはバックグラウンドで続行します。",
       "notify": "タスク完了時に通知",
       "notifyHint": "OmniZip がバックグラウンドのときのみ",
-      "openAfter": "展開後にフォルダーを開く"
+      "openAfter": "展開後にフォルダーを開く",
+      "preview": "プレビュー方法",
+      "previewAuto": "自動",
+      "previewBuiltin": "内蔵プレビュー",
+      "previewMissing": "{app}（未インストール）",
+      "previewCustom": "カスタムコマンド",
+      "previewSystem": "既定のアプリで開く",
+      "previewAutoLook": "Omni Look がインストールされています。スペースキーで Omni Look がプレビューします",
+      "previewAutoBuiltin": "Omni Look があればそれを、なければ内蔵プレビューを使います",
+      "previewSystemHint": "スペースキーで、その種類に設定されたアプリでファイルを開きます",
+      "previewCustomHint": "ファイルをキャッシュに展開してからコマンドに渡します。'{file}' はファイルのパスです",
+      "previewCommand": "プレビューコマンド"
     },
     "appearance": {
       "mode": "モード",
@@ -560,6 +572,7 @@
       "family": "同じファミリーのアプリ",
       "familyHint": "同じデザインシステムとテーマを共有しています",
       "omniDownloadHint": "ダウンロードマネージャー Omni Download。デザインとテーマを共有しています",
+      "omniLookHint": "クイックプレビューツール Omni Look。ショートカットキーでファイルをプレビュー。デザインとテーマを共有しています",
       "learnAbout": "{app} について"
     }
   },

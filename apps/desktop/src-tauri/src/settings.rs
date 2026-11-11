@@ -49,6 +49,11 @@ pub struct General {
     pub notify: bool,
     /// Open the destination folder after extracting.
     pub open_after_extract: bool,
+    /// Who previews an entry (Space): `auto` (Omni Look when installed, otherwise built in),
+    /// `builtin`, `omnilook`, `peek`, `quicklook`, `seer`, `custom` or `system` (`viewer.rs`).
+    pub preview: String,
+    /// The command for `custom`; `{file}` stands for the file.
+    pub preview_command: String,
 }
 
 impl Default for General {
@@ -59,6 +64,8 @@ impl Default for General {
             close_behavior: "exit".into(),
             notify: true,
             open_after_extract: true,
+            preview: "auto".into(),
+            preview_command: String::new(),
         }
     }
 }

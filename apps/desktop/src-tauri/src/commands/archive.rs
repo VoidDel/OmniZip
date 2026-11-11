@@ -529,6 +529,75 @@ pub fn archive_set_password(
     Ok(())
 }
 
+/// Writes one entry to the cache for another program, as it is decoded (an entry of any size
+/// passes through a buffer, never memory whole), and returns the file. The folder is named after
+/// the entry and the archive as they are now, so asking again reuses the file (Omni Look closes
+/// its preview when given the same file again), while an edited archive gets a new one. The file
+/// appears under its name only once complete, and carries the archive's "from the internet" mark.
+fn cache_entry(a: &OpenedArchive, node: NodeId, cache: &Path) -> Result<PathBuf, Error> {
+    use std::hash::{Hash, Hasher};
+    let n = a
+        .tree
+        .node(node)
+        .ok_or_else(|| Error::invalid_argument("no such node"))?;
+    let entry = n
+        .entry
+        .ok_or_else(|| Error::invalid_argument("not a file"))?;
+    let safe = omnizip_core::path::sanitize(
+        &n.name,
+        omnizip_core::path::TargetOs::current(),
+        omnizip_core::path::UnsafePathMode::Strip,
+    )?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (
+        &a.path,
+        std::fs::metadata(&a.path).and_then(|m| m.modified()).ok(),
+    )
+        .hash(&mut h);
+    (a.tree.path(node), n.size, n.mtime).hash(&mut h);
+    let dir = cache
+        .join("open")
+        .join(format!("{}-{node}-{:08x}", a.id, h.finish() as u32));
+    let file = dir.join(safe.file_name());
+    if file.is_file() {
+        return Ok(file);
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| Error::io(e, &dir))?;
+    let part = dir.join(".part");
+    let ctx = match a.password.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        Some(p) => omnizip_core::JobCtx::new(
+            Arc::new(omnizip_core::NullProgress),
+            Arc::new(omnizip_core::FixedPassword(p)),
+        ),
+        None => omnizip_core::JobCtx::default(),
+    };
+    let size = a.info.archive_size;
+    let written = match a.reader.try_lock() {
+        Ok(mut r) => omnizip_core::extract_entry(r.as_mut(), entry, &part, size, &ctx),
+        // A job is using the archive: read through a second handle.
+        Err(_) => ops::reopen(a).and_then(|fresh| {
+            let mut r = fresh.reader.lock().unwrap_or_else(|e| e.into_inner());
+            omnizip_core::extract_entry(r.as_mut(), entry, &part, size, &ctx)
+        }),
+    };
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
+    }
+    std::fs::rename(&part, &file).map_err(|e| Error::io(e, &file))?;
+    if let Some(origin) = omnizip_core::origin::read(&a.path) {
+        let _ = omnizip_core::origin::apply(&file, &origin);
+    }
+    Ok(file)
+}
+
+fn cache_dir(state: &AppState) -> CmdResult<PathBuf> {
+    state
+        .cache_dir
+        .clone()
+        .ok_or_else(|| err(Error::internal("no cache dir")))
+}
+
 /// Extracts one entry into the cache and opens it with the system application.
 #[tauri::command]
 pub async fn archive_open_external(
@@ -537,26 +606,38 @@ pub async fn archive_open_external(
     node: NodeId,
 ) -> CmdResult<String> {
     let a = archive(&state, id)?;
-    let cache = state
-        .cache_dir
-        .clone()
-        .ok_or_else(|| err(Error::internal("no cache dir")))?;
+    let cache = cache_dir(&state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let (name, data, _) = read_node(&a, node, usize::MAX >> 1)?;
-        let safe = omnizip_core::path::sanitize(
-            &name,
-            omnizip_core::path::TargetOs::current(),
-            omnizip_core::path::UnsafePathMode::Strip,
-        )?;
-        let dir = cache.join("open").join(format!("{}-{node}", a.id));
-        std::fs::create_dir_all(&dir).map_err(|e| Error::io(e, &dir))?;
-        let file = dir.join(safe.file_name());
-        std::fs::write(&file, data).map_err(|e| Error::io(e, &file))?;
-        if let Some(origin) = omnizip_core::origin::read(&a.path) {
-            let _ = omnizip_core::origin::apply(&file, &origin);
-        }
+        let file = cache_entry(&a, node, &cache)?;
         tauri_plugin_opener::open_path(&file, None::<&str>).map_err(Error::internal)?;
         Ok::<_, Error>(file.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| err(Error::internal(e)))?
+    .map_err(err)
+}
+
+/// Previews one entry with the app chosen in the settings (`viewer.rs`). Returns `false` when the
+/// built-in preview is the one: nothing is extracted then, and the page shows its dialog.
+#[tauri::command]
+pub async fn archive_look(state: State<'_, AppState>, id: u32, node: NodeId) -> CmdResult<bool> {
+    let general = state.settings().general;
+    let viewer = viewer::resolve(
+        &general.preview,
+        &general.preview_command,
+        &viewer::detect(),
+    );
+    if viewer == viewer::Viewer::Builtin {
+        return Ok(false);
+    }
+    let a = archive(&state, id)?;
+    let cache = cache_dir(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = cache_entry(&a, node, &cache)?;
+        // Shown instead of the cache path: "archive.zip › folder/file.txt".
+        let title = format!("{} › {}", ops::file_name(&a.path), a.tree.path(node));
+        viewer::launch(&viewer, &file, &title).map_err(|e| Error::io(e, &file))?;
+        Ok::<_, Error>(true)
     })
     .await
     .map_err(|e| err(Error::internal(e)))?
