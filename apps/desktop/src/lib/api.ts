@@ -122,6 +122,8 @@ export const api = {
   /** Linux: makes OmniZip open `keys`, or gives them back to the previous default; the new state. */
   formatSetDefault: (keys: string[], on: boolean) => invoke<Record<string, boolean>>('format_set_default', { keys, on }),
   openHomepage: () => invoke<void>('open_homepage'),
+  /** The page of another app of the Omni family (Settings › About). */
+  openFamilyApp: (app: 'omni-download') => invoke<void>('open_family_app', { app }),
   shellStatus: () => invoke<ShellStatus>('shell_status'),
   mountProbe: () => invoke<MountProbe>('mount_probe'),
   mounts: () => invoke<MountInfo[]>('mount_list'),

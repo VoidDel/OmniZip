@@ -197,6 +197,17 @@ pub fn open_homepage() -> CmdResult<()> {
         .map_err(|e| err(Error::internal(e)))
 }
 
+/// Opens the page of another app of the Omni family (settings, About), by name: the addresses are
+/// fixed here for the same reason as the homepage's.
+#[tauri::command]
+pub fn open_family_app(app: String) -> CmdResult<()> {
+    let url = match app.as_str() {
+        "omni-download" => "https://github.com/VoidDel/OmniDownloadeManager",
+        _ => return Err(err(Error::internal(format!("no such app: {app}")))),
+    };
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| err(Error::internal(e)))
+}
+
 /// Opens the download page of the mount driver (WinFsp), for the settings page.
 #[tauri::command]
 pub fn open_mount_driver_page() -> CmdResult<()> {

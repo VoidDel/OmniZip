@@ -557,7 +557,11 @@
       "license": "License",
       "components": "Built with",
       "engines": "Format engines",
-      "source": "Source code"
+      "source": "Source code",
+      "family": "Also in the family",
+      "familyHint": "Sharing one design system and its themes",
+      "omniDownloadHint": "Omni Download, the download manager, with the same design and themes",
+      "learnAbout": "Learn about {app}"
     }
   },
   "errors": {

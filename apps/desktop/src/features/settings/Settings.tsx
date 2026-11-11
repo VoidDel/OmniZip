@@ -1,5 +1,6 @@
 // Settings (docs/04-ui-design.md §4.9, docs/05-theming.md, docs/06-i18n.md).
 
+import omniDownloadIcon from '@icons/family/omni-download.svg';
 import { open } from '@tauri-apps/plugin-dialog';
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
@@ -27,6 +28,12 @@ export const SETTINGS_TABS: [SettingsTab, IconName][] = [
 ];
 
 const ACCENTS = ['#2F6FED', '#5B8CFF', '#7A5AF8', '#C2410C', '#B8641B', '#D4587A', '#DB2777', '#0E9F8E', '#1E9E63', '#4D7C0F', '#0891B2', '#64748B'];
+
+/** The Omni family's other apps (Settings › About): name, icon, a line about it, and the id
+ *  `open_family_app` knows. One entry per app as more join. */
+const FAMILY: { id: 'omni-download'; name: string; icon: string; hint: string }[] = [
+  { id: 'omni-download', name: 'Omni Download', icon: omniDownloadIcon, hint: 'settings.about.omniDownloadHint' },
+];
 
 function Row({ label, hint, children, col }: { label: ReactNode; hint?: ReactNode; children?: ReactNode; col?: boolean }) {
   return (
@@ -743,6 +750,24 @@ export function SettingsView() {
                 <div className="chips">
                   {['Tauri 2', 'React 19', 'zip', 'sevenz-rust2', 'tar', 'flate2 · zlib-rs', 'liblzma', 'zstd', 'lz4_flex', 'brotli', 'unrar', 'chardetng', 'Fluent', 'i18next'].map((c) => (
                     <span key={c} className="chip">{c}</span>
+                  ))}
+                </div>
+              </Row>
+              {/* The other apps of the Omni family: a card each. */}
+              <Row col label={t('settings.about.family')} hint={t('settings.about.familyHint')}>
+                <div className="family-apps">
+                  {FAMILY.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="family-app"
+                      title={t(a.hint)}
+                      aria-label={t('settings.about.learnAbout', { app: a.name })}
+                      onClick={() => void api.openFamilyApp(a.id).catch((e) => useApp.getState().reportError(e))}
+                    >
+                      <img src={a.icon} width={40} height={40} alt="" draggable={false} />
+                      <span>{a.name}</span>
+                    </button>
                   ))}
                 </div>
               </Row>

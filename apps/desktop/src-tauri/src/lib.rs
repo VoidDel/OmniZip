@@ -387,6 +387,7 @@ pub fn run() {
             commands::format_defaults,
             commands::format_set_default,
             commands::open_homepage,
+            commands::open_family_app,
             commands::shell_status,
             commands::shell_request,
             commands::mount_probe,

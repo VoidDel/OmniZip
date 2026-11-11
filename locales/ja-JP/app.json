@@ -557,7 +557,11 @@
       "license": "ライセンス",
       "components": "使用コンポーネント",
       "engines": "形式エンジン",
-      "source": "ソースコード"
+      "source": "ソースコード",
+      "family": "同じファミリーのアプリ",
+      "familyHint": "同じデザインシステムとテーマを共有しています",
+      "omniDownloadHint": "ダウンロードマネージャー Omni Download。デザインとテーマを共有しています",
+      "learnAbout": "{app} について"
     }
   },
   "errors": {

@@ -557,7 +557,11 @@
       "license": "许可证",
       "components": "构建组件",
       "engines": "格式引擎",
-      "source": "源代码"
+      "source": "源代码",
+      "family": "同家族应用",
+      "familyHint": "共用同一套设计系统与主题",
+      "omniDownloadHint": "Omni Download 下载管理器，共用设计系统与主题",
+      "learnAbout": "了解 {app}"
     }
   },
   "errors": {

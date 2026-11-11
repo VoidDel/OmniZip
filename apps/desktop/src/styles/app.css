@@ -66,6 +66,20 @@
 .home h3 { margin: 0; font-size: .95rem; font-weight: 600; }
 .home .sect button { color: var(--fg-secondary); font-size: .86rem; }
 
+/* ---------------------------------------------------------------- settings: about */
+/* The Omni family's other apps: a card each, the icon over the name (as in Omni Download). */
+.family-apps { display: flex; flex-wrap: wrap; gap: 12px; }
+.family-app {
+  width: 112px; padding: 14px 8px 12px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface);
+  color: var(--fg-primary); font-size: .86rem; font-weight: 500; text-align: center;
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+.family-app:hover:not(:disabled) { border-color: var(--border-default); box-shadow: var(--shadow-1); }
+.family-app:disabled { cursor: default; }
+.family-app img { display: block; flex: none; }
+.family-app span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------------------------------------------------------------- settings: menu preview, formats */
 .menu-prev-box { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; max-width: 100%; }
 .menu-prev-row { display: flex; align-items: flex-start; gap: 2px; flex-wrap: wrap; max-width: 100%; }
