@@ -113,10 +113,20 @@ mod tests {
         }
         assert!(r.capabilities(FormatId::Rar).contains(Capabilities::READ));
         assert!(!r.capabilities(FormatId::Rar).contains(Capabilities::WRITE));
-        assert!(
-            r.engine(FormatId::Iso).is_none(),
-            "ISO arrives with libarchive in M2"
-        );
+        // Tier 2 formats this build reads: read-only, never written.
+        for f in [
+            FormatId::Iso,
+            FormatId::Ar,
+            FormatId::Deb,
+            FormatId::Cpio,
+            FormatId::Rpm,
+            FormatId::Xar,
+            FormatId::Split,
+        ] {
+            let caps = r.capabilities(f);
+            assert!(caps.contains(Capabilities::READ), "{f} must be readable");
+            assert!(!caps.contains(Capabilities::WRITE), "{f} is read-only");
+        }
     }
 
     #[test]
