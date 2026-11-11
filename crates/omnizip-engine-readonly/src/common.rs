@@ -2,9 +2,11 @@
 //! entry lists walked from a decoded stream ([`Streamed`]), and name decoding.
 
 use std::{
+    collections::HashMap,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
     sync::Arc,
+    time::SystemTime,
 };
 
 use omnizip_core::{
@@ -65,6 +67,40 @@ pub(crate) fn entry_path(name: &str, kind: EntryKind) -> Option<String> {
     })
 }
 
+/// A calendar time `offset` seconds east of UTC as a `SystemTime`. `None` for impossible
+/// dates and for times before 1970.
+pub(crate) fn utc_time(
+    year: i64,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    offset: i64,
+) -> Option<SystemTime> {
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    // Days since 1970-01-01 (H. Hinnant's days_from_civil).
+    let m = i64::from(month);
+    let y = if m <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second)
+        - offset;
+    u64::try_from(secs)
+        .ok()
+        .map(omnizip_core::timeutil::from_unix_secs)
+}
+
 pub(crate) fn corrupt(what: impl std::fmt::Display, path: &Path) -> Error {
     Error::new(ErrorCode::Corrupt)
         .detail(what)
@@ -111,17 +147,62 @@ impl<R: Read> Read for Exact<'_, R> {
     }
 }
 
-/// An archive whose files lie as they are in the input: each has a byte range.
+/// How one file's data is compressed, in formats that compress each file on its own (XAR).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Coding {
+    /// A zlib stream (XAR calls it `application/x-gzip`).
+    Zlib,
+    Codec(omnizip_core::Codec),
+}
+
+/// An archive whose files each lie in one byte range of the input (several for the rare file
+/// in several extents), stored as they are or compressed on their own.
 #[derive(Clone)]
 pub(crate) struct Stored {
     pub info: ArchiveInfo,
     pub entries: Arc<[Entry]>,
     /// Per entry, where a file's data lies in the input: `(offset, length)`.
     pub ranges: Arc<[Option<(u64, u64)>]>,
+    /// Files in several pieces (ISO multi-extent files): the pieces in order. `ranges` has
+    /// none for them.
+    pub chains: Arc<HashMap<EntryId, Vec<(u64, u64)>>>,
+    /// Per entry, how its data is compressed (empty: nothing is).
+    pub codings: Arc<[Option<Coding>]>,
     pub input: SharedInput,
     /// The input is the archive file itself (not a window or joined volumes): mounts may read
     /// the ranges from that file.
     pub in_place: bool,
+}
+
+impl Stored {
+    fn coding(&self, i: usize) -> Option<Coding> {
+        self.codings.get(i).copied().flatten()
+    }
+}
+
+/// Reads pieces of the input one after another.
+struct Chain<'a> {
+    input: &'a mut SharedInput,
+    pieces: std::slice::Iter<'a, (u64, u64)>,
+    left: u64,
+}
+
+impl Read for Chain<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        while self.left == 0 {
+            let Some(&(offset, len)) = self.pieces.next() else {
+                return Ok(0);
+            };
+            self.input.seek(SeekFrom::Start(offset))?;
+            self.left = len;
+        }
+        let want = buf
+            .len()
+            .min(usize::try_from(self.left).unwrap_or(usize::MAX));
+        let n = self.input.read(&mut buf[..want])?;
+        self.left -= n as u64;
+        Ok(n)
+    }
 }
 
 impl ArchiveReader for Stored {
@@ -135,7 +216,7 @@ impl ArchiveReader for Stored {
 
     fn stored_range(&mut self, id: EntryId) -> Option<(u64, u64)> {
         let e = self.entries.get(id as usize)?;
-        (self.in_place && e.kind == EntryKind::File)
+        (self.in_place && e.kind == EntryKind::File && self.coding(id as usize).is_none())
             .then(|| self.ranges[id as usize])
             .flatten()
     }
@@ -166,19 +247,44 @@ impl ArchiveReader for Stored {
             if !sink.wants(e) {
                 continue;
             }
-            match (e.kind, self.ranges[i]) {
-                (EntryKind::File, Some((offset, len))) => {
-                    self.input
-                        .seek(SeekFrom::Start(offset))
-                        .map_err(|e| Error::io(e, &path))?;
-                    let mut r = Exact {
-                        inner: (&mut self.input).take(len),
-                        left: len,
-                        path: &path,
-                    };
-                    sink.entry(e, EntryData::Stream(&mut r), ctx)?;
-                }
-                _ => sink.entry(e, EntryData::None, ctx)?,
+            if e.kind != EntryKind::File {
+                sink.entry(e, EntryData::None, ctx)?;
+            } else {
+                // A file without a range has no data: empty, or reported as cut short.
+                let chains = self.chains.clone();
+                let single;
+                let pieces: &[(u64, u64)] = match self.ranges[i] {
+                    Some(r) => {
+                        single = [r];
+                        &single
+                    }
+                    None => chains.get(&(i as EntryId)).map_or(&[], Vec::as_slice),
+                };
+                let packed: u64 = pieces.iter().map(|p| p.1).sum();
+                let coding = self.coding(i);
+                let raw = Chain {
+                    input: &mut self.input,
+                    pieces: pieces.iter(),
+                    left: 0,
+                };
+                let raw = Exact {
+                    inner: raw,
+                    left: packed,
+                    path: &path,
+                };
+                let mut decoded: Box<dyn Read + Send + '_> = match coding {
+                    None => Box::new(raw),
+                    Some(Coding::Zlib) => Box::new(flate2::read::ZlibDecoder::new(raw)),
+                    Some(Coding::Codec(c)) => {
+                        omnizip_engine_tar::codec::decoder(c, raw).map_err(|e| corrupt(e, &path))?
+                    }
+                };
+                let mut r = Exact {
+                    inner: &mut decoded,
+                    left: e.size,
+                    path: &path,
+                };
+                sink.entry(e, EntryData::Stream(&mut r), ctx)?;
             }
             if sink.done() {
                 break;
@@ -253,6 +359,27 @@ impl ArchiveReader for Streamed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendar_times() {
+        let secs = |t: SystemTime| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        assert_eq!(secs(utc_time(1970, 1, 1, 0, 0, 0, 0).unwrap()), 0);
+        assert_eq!(
+            secs(utc_time(2026, 1, 1, 0, 0, 0, 0).unwrap()),
+            1_767_225_600
+        );
+        // 08:00 at UTC+8 is midnight UTC.
+        assert_eq!(
+            secs(utc_time(2026, 1, 1, 8, 0, 0, 8 * 3600).unwrap()),
+            1_767_225_600
+        );
+        assert_eq!(
+            secs(utc_time(2024, 2, 29, 12, 0, 0, 0).unwrap()),
+            1_709_208_000
+        );
+        assert!(utc_time(1900, 0, 0, 0, 0, 0, 0).is_none());
+        assert!(utc_time(1969, 12, 31, 0, 0, 0, 0).is_none());
+    }
 
     #[test]
     fn entry_paths() {

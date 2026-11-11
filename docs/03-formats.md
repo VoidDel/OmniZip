@@ -32,12 +32,12 @@
 |---|---|---|---|
 | RAR 4 / RAR 5 | .rar .r00–.r99 .part1.rar | `unrar`（C++ 绑定，隔离 crate） | 多卷、加密（含头加密）、固实；恢复记录仅校验；**不提供创建**（许可限制） |
 | CAB | .cab | libarchive | MSZIP / LZX / Quantum |
-| ISO 9660 / UDF | .iso .img | libarchive | Joliet、Rock Ridge；UDF best-effort；可直接浏览并提取 |
+| ISO 9660 / UDF | .iso .img | 纯 Rust（`omnizip-engine-readonly`） | 名称依次取 Rock Ridge（含权限、符号链接、时间、CE 续区、CL / RE 深目录重定位）、Joliet、ISO 9660；多段文件（>4 GiB）按段拼接；文件原样存放，挂载时就地读取；卷标显示为注释。只有 UDF 的镜像不支持。Alpine 3.20 virt 镜像解压结果与 libarchive 一致（2026-11-11） |
 | CPIO | .cpio（newc / crc / odc / bin） | 纯 Rust（`omnizip-engine-readonly`） | initramfs 常见；文件数据原样存放，挂载时就地读取；硬链接的数据只存一份（newc 存在最后一个名字上），其余名字作为指向它的硬链接 |
 | AR / DEB | .a .lib .deb | 纯 Rust（`omnizip-engine-readonly`）+ 内层 tar | GNU（`//` 长名表）与 BSD（`#1/长度`）成员名，符号表跳过；.deb 展开 `data.tar.*` 到根目录、`control.tar.*` 到 `DEBIAN/`（同 `dpkg-deb -R`），压缩方式 gz / xz / zst / bz2 / lzma / 无 |
 | RPM | .rpm | 纯 Rust 头解析 + 内层 cpio | payload 为 gz / bz2 / xz / lzma / zstd；注释显示"名称-版本-发行"；每次列出与解压都从头解码 payload。Fedora 45 的 tzdata（zstd，1806 个文件，大半是硬链接）解压结果与 libarchive 逐字节一致（2026-11-11） |
 | ARJ / LZH (LHA) | .arj .lzh .lha | libarchive | 老格式，日本/亚洲历史资料常见 |
-| XAR / PKG | .xar .pkg | libarchive | macOS 安装包 |
+| XAR / PKG | .xar .pkg | 纯 Rust（`omnizip-engine-readonly`，目录 XML 用 `roxmltree`） | macOS 安装包；每个文件单独压缩（zlib / bzip2 / xz / lzma）或原样存放，可单独读取；base64 编码的名字、硬链接。python.org 的 macOS 安装包解压结果与 libarchive 一致 |
 | 自解压 SFX | .exe | 检测覆盖区 → 交给 ZIP / 7z / RAR 引擎 | 不执行任何代码。按 PE 节表求出程序末尾（覆盖区起点），从那里往后 1 MiB 内找 7z（校验起始头 CRC，程序里碰巧出现的签名不算）与 RAR 签名，可越过 7-Zip 安装器的配置文本；ZIP 按末尾的结束记录。7z 从找到的位置开窗口读取（`SharedInput::open_from`），RAR 与 ZIP 由各自的库处理偏移（2026-11-11） |
 | 分割文件 | .001 .002…（无容器） | 内置拼接（`omnizip-engine-readonly`） | 不是压缩包分卷的 `.001`（`movie.mkv.001`）按格式 `split` 打开：一个条目，即拼接后的文件，"解压"就是合并；从任意一卷都能打开，缺第一卷时报缺卷。内容是压缩包的（`backup.001` 里是 7z）仍交给那个格式 |
 

@@ -9,6 +9,7 @@ use std::{
     collections::HashMap,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
+    sync::Arc,
 };
 
 use omnizip_core::{
@@ -392,6 +393,8 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
         info,
         entries: entries.into(),
         ranges: ranges.into(),
+        chains: Default::default(),
+        codings: Arc::from([]),
         input,
     })
 }

@@ -287,3 +287,114 @@ fn damaged_headers_are_refused() {
             .is_err()
     );
 }
+
+const TREE: [&str; 5] = [
+    "A Long File Name With Spaces and Mixed Case.txt",
+    "hello.txt",
+    "sub/",
+    "sub/数据/",
+    "sub/数据/中文名.txt",
+];
+
+#[test]
+fn iso_rock_ridge_joliet_and_plain() {
+    for f in ["rockridge", "joliet"] {
+        let p = fixture(&format!("iso/{f}.iso"));
+        let mut r = open(&p);
+        assert_eq!(r.info().format, FormatId::Iso);
+        let mut names = paths(r.as_ref());
+        names.sort_unstable();
+        assert_eq!(names, TREE, "{f}");
+        if f == "rockridge" {
+            assert_eq!(r.info().comment.as_deref(), Some("OMNIZIP"));
+            // Rock Ridge carries POSIX modes.
+            assert!(r.entries().iter().all(|e| e.unix_mode.is_some()), "{f}");
+        }
+        assert!(r.entries().iter().all(|e| e.mtime.is_some()), "{f}");
+        // Files lie as they are: a mount reads them in place.
+        let id = r
+            .entries()
+            .iter()
+            .find(|e| e.path == "hello.txt")
+            .unwrap()
+            .id;
+        let (off, len) = r.stored_range(id).unwrap();
+        assert_eq!(
+            &fs::read(&p).unwrap()[off as usize..][..len as usize],
+            b"hello
+"
+        );
+        extract_all(
+            r.as_mut(),
+            &[
+                (
+                    "hello.txt",
+                    b"hello
+",
+                ),
+                (
+                    "sub/数据/中文名.txt",
+                    "中文内容
+"
+                    .as_bytes(),
+                ),
+                (
+                    "A Long File Name With Spaces and Mixed Case.txt",
+                    b"long
+",
+                ),
+            ],
+        );
+    }
+    // Plain ISO 9660: short upper-case names, without the ";1" version.
+    let mut r = open(&fixture("iso/plain.iso"));
+    let names = paths(r.as_ref());
+    assert!(names.contains(&"HELLO.TXT"), "{names:?}");
+    assert_eq!(
+        r.entries()
+            .iter()
+            .filter(|e| e.kind == EntryKind::File)
+            .count(),
+        3
+    );
+    assert_eq!(
+        content(r.as_mut(), "HELLO.TXT"),
+        b"hello
+"
+    );
+}
+
+#[test]
+fn xar_every_compression() {
+    for f in ["test", "bzip2", "none"] {
+        let mut r = open(&fixture(&format!("xar/{f}.xar")));
+        assert_eq!(r.info().format, FormatId::Xar);
+        let mut names = paths(r.as_ref());
+        names.sort_unstable();
+        assert_eq!(names, TREE, "{f}");
+        let id = r
+            .entries()
+            .iter()
+            .find(|e| e.path == "hello.txt")
+            .unwrap()
+            .id;
+        // Only stored data is read in place.
+        assert_eq!(r.stored_range(id).is_some(), f == "none", "{f}");
+        extract_all(
+            r.as_mut(),
+            &[
+                (
+                    "hello.txt",
+                    b"hello
+",
+                ),
+                (
+                    "sub/数据/中文名.txt",
+                    "中文内容
+"
+                    .as_bytes(),
+                ),
+            ],
+        );
+    }
+}

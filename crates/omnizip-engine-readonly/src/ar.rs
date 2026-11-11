@@ -138,6 +138,8 @@ pub(crate) fn open_ar(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<S
         info,
         entries: entries.into(),
         ranges: ranges.into(),
+        chains: Default::default(),
+        codings: Arc::from([]),
         input,
         in_place: true,
     })
