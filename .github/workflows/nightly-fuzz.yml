@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [detect, zip, sevenz, tar, rar, mount, sanitize, encoding]
+        target: [detect, zip, sevenz, tar, rar, readonly, mount, sanitize, encoding]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -62,6 +62,21 @@ jobs:
         run: |
           mkdir -p fuzz/corpus/${{ matrix.target }}
           cp fixtures/rar/*.rar fuzz/corpus/${{ matrix.target }}/
+      - name: Seed corpus from fixtures (read-only formats)
+        if: matrix.target == 'readonly'
+        # Each fixture behind the byte that picks its parser (FORMATS in fuzz_targets/readonly.rs).
+        run: |
+          mkdir -p fuzz/corpus/readonly
+          byte() { python3 -c "import sys; sys.stdout.buffer.write(bytes([$1]))"; }
+          seed() { for f in $2; do { byte "$1"; cat "$f"; } > "fuzz/corpus/readonly/$1-$(basename "$f")"; done; }
+          seed 0 "fixtures/ar/*"
+          seed 1 "fixtures/deb/*"
+          seed 2 "fixtures/cpio/*"
+          seed 4 "fixtures/iso/*"
+          seed 5 "fixtures/xar/*"
+          seed 6 "fixtures/cab/*.cab"
+          seed 7 "fixtures/lzh/*.lzh"
+          seed 8 "fixtures/arj/*.arj"
       # Debug assertions and overflow checks on (-a): an overflow on hostile input is a bug.
       - name: Fuzz
         run: >

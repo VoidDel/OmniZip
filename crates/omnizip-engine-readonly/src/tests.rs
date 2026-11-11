@@ -559,3 +559,44 @@ fn arj_every_method() {
         omnizip_core::ErrorCode::CrcMismatch
     );
 }
+
+/// Cut and flipped copies of every fixture are refused or read, never a panic or a hang: a
+/// quick stand-in for the `readonly` fuzz target.
+#[test]
+fn damaged_inputs_never_panic() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("x");
+    let mut seed = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let dirs = ["ar", "deb", "cpio", "iso", "xar", "cab", "lzh", "arj"];
+    for dir in dirs {
+        for f in fs::read_dir(fixture(dir)).unwrap() {
+            let f = f.unwrap().path();
+            let Ok(format) = omnizip_core::detect::detect_path(&f).map(|d| d.format) else {
+                continue;
+            };
+            let data = fs::read(&f).unwrap();
+            for round in 0..60 {
+                let mut m = data.clone();
+                if round % 3 == 0 {
+                    m.truncate(next() as usize % m.len());
+                } else {
+                    for _ in 0..1 + round % 4 {
+                        let i = next() as usize % m.len();
+                        m[i] ^= 1 << (next() % 8);
+                    }
+                }
+                fs::write(&p, &m).unwrap();
+                let ctx = JobCtx::default();
+                if let Ok(mut r) = ReadonlyEngine.open(&p, format, &OpenOptions::default(), &ctx) {
+                    let _ = test_archive(r.as_mut(), Selection::all(), &ctx);
+                }
+            }
+        }
+    }
+}

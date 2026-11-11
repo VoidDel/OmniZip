@@ -33,6 +33,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "readonly"
+path = "fuzz_targets/readonly.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "zip"
 path = "fuzz_targets/zip.rs"
 test = false
