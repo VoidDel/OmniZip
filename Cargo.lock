@@ -3112,7 +3112,10 @@ dependencies = [
 name = "omnizip-engine-readonly"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "omnizip-core",
+ "omnizip-engine-tar",
+ "tar",
  "tempfile",
 ]
 

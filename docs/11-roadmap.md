@@ -217,4 +217,5 @@
 M2"格式"一行的进度。ZIP 原地更新、格式转换、7z 文件名加密（读写）、RAR 头加密（读）此前已完成。Tier 2 格式按用户决定（2026-11-11）用纯 Rust 实现，不引入 libarchive。
 
 - 第 1 批：自解压包（7z / RAR / ZIP 的 SFX 均可打开，按 PE 覆盖区定位）；ZIP spanned（`.z01 … .zip`）；纯分割文件（`.001`，格式 `split`，解压即合并）。新 crate `omnizip-engine-readonly` 放只读格式。
-- 待做：Tier 2 各格式（AR / DEB、CPIO、RPM、ISO、CAB、XAR、LZH、ARJ）。
+- 第 2 批：AR / DEB、CPIO（newc / crc / odc / bin）、RPM。测试样本由真实工具生成（GNU ar、bsdtar、GNU cpio、dpkg-deb，`fixtures/make-readonly-fixtures.sh`）；RPM 另用 Fedora 45 的真实包与 libarchive 对比过。
+- 待做：ISO、CAB、XAR、LZH、ARJ。

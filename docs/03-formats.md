@@ -33,9 +33,9 @@
 | RAR 4 / RAR 5 | .rar .r00–.r99 .part1.rar | `unrar`（C++ 绑定，隔离 crate） | 多卷、加密（含头加密）、固实；恢复记录仅校验；**不提供创建**（许可限制） |
 | CAB | .cab | libarchive | MSZIP / LZX / Quantum |
 | ISO 9660 / UDF | .iso .img | libarchive | Joliet、Rock Ridge；UDF best-effort；可直接浏览并提取 |
-| CPIO | .cpio（newc / odc / bin） | libarchive | initramfs 常见 |
-| AR / DEB | .a .deb | 纯 Rust（`ar` 格式简单）+ 内层 tar | .deb 自动展开 `data.tar.*` / `control.tar.*` |
-| RPM | .rpm | 纯 Rust 头解析 + 内层 cpio | payload 可能为 gz / xz / zstd |
+| CPIO | .cpio（newc / crc / odc / bin） | 纯 Rust（`omnizip-engine-readonly`） | initramfs 常见；文件数据原样存放，挂载时就地读取；硬链接的数据只存一份（newc 存在最后一个名字上），其余名字作为指向它的硬链接 |
+| AR / DEB | .a .lib .deb | 纯 Rust（`omnizip-engine-readonly`）+ 内层 tar | GNU（`//` 长名表）与 BSD（`#1/长度`）成员名，符号表跳过；.deb 展开 `data.tar.*` 到根目录、`control.tar.*` 到 `DEBIAN/`（同 `dpkg-deb -R`），压缩方式 gz / xz / zst / bz2 / lzma / 无 |
+| RPM | .rpm | 纯 Rust 头解析 + 内层 cpio | payload 为 gz / bz2 / xz / lzma / zstd；注释显示"名称-版本-发行"；每次列出与解压都从头解码 payload。Fedora 45 的 tzdata（zstd，1806 个文件，大半是硬链接）解压结果与 libarchive 逐字节一致（2026-11-11） |
 | ARJ / LZH (LHA) | .arj .lzh .lha | libarchive | 老格式，日本/亚洲历史资料常见 |
 | XAR / PKG | .xar .pkg | libarchive | macOS 安装包 |
 | 自解压 SFX | .exe | 检测覆盖区 → 交给 ZIP / 7z / RAR 引擎 | 不执行任何代码。按 PE 节表求出程序末尾（覆盖区起点），从那里往后 1 MiB 内找 7z（校验起始头 CRC，程序里碰巧出现的签名不算）与 RAR 签名，可越过 7-Zip 安装器的配置文本；ZIP 按末尾的结束记录。7z 从找到的位置开窗口读取（`SharedInput::open_from`），RAR 与 ZIP 由各自的库处理偏移（2026-11-11） |

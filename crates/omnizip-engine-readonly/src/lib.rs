@@ -7,9 +7,21 @@ use omnizip_core::{
     ArchiveReader, Capabilities, Engine, Error, ErrorCode, FormatId, JobCtx, OpenOptions, Result,
 };
 
+mod ar;
+mod common;
+mod cpio;
+mod rpm;
 mod split;
+#[cfg(test)]
+mod tests;
 
-const FORMATS: &[FormatId] = &[FormatId::Split];
+const FORMATS: &[FormatId] = &[
+    FormatId::Ar,
+    FormatId::Deb,
+    FormatId::Cpio,
+    FormatId::Rpm,
+    FormatId::Split,
+];
 
 /// The engine for every read-only format of this crate.
 #[derive(Debug, Default, Clone, Copy)]
@@ -36,10 +48,14 @@ impl Engine for ReadonlyEngine {
         &self,
         path: &Path,
         format: FormatId,
-        _opts: &OpenOptions,
-        _ctx: &JobCtx,
+        opts: &OpenOptions,
+        ctx: &JobCtx,
     ) -> Result<Box<dyn ArchiveReader>> {
         match format {
+            FormatId::Ar => Ok(Box::new(ar::open_ar(path, opts, ctx)?)),
+            FormatId::Deb => Ok(Box::new(ar::open_deb(path, opts, ctx)?)),
+            FormatId::Cpio => Ok(Box::new(cpio::open(path, opts, ctx)?)),
+            FormatId::Rpm => Ok(Box::new(rpm::open(path, opts, ctx)?)),
             FormatId::Split => Ok(Box::new(split::SplitReader::open(path)?)),
             other => Err(Error::new(ErrorCode::UnsupportedFormat).with("format", other)),
         }
