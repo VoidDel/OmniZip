@@ -18,7 +18,6 @@ import { type SettingsTab, mountRoot, useApp } from '../../store/app';
 export const SETTINGS_TABS: [SettingsTab, IconName][] = [
   ['general', 'layout'],
   ['appearance', 'palette'],
-  ['language', 'globe'],
   ['formats', 'archive'],
   ['shell', 'terminal'],
   ['security', 'shield'],
@@ -455,7 +454,7 @@ export function SettingsView() {
                 <Switch label={t('settings.general.notify')} checked={settings.general.notify} onChange={(v) => set((s) => (s.general.notify = v))} />
               </Row>
             </div>
-            {/* Defaults of the compress dialog. */}
+            {/* Defaults of the compress dialog, then how sizes and old archives' names are read. */}
             <div className="set-group">
               <Row label={t('settings.formats.defaultFormat')}>
                 <Select label={t('settings.formats.defaultFormat')} value={settings.formats.default_format} onChange={(v) => set((s) => (s.formats.default_format = v))} options={['zip', '7z', 'tar.zst', 'tar.gz', 'tar.xz'].map((f) => [f, f.toUpperCase()] as [string, string])} />
@@ -471,6 +470,22 @@ export function SettingsView() {
               <Row label={t('settings.formats.skipCompressed')} hint={t('settings.formats.skipCompressedHint')}>
                 <Switch label={t('settings.formats.skipCompressed')} checked={settings.formats.skip_compressed} onChange={(v) => set((s) => (s.formats.skip_compressed = v))} />
               </Row>
+              <Row label={t('settings.language.sizeUnit')} hint={`${t('settings.language.sample')}: ${fmt.size(1_536_000)} · ${fmt.size(4.2 * 1024 ** 3)}`}>
+                <Select
+                  label={t('settings.language.sizeUnit')}
+                  value={settings.language.size_unit}
+                  onChange={(v) => set((s) => (s.language.size_unit = v))}
+                  options={[['auto', t('settings.language.unitAuto')], ['kb', t('settings.language.unitKb')], ['kib', t('settings.language.unitKib')]]}
+                />
+              </Row>
+              <Row label={t('settings.language.encoding')}>
+                <Select
+                  label={t('settings.language.encoding')}
+                  value={settings.language.default_encoding}
+                  onChange={(v) => set((s) => (s.language.default_encoding = v))}
+                  options={[['auto', t('settings.language.encodingAuto')], ...boot.encodings.map((e) => [e, e] as [string, string])]}
+                />
+              </Row>
             </div>
           </>
         );
@@ -481,9 +496,18 @@ export function SettingsView() {
         const accentIsCustom = a.accent.startsWith('#');
         const accentIsPicked = accentIsCustom && !ACCENTS.includes(a.accent.toUpperCase());
         const accentColor = theme?.tokens.accent ?? '#2F6FED';
+        const sysLang = boot.languages.find(([l]) => l === normalizeLang(sys.locale))?.[1] ?? sys.locale;
         return (
           <>
             <div className="set-group">
+              <Row label={t('settings.language.ui')}>
+                <Select
+                  label={t('settings.language.ui')}
+                  value={settings.language.ui}
+                  onChange={(v) => set((s) => (s.language.ui = v))}
+                  options={[['auto', t('settings.language.auto', { lang: sysLang })], ...boot.languages.map(([l, n]) => [l, n] as [string, string])]}
+                />
+              </Row>
               <Row label={t('settings.appearance.mode')}>
                 <Segmented value={a.mode} onChange={(v) => set((s) => (s.appearance.mode = v))} options={[['light', t('settings.appearance.light')], ['dark', t('settings.appearance.dark')], ['system', t('settings.appearance.system')]]} />
               </Row>
@@ -589,37 +613,6 @@ export function SettingsView() {
               </button>
             </div>
           </>
-        );
-      }
-      case 'language': {
-        const sysLang = boot.languages.find(([l]) => l === normalizeLang(sys.locale))?.[1] ?? sys.locale;
-        return (
-          <div className="set-group">
-            <Row label={t('settings.language.ui')}>
-              <Select
-                label={t('settings.language.ui')}
-                value={settings.language.ui}
-                onChange={(v) => set((s) => (s.language.ui = v))}
-                options={[['auto', t('settings.language.auto', { lang: sysLang })], ...boot.languages.map(([l, n]) => [l, n] as [string, string])]}
-              />
-            </Row>
-            <Row label={t('settings.language.sizeUnit')} hint={`${t('settings.language.sample')}: ${fmt.size(1_536_000)} · ${fmt.size(4.2 * 1024 ** 3)}`}>
-              <Select
-                label={t('settings.language.sizeUnit')}
-                value={settings.language.size_unit}
-                onChange={(v) => set((s) => (s.language.size_unit = v))}
-                options={[['auto', t('settings.language.unitAuto')], ['kb', t('settings.language.unitKb')], ['kib', t('settings.language.unitKib')]]}
-              />
-            </Row>
-            <Row label={t('settings.language.encoding')}>
-              <Select
-                label={t('settings.language.encoding')}
-                value={settings.language.default_encoding}
-                onChange={(v) => set((s) => (s.language.default_encoding = v))}
-                options={[['auto', t('settings.language.encodingAuto')], ...boot.encodings.map((e) => [e, e] as [string, string])]}
-              />
-            </Row>
-          </div>
         );
       }
       case 'formats':

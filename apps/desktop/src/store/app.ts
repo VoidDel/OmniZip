@@ -20,7 +20,7 @@ import type {
 export type View = 'home' | 'browser' | 'settings';
 export type SortKey = 'name' | 'size' | 'packed' | 'mtime' | 'type';
 export type SettingsTab =
-  | 'general' | 'appearance' | 'language' | 'formats' | 'shell' | 'security' | 'mount' | 'advanced' | 'about';
+  | 'general' | 'appearance' | 'formats' | 'shell' | 'security' | 'mount' | 'advanced' | 'about';
 
 /** Modal dialogs. Each carries its own props; the host renders the top-most one. */
 export type DialogSpec =
