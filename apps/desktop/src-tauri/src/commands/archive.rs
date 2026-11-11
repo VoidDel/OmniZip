@@ -584,6 +584,12 @@ fn cache_entry(a: &OpenedArchive, node: NodeId, cache: &Path) -> Result<PathBuf,
         let _ = std::fs::remove_file(&part);
         return Err(e);
     }
+    // The entry's own time, not the moment it was copied out (a previewer shows it).
+    if let Some(t) = n.mtime
+        && let Ok(f) = std::fs::File::options().write(true).open(&part)
+    {
+        let _ = f.set_modified(t);
+    }
     std::fs::rename(&part, &file).map_err(|e| Error::io(e, &file))?;
     if let Some(origin) = omnizip_core::origin::read(&a.path) {
         let _ = omnizip_core::origin::apply(&file, &origin);
