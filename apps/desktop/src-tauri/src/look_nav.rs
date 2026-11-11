@@ -19,7 +19,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use omnizip_core::{NodeId, SortKey};
+use omnizip_core::{NodeId, SortKey, TreeIndex};
 use omnizip_mountd::pipe::{self, Access};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -133,6 +133,27 @@ fn connection(app: &AppHandle, conn: File) {
     let _ = (&conn).write_all(out.as_bytes());
 }
 
+/// The file before (`back`) or after `node` in its folder, as the list orders it: folders come
+/// first there and are skipped. `None` at either end.
+pub fn neighbour(
+    tree: &TreeIndex,
+    node: NodeId,
+    key: SortKey,
+    desc: bool,
+    back: bool,
+) -> Option<NodeId> {
+    let parent = tree.node(node)?.parent?;
+    let files: Vec<NodeId> = tree
+        .list(parent, key, desc, 0, usize::MAX)
+        .items
+        .into_iter()
+        .filter(|&id| tree.node(id).is_some_and(|n| !n.is_dir))
+        .collect();
+    let i = files.iter().position(|&id| id == node)?;
+    let j = if back { i.checked_sub(1)? } else { i + 1 };
+    files.get(j).copied()
+}
+
 fn answer(app: &AppHandle, ask: &Ask) -> Answer {
     let fail = |e: String| Answer {
         error: Some(e),
@@ -156,24 +177,7 @@ fn answer(app: &AppHandle, ask: &Ask) -> Answer {
     let Some(cache) = state.cache_dir.clone() else {
         return fail("no cache".into());
     };
-    let Some(parent) = a.tree.node(cur.node).and_then(|n| n.parent) else {
-        return fail("no such entry".into());
-    };
-    // The folder's files in the list's order (folders come first there; they are skipped).
-    let page = a.tree.list(parent, cur.key, cur.desc, 0, usize::MAX);
-    let files: Vec<NodeId> = page
-        .items
-        .into_iter()
-        .filter(|&id| a.tree.node(id).is_some_and(|n| !n.is_dir))
-        .collect();
-    let Some(i) = files.iter().position(|&id| id == cur.node) else {
-        return fail("not in its folder".into());
-    };
-    let j = match ask.op.as_str() {
-        "prev" => i.checked_sub(1),
-        _ => Some(i + 1).filter(|&j| j < files.len()),
-    };
-    let Some(node) = j.map(|j| files[j]) else {
+    let Some(node) = neighbour(&a.tree, cur.node, cur.key, cur.desc, ask.op == "prev") else {
         return Answer {
             end: true,
             ..Default::default()
@@ -200,5 +204,69 @@ fn answer(app: &AppHandle, ask: &Ask) -> Answer {
             }
         }
         Err(e) => fail(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use omnizip_core::{Entry, EntryKind};
+
+    use super::*;
+
+    fn tree(paths: &[(&str, u64)]) -> TreeIndex {
+        let entries: Vec<Entry> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, (p, size))| {
+                let kind = if p.ends_with('/') {
+                    EntryKind::Dir
+                } else {
+                    EntryKind::File
+                };
+                let mut e = Entry::new(i as u32, (*p).into(), kind);
+                e.size = *size;
+                e
+            })
+            .collect();
+        TreeIndex::build(&entries)
+    }
+
+    #[test]
+    fn neighbours_in_list_order_skipping_folders() {
+        let t = tree(&[
+            ("d/sub/", 0),
+            ("d/img10.png", 1),
+            ("d/img2.png", 30),
+            ("d/a.txt", 20),
+            ("d/sub/deep.txt", 5),
+        ]);
+        let id = |p: &str| t.find(p).unwrap();
+        let name = |n: Option<NodeId>| n.map(|n| t.node(n).unwrap().name.clone());
+        // By name, naturally: a.txt, img2.png, img10.png (the folder "sub" is skipped).
+        assert_eq!(
+            name(neighbour(&t, id("d/a.txt"), SortKey::Name, false, false)),
+            Some("img2.png".into())
+        );
+        assert_eq!(
+            name(neighbour(&t, id("d/img2.png"), SortKey::Name, false, false)),
+            Some("img10.png".into())
+        );
+        assert_eq!(
+            neighbour(&t, id("d/img10.png"), SortKey::Name, false, false),
+            None
+        );
+        assert_eq!(
+            neighbour(&t, id("d/a.txt"), SortKey::Name, false, true),
+            None
+        );
+        // The list sorted by size, largest first: img2.png (30), a.txt (20), img10.png (1).
+        assert_eq!(
+            name(neighbour(&t, id("d/img2.png"), SortKey::Size, true, false)),
+            Some("a.txt".into())
+        );
+        assert_eq!(
+            name(neighbour(&t, id("d/img10.png"), SortKey::Size, true, true)),
+            Some("a.txt".into())
+        );
     }
 }
