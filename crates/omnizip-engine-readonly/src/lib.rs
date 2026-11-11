@@ -8,9 +8,13 @@ use omnizip_core::{
 };
 
 mod ar;
+mod arj;
+mod cab;
 mod common;
 mod cpio;
 mod iso;
+mod lha;
+mod lzh;
 mod rpm;
 mod split;
 #[cfg(test)]
@@ -24,6 +28,9 @@ const FORMATS: &[FormatId] = &[
     FormatId::Rpm,
     FormatId::Iso,
     FormatId::Xar,
+    FormatId::Cab,
+    FormatId::Lzh,
+    FormatId::Arj,
     FormatId::Split,
 ];
 
@@ -62,6 +69,9 @@ impl Engine for ReadonlyEngine {
             FormatId::Rpm => Ok(Box::new(rpm::open(path, opts, ctx)?)),
             FormatId::Iso => Ok(Box::new(iso::open(path, opts, ctx)?)),
             FormatId::Xar => Ok(Box::new(xar::open(path, opts, ctx)?)),
+            FormatId::Cab => Ok(Box::new(cab::open(path, opts, ctx)?)),
+            FormatId::Lzh => Ok(Box::new(lzh::open(path, opts, ctx)?)),
+            FormatId::Arj => Ok(Box::new(arj::open(path, opts, ctx)?)),
             FormatId::Split => Ok(Box::new(split::SplitReader::open(path)?)),
             other => Err(Error::new(ErrorCode::UnsupportedFormat).with("format", other)),
         }

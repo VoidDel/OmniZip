@@ -31,12 +31,12 @@
 | 格式 | 扩展名 | 引擎 | 备注 |
 |---|---|---|---|
 | RAR 4 / RAR 5 | .rar .r00–.r99 .part1.rar | `unrar`（C++ 绑定，隔离 crate） | 多卷、加密（含头加密）、固实；恢复记录仅校验；**不提供创建**（许可限制） |
-| CAB | .cab | libarchive | MSZIP / LZX / Quantum |
+| CAB | .cab | 纯 Rust（`omnizip-engine-readonly`；LZX 用 `lzxd`，MSZIP 用 flate2） | 存储 / MSZIP / LZX；Quantum 只列出不解压；跨多个 cab 的文件不拼接。每个 folder 是一条压缩流，按 folder 从头解一遍取出其中所需的文件（同 7z 固实块，`solid_block`），不像 `cab` crate 那样每个文件都从 folder 开头重解；未标 UTF-8 的名字按代码页探测（makecab 写的 GBK 名可正确显示）。解压结果与 libarchive 一致 |
 | ISO 9660 / UDF | .iso .img | 纯 Rust（`omnizip-engine-readonly`） | 名称依次取 Rock Ridge（含权限、符号链接、时间、CE 续区、CL / RE 深目录重定位）、Joliet、ISO 9660；多段文件（>4 GiB）按段拼接；文件原样存放，挂载时就地读取；卷标显示为注释。只有 UDF 的镜像不支持。Alpine 3.20 virt 镜像解压结果与 libarchive 一致（2026-11-11） |
 | CPIO | .cpio（newc / crc / odc / bin） | 纯 Rust（`omnizip-engine-readonly`） | initramfs 常见；文件数据原样存放，挂载时就地读取；硬链接的数据只存一份（newc 存在最后一个名字上），其余名字作为指向它的硬链接 |
 | AR / DEB | .a .lib .deb | 纯 Rust（`omnizip-engine-readonly`）+ 内层 tar | GNU（`//` 长名表）与 BSD（`#1/长度`）成员名，符号表跳过；.deb 展开 `data.tar.*` 到根目录、`control.tar.*` 到 `DEBIAN/`（同 `dpkg-deb -R`），压缩方式 gz / xz / zst / bz2 / lzma / 无 |
 | RPM | .rpm | 纯 Rust 头解析 + 内层 cpio | payload 为 gz / bz2 / xz / lzma / zstd；注释显示"名称-版本-发行"；每次列出与解压都从头解码 payload。Fedora 45 的 tzdata（zstd，1806 个文件，大半是硬链接）解压结果与 libarchive 逐字节一致（2026-11-11） |
-| ARJ / LZH (LHA) | .arj .lzh .lha | libarchive | 老格式，日本/亚洲历史资料常见 |
+| ARJ / LZH (LHA) | .arj .lzh .lha | 纯 Rust（`omnizip-engine-readonly`；LHA 解码用 `delharc`） | 老格式，日本/亚洲历史资料常见。LZH：头级别 0–3，`-lh0-`…`-lh7-`、`-lhx-`、`-lzs-`、`-lz5-`、`-pm1/2-`，Unix 符号链接，名字保留原始字节按代码页探测（Shift_JIS），校验 CRC-16。ARJ：方法 0–4（1–3 按 `-lh6-` 解码，4 自行实现），校验 CRC-32；加密（garbled）与多卷不支持。每个文件单独读取，存储的文件挂载时就地读取。测试样本来自 lhasa 项目（多种真实 LHA 工具写出）与 unarj-rs |
 | XAR / PKG | .xar .pkg | 纯 Rust（`omnizip-engine-readonly`，目录 XML 用 `roxmltree`） | macOS 安装包；每个文件单独压缩（zlib / bzip2 / xz / lzma）或原样存放，可单独读取；base64 编码的名字、硬链接。python.org 的 macOS 安装包解压结果与 libarchive 一致 |
 | 自解压 SFX | .exe | 检测覆盖区 → 交给 ZIP / 7z / RAR 引擎 | 不执行任何代码。按 PE 节表求出程序末尾（覆盖区起点），从那里往后 1 MiB 内找 7z（校验起始头 CRC，程序里碰巧出现的签名不算）与 RAR 签名，可越过 7-Zip 安装器的配置文本；ZIP 按末尾的结束记录。7z 从找到的位置开窗口读取（`SharedInput::open_from`），RAR 与 ZIP 由各自的库处理偏移（2026-11-11） |
 | 分割文件 | .001 .002…（无容器） | 内置拼接（`omnizip-engine-readonly`） | 不是压缩包分卷的 `.001`（`movie.mkv.001`）按格式 `split` 打开：一个条目，即拼接后的文件，"解压"就是合并；从任意一卷都能打开，缺第一卷时报缺卷。内容是压缩包的（`backup.001` 里是 7z）仍交给那个格式 |
@@ -66,7 +66,8 @@
 | `lz4_flex` | LZ4 frame | 纯 Rust | MIT | |
 | `brotli` | Brotli | 纯 Rust | BSD / MIT | |
 | `unrar` | RAR 解压 | C++ 绑定 | unrar 许可（仅解压） | 隔离为 `omnizip-engine-rar`，不参与任何压缩代码；v2 进程隔离 |
-| libarchive | 长尾格式 | C 动态库 | BSD | 运行时 `dlopen`，缺失时相关格式灰显；Windows 随包附带 |
+| `omnizip-engine-readonly` | Tier 2 只读格式 | 纯 Rust | MIT | AR / DEB、CPIO、RPM、ISO、CAB、XAR、LZH、ARJ、分割文件；依赖 `delharc`（LHA 解码）、`lzxd`（LZX）、`roxmltree`（XAR 目录）。2026-11-11 起取代原计划的 libarchive |
+| libarchive | （未采用） | C 动态库 | BSD | 原计划运行时 `dlopen` 读长尾格式；Tier 2 已全部纯 Rust 实现，暂不需要。Tier 3（WIM 等）若要支持再评估 |
 | `crc32fast` `sha2` `blake3` `md-5` | 校验与"哈希"面板 | 纯 Rust | | |
 | `chardetng` + `encoding_rs` | 文件名编码探测 / 转换 | 纯 Rust | | |
 

@@ -453,6 +453,7 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
         ranges: ranges.into(),
         chains: Arc::new(chains),
         codings: Arc::from([]),
+        checks: Arc::from([]),
         input,
     })
 }

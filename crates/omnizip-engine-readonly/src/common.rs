@@ -147,12 +147,59 @@ impl<R: Read> Read for Exact<'_, R> {
     }
 }
 
-/// How one file's data is compressed, in formats that compress each file on its own (XAR).
+/// How one file's data is compressed, in formats that compress each file on its own (XAR,
+/// LZH, ARJ).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Coding {
     /// A zlib stream (XAR calls it `application/x-gzip`).
     Zlib,
     Codec(omnizip_core::Codec),
+    /// An LHA method (`-lh5-` …); ARJ methods 1–3 are `-lh6-`.
+    Lha(delharc::CompressionMethod),
+    /// ARJ method 4.
+    ArjFastest,
+    /// A method OmniZip does not decode (named by the entry's `method`).
+    Unsupported,
+}
+
+/// A checksum of a file's data, verified once all of it was read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Check {
+    Crc32(u32),
+    /// The CRC-16 of LHA archives.
+    Crc16(u16),
+}
+
+/// Verifies a [`Check`] at the end of the data.
+struct Verify<'a, R> {
+    inner: R,
+    check: Check,
+    crc32: crc32fast::Hasher,
+    crc16: delharc::crc::Crc16,
+    path: &'a Path,
+}
+
+impl<R: Read> Read for Verify<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n > 0 {
+            match self.check {
+                Check::Crc32(_) => self.crc32.update(&buf[..n]),
+                Check::Crc16(_) => self.crc16.digest(&buf[..n]),
+            }
+            return Ok(n);
+        }
+        let ok = match self.check {
+            Check::Crc32(want) => self.crc32.clone().finalize() == want,
+            Check::Crc16(want) => self.crc16.sum16() == want,
+        };
+        if !buf.is_empty() && !ok {
+            return Err(Error::new(ErrorCode::CrcMismatch)
+                .with("path", self.path.display())
+                .into());
+        }
+        Ok(0)
+    }
 }
 
 /// An archive whose files each lie in one byte range of the input (several for the rare file
@@ -168,6 +215,8 @@ pub(crate) struct Stored {
     pub chains: Arc<HashMap<EntryId, Vec<(u64, u64)>>>,
     /// Per entry, how its data is compressed (empty: nothing is).
     pub codings: Arc<[Option<Coding>]>,
+    /// Per entry, the checksum its data must have (empty: none).
+    pub checks: Arc<[Option<Check>]>,
     pub input: SharedInput,
     /// The input is the archive file itself (not a window or joined volumes): mounts may read
     /// the ranges from that file.
@@ -278,13 +327,37 @@ impl ArchiveReader for Stored {
                     Some(Coding::Codec(c)) => {
                         omnizip_engine_tar::codec::decoder(c, raw).map_err(|e| corrupt(e, &path))?
                     }
+                    Some(Coding::Lha(m)) => {
+                        Box::new(crate::lha::LhaStream::new(m, raw, e.size, &path)?)
+                    }
+                    Some(Coding::ArjFastest) => Box::new(crate::lha::ArjFastest::new(raw, e.size)),
+                    Some(Coding::Unsupported) => {
+                        return Err(Error::new(ErrorCode::UnsupportedMethod)
+                            .with("method", e.method.clone().unwrap_or_default())
+                            .with("path", path.display()));
+                    }
                 };
-                let mut r = Exact {
+                let exact = Exact {
                     inner: &mut decoded,
                     left: e.size,
                     path: &path,
                 };
-                sink.entry(e, EntryData::Stream(&mut r), ctx)?;
+                match self.checks.get(i).copied().flatten() {
+                    Some(check) => {
+                        let mut r = Verify {
+                            inner: exact,
+                            check,
+                            crc32: crc32fast::Hasher::new(),
+                            crc16: delharc::crc::Crc16::default(),
+                            path: &path,
+                        };
+                        sink.entry(e, EntryData::Stream(&mut r), ctx)?;
+                    }
+                    None => {
+                        let mut r = exact;
+                        sink.entry(e, EntryData::Stream(&mut r), ctx)?;
+                    }
+                }
             }
             if sink.done() {
                 break;

@@ -219,4 +219,5 @@ M2"格式"一行的进度。ZIP 原地更新、格式转换、7z 文件名加密
 - 第 1 批：自解压包（7z / RAR / ZIP 的 SFX 均可打开，按 PE 覆盖区定位）；ZIP spanned（`.z01 … .zip`）；纯分割文件（`.001`，格式 `split`，解压即合并）。新 crate `omnizip-engine-readonly` 放只读格式。
 - 第 2 批：AR / DEB、CPIO（newc / crc / odc / bin）、RPM。测试样本由真实工具生成（GNU ar、bsdtar、GNU cpio、dpkg-deb，`fixtures/make-readonly-fixtures.sh`）；RPM 另用 Fedora 45 的真实包与 libarchive 对比过。
 - 第 3 批：ISO 9660（Rock Ridge、Joliet）、XAR / PKG；真实的 Alpine 镜像与 python.org 安装包解压结果与 libarchive 一致。
-- 待做：CAB、LZH、ARJ。
+- 第 4 批：CAB（存储 / MSZIP / LZX，按 folder 顺序解码）、LZH（delharc，头级别 0–3）、ARJ（方法 0–4）。至此 M2"格式"一行全部完成。
+- 未做：UDF-only 镜像、CAB Quantum 与跨 cab 文件、ARJ 加密与多卷、`.z01` 分卷用真实 Info-ZIP / WinZip 样本的验证（本机没有这两个工具，测试样本由程序按 PKZIP 规范切分）。

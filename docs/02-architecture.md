@@ -210,7 +210,7 @@ Shell 扩展与 CLI 读取同一份 `config.toml`（语言、菜单项配置）�
 | 编号 | 决策 | 被否选项 | 理由 |
 |---|---|---|---|
 | ADR-01 | Tauri 2 + Rust | Qt / Electron / Avalonia | 见 1.2 |
-| ADR-02 | 纯 Rust 引擎优先，libarchive 为可选长尾引擎 | 全部走 libarchive | 跨平台链接成本、内存安全、可控的 feature 粒度 |
+| ADR-02 | 纯 Rust 引擎优先，libarchive 为可选长尾引擎（2026-11-11：Tier 2 已全部纯 Rust，未引入 libarchive） | 全部走 libarchive | 跨平台链接成本、内存安全、可控的 feature 粒度 |
 | ADR-03 | Shell 扩展不链接核心库 | 扩展内直接解压 | explorer.exe 稳定性、升级时文件锁、体积 |
 | ADR-04 | 条目索引驻留 Rust，前端分页 | 整树序列化到 JS | 百万条目性能 |
 | ADR-05 | 主题 = JSON 令牌 → CSS 变量 | 多套 CSS 文件 | 可自定义、可校验、可热更 |

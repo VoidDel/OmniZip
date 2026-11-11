@@ -27,6 +27,12 @@ fn open(path: &Path) -> Box<dyn ArchiveReader> {
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
+/// Whether testing finds damage: an error, or a file reported as broken.
+fn damaged(r: &mut dyn ArchiveReader) -> bool {
+    test_archive(r, Selection::all(), &JobCtx::default())
+        .map_or(true, |rep| !rep.warnings.is_empty())
+}
+
 fn paths(r: &dyn ArchiveReader) -> Vec<&str> {
     r.entries().iter().map(|e| e.path.as_str()).collect()
 }
@@ -397,4 +403,159 @@ fn xar_every_compression() {
             ],
         );
     }
+}
+
+/// `sub/deep/big.txt` of the CAB fixtures.
+fn cab_big() -> Vec<u8> {
+    (1..=3000u32)
+        .map(|i| {
+            format!(
+                "line {i}: the quick brown fox {} jumps
+",
+                i * 7919 % 1000
+            )
+        })
+        .collect::<String>()
+        .into_bytes()
+}
+
+#[test]
+fn cab_every_method() {
+    let zh = OpenOptions {
+        locale: Some("zh-CN".into()),
+        ..Default::default()
+    };
+    for f in ["mszip", "lzx", "none"] {
+        let p = fixture(&format!("cab/{f}.cab"));
+        let mut r = ReadonlyEngine
+            .open(&p, FormatId::Cab, &zh, &JobCtx::default())
+            .unwrap();
+        assert_eq!(
+            paths(r.as_ref()),
+            [
+                "hello.txt",
+                "A Long File Name.txt",
+                "sub/deep/big.txt",
+                "sub/中文名.txt"
+            ],
+            "{f}"
+        );
+        // A name without the UTF-8 flag, in the system code page.
+        assert!(r.info().encoding.is_some(), "{f}");
+        // Two folders decode independently.
+        assert_eq!(r.solid_block(3).is_some(), f == "mszip", "{f}");
+        // One file in the middle of a folder, alone.
+        assert_eq!(content(r.as_mut(), "sub/deep/big.txt"), cab_big(), "{f}");
+        extract_all(
+            r.as_mut(),
+            &[
+                (
+                    "hello.txt",
+                    b"hello
+",
+                ),
+                (
+                    "A Long File Name.txt",
+                    b"long
+",
+                ),
+                ("sub/deep/big.txt", &cab_big()),
+                (
+                    "sub/中文名.txt",
+                    "中文内容
+"
+                    .as_bytes(),
+                ),
+            ],
+        );
+    }
+    // A damaged data block is reported, not written out.
+    let mut c = fs::read(fixture("cab/lzx.cab")).unwrap();
+    let n = c.len();
+    for b in &mut c[n - 2000..n - 1000] {
+        *b ^= 0x5A;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("bad.cab");
+    fs::write(&p, c).unwrap();
+    let mut r = open(&p);
+    assert!(damaged(r.as_mut()));
+}
+
+/// The GPL v2 text inside the lhasa archives: 18,092 bytes, checked by the archives' CRC-16.
+fn gpl2(r: &mut dyn ArchiveReader, name: &str) -> Vec<u8> {
+    let g = content(r, name);
+    assert_eq!(g.len(), 18092);
+    assert!(String::from_utf8_lossy(&g[..100]).contains("GNU GENERAL PUBLIC LICENSE"));
+    g
+}
+
+#[test]
+fn lzh_levels_and_methods() {
+    let mut texts = Vec::new();
+    for f in [
+        "lha_unix114i-h0_lh5",
+        "lha_unix114i-h1_lh6",
+        "lha_unix114i-h2_lh7",
+        "explzh_723-h2_lh5",
+        "unlha32-h2_lhx",
+    ] {
+        let mut r = open(&fixture(&format!("lzh/{f}.lzh")));
+        assert_eq!(r.info().format, FormatId::Lzh, "{f}");
+        // UNLHA32, a DOS-era tool, stores the name upper-case: kept as stored.
+        let name = r.entries()[0].path.clone();
+        assert_eq!(name.to_ascii_lowercase(), "gpl-2", "{f}");
+        texts.push(gpl2(r.as_mut(), &name));
+        let mut c = r.try_clone().unwrap();
+        test_archive(c.as_mut(), Selection::all(), &JobCtx::default()).unwrap();
+    }
+    assert!(texts.windows(2).all(|w| w[0] == w[1]));
+
+    for f in ["lha_unix114i-h2_subdir", "explzh_723-h1_subdir"] {
+        let mut r = open(&fixture(&format!("lzh/{f}.lzh")));
+        assert_eq!(
+            paths(r.as_ref()),
+            ["subdir/", "subdir/subdir2/", "subdir/subdir2/hello.txt"],
+            "{f}"
+        );
+        assert_eq!(content(r.as_mut(), "subdir/subdir2/hello.txt").len(), 12);
+    }
+    let r = open(&fixture("lzh/lha_unix114i-h1_symlink2.lzh"));
+    let link = &r.entries()[0];
+    assert_eq!(
+        (link.path.as_str(), link.kind),
+        ("symlink", EntryKind::Symlink)
+    );
+    assert_eq!(link.link_target.as_deref(), Some("path/to/target"));
+
+    // A flipped data byte fails the CRC-16 (or the decoder) instead of passing silently.
+    let mut b = fs::read(fixture("lzh/lha_unix114i-h1_lh6.lzh")).unwrap();
+    let n = b.len();
+    b[n - 100] ^= 0x01;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("bad.lzh");
+    fs::write(&p, b).unwrap();
+    let mut r = open(&p);
+    assert!(damaged(r.as_mut()));
+}
+
+#[test]
+fn arj_every_method() {
+    let license = fs::read(fixture("arj/LICENSE-unarj-rs-MIT")).unwrap();
+    for f in ["stored", "method1", "method2", "method3", "method4"] {
+        let mut r = open(&fixture(&format!("arj/{f}.arj")));
+        assert_eq!(r.info().format, FormatId::Arj, "{f}");
+        assert_eq!(paths(r.as_ref()), ["LICENSE"], "{f}");
+        assert_eq!(content(r.as_mut(), "LICENSE"), license, "{f}");
+        extract_all(r.as_mut(), &[("LICENSE", &license)]);
+    }
+    // Stored data is read in place.
+    let mut r = open(&fixture("arj/stored.arj"));
+    assert!(r.stored_range(0).is_some());
+    let mut r = open(&fixture("arj/wrongcrc32.arj"));
+    let report = test_archive(r.as_mut(), Selection::all(), &JobCtx::default()).unwrap();
+    assert_eq!(
+        report.warnings[0].code,
+        omnizip_core::ErrorCode::CrcMismatch
+    );
 }

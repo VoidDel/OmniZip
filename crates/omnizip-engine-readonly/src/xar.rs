@@ -2,7 +2,7 @@
 //! `docs/03-formats.md` §3): a header, a zlib-compressed XML table of contents, and a heap with
 //! each file's data, compressed on its own (zlib, bzip2, xz, lzma) or stored.
 
-use std::{collections::HashMap, io::Read, path::Path, time::SystemTime};
+use std::{collections::HashMap, io::Read, path::Path, sync::Arc, time::SystemTime};
 
 use omnizip_core::{
     ArchiveInfo, Codec, Entry, EntryKind, Error, ErrorCode, FormatId, JobCtx, OpenOptions, Result,
@@ -254,6 +254,8 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
                 None => "Store",
                 Some(Coding::Zlib) => "Deflate",
                 Some(Coding::Codec(c)) => c.method_name(),
+                // XAR uses none of the others.
+                Some(_) => "?",
             });
         }
         entries.push(e);
@@ -267,6 +269,7 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
         ranges: ranges.into(),
         chains: Default::default(),
         codings: codings.into(),
+        checks: Arc::from([]),
         input,
         in_place: true,
     })
