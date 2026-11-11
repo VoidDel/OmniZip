@@ -111,6 +111,13 @@ fn selective_extraction_inside_a_solid_block() {
     let (data, cut) = read_entry(r.as_mut(), id, 20, &ctx()).unwrap();
     assert_eq!(data, &content(7).as_bytes()[..20]);
     assert!(cut);
+
+    // Opening it with another program: the whole entry, written to a file as it is decoded.
+    let file = d.path().join("f07-cache.txt");
+    let size = fs::metadata(&a).unwrap().len();
+    let n = omnizip_core::extract_entry(r.as_mut(), id, &file, size, &ctx()).unwrap();
+    assert_eq!(fs::read_to_string(&file).unwrap(), content(7));
+    assert_eq!(n, content(7).len() as u64);
 }
 
 #[test]

@@ -12,7 +12,7 @@ use crate::{
     format::archive_stem,
     job::{Confirm, Phase},
     options::{ExtractOptions, OpenOptions, UpdateOp, WriteOptions},
-    sink::{CaptureSink, ExtractSink, FsSink, Report, Selection, TestSink},
+    sink::{CaptureSink, ExtractSink, FileSink, FsSink, Report, Selection, TestSink},
     source::Source,
     tree::TreeIndex,
 };
@@ -426,6 +426,26 @@ pub fn test(reader: &mut dyn ArchiveReader, selection: Selection, ctx: &JobCtx) 
     let report = reader.test(selection, ctx)?;
     ctx.finish();
     Ok(report)
+}
+
+/// Writes one entry to `path` as it is decoded (opening it with another program, previewing it in
+/// another app), never holding it whole in memory. `archive_size` sets the bomb cap. Returns the
+/// bytes written.
+pub fn extract_entry(
+    reader: &mut dyn ArchiveReader,
+    id: EntryId,
+    path: &std::path::Path,
+    archive_size: u64,
+    ctx: &JobCtx,
+) -> Result<u64> {
+    if reader.entries().get(id as usize).is_none() {
+        return Err(Error::invalid_argument(format!("no entry {id}")));
+    }
+    let limit = ctx.policy.max_unpacked(archive_size);
+    let mut sink = FileSink::new(id, path.to_owned(), limit);
+    reader.extract_to(&mut sink, ctx)?;
+    sink.written
+        .ok_or_else(|| Error::internal("entry not delivered"))
 }
 
 /// Reads up to `max` bytes of one entry (previews). Returns the data and whether it was cut.

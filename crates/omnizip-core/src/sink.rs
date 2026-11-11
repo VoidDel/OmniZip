@@ -1132,6 +1132,69 @@ impl ExtractSink for CaptureSink {
     }
 }
 
+/// Writes the content of one entry to a file as it is decoded (opening an entry with another
+/// program): an entry of any size passes through one buffer instead of memory. Past the bomb
+/// ratio it stops instead of asking, like a mount: nobody chose to unpack that much.
+pub struct FileSink {
+    id: EntryId,
+    path: PathBuf,
+    /// The most the entry may unpack to ([`SecurityPolicy::max_unpacked`]).
+    ///
+    /// [`SecurityPolicy::max_unpacked`]: crate::SecurityPolicy::max_unpacked
+    limit: u64,
+    /// Bytes written, once the entry has been.
+    pub written: Option<u64>,
+}
+
+impl FileSink {
+    pub fn new(id: EntryId, path: PathBuf, limit: u64) -> Self {
+        Self {
+            id,
+            path,
+            limit,
+            written: None,
+        }
+    }
+}
+
+impl ExtractSink for FileSink {
+    fn wants(&self, entry: &Entry) -> bool {
+        entry.id == self.id && self.written.is_none()
+    }
+
+    fn wanted(&self) -> Option<Vec<EntryId>> {
+        Some(vec![self.id])
+    }
+
+    fn entry(&mut self, entry: &Entry, data: EntryData<'_>, ctx: &JobCtx) -> Result<()> {
+        let path = &self.path;
+        let n = match data {
+            EntryData::Stream(r) => {
+                let mut f = File::create(path).map_err(|e| Error::io(e, path))?;
+                let mut buf = vec![0u8; 1 << 20];
+                let n = copy_with_buffer(r, &mut f, &mut buf, ctx, Some(self.limit))?;
+                f.flush().map_err(|e| Error::io(e, path))?;
+                n
+            }
+            EntryData::WriteTo(w) => {
+                w(path)?;
+                fs::metadata(path).map_err(|e| Error::io(e, path))?.len()
+            }
+            EntryData::None => {
+                let t = entry.link_target.as_deref().unwrap_or_default();
+                fs::write(path, t).map_err(|e| Error::io(e, path))?;
+                t.len() as u64
+            }
+        };
+        self.written = Some(n);
+        Ok(())
+    }
+
+    fn done(&self) -> bool {
+        self.written.is_some()
+    }
+}
+
 /// The file being written, behind the streaming bomb check. An entry of unknown size (a lone
 /// .gz / .zst / .xz) has no declared size to cap it, and a check once the file is whole comes
 /// after the disk is full; so the check runs before each write, with the bytes of earlier files.
@@ -1702,5 +1765,25 @@ mod tests {
         let mut r: &[u8] = b"0123456789";
         t.entry(&e, EntryData::Stream(&mut r), &ctx).unwrap();
         assert_eq!(t.report.bytes, 10);
+    }
+
+    #[test]
+    fn file_sink_streams_and_stops_at_the_limit() {
+        let d = tempfile::tempdir().unwrap();
+        let ctx = JobCtx::default();
+        let e = file_entry(3, "dir/a.bin", b"0123456789");
+        let out = d.path().join("a.bin");
+        let mut s = FileSink::new(3, out.clone(), 100);
+        assert!(s.wants(&e) && !s.done());
+        let mut r: &[u8] = b"0123456789";
+        s.entry(&e, EntryData::Stream(&mut r), &ctx).unwrap();
+        assert_eq!(s.written, Some(10));
+        assert!(s.done() && !s.wants(&e));
+        assert_eq!(fs::read(&out).unwrap(), b"0123456789");
+
+        let mut s = FileSink::new(3, d.path().join("big.bin"), 4);
+        let mut r: &[u8] = b"0123456789";
+        let err = s.entry(&e, EntryData::Stream(&mut r), &ctx).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::CompressionBomb);
     }
 }

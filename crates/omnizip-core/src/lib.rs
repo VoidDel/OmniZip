@@ -36,7 +36,7 @@ pub mod timeutil;
 pub mod tree;
 pub mod volume;
 
-pub use archive::{ArchiveInfo, ArchiveReader, Engine, extract, read_entry, test};
+pub use archive::{ArchiveInfo, ArchiveReader, Engine, extract, extract_entry, read_entry, test};
 pub use entry::{Entry, EntryId, EntryKind};
 pub use error::{Error, ErrorCode, ErrorReport, Result};
 pub use format::{Capabilities, Codec, FormatId, MountClass, Tier};
