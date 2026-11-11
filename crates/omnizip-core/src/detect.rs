@@ -133,22 +133,78 @@ fn parse_octal(field: &[u8]) -> Option<u64> {
     u64::from_str_radix(std::str::from_utf8(&s).ok()?, 8).ok()
 }
 
-/// Looks for an archive embedded in a Windows executable (self-extracting archive).
-fn sniff_sfx(head: &[u8], tail: &[u8]) -> Option<FormatId> {
+/// How far past the end of the program an SFX archive may start: some SFX modules put a
+/// configuration block (the 7-Zip installer's `;!@Install@!UTF-8!` text) in between.
+const SFX_SCAN: usize = 1 << 20;
+
+/// Where the data appended to a Windows executable (its overlay) starts: the end of the
+/// furthest section. `None` when `head` is not a PE file or its section table lies further in.
+pub fn pe_overlay(head: &[u8]) -> Option<u64> {
+    let u16_at = |o: usize| head.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let u32_at = |o: usize| {
+        head.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
     if !head.starts_with(b"MZ") {
         return None;
     }
-    // ZIP end-of-central-directory near the end of the file.
-    if find(tail, b"PK\x05\x06").is_some() {
-        return Some(FormatId::Zip);
+    let pe = u32_at(0x3C)? as usize;
+    if head.get(pe..pe + 4)? != b"PE\0\0" {
+        return None;
     }
-    if find(head, &[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]).is_some() {
-        return Some(FormatId::SevenZ);
+    let sections = usize::from(u16_at(pe + 6)?);
+    let optional = usize::from(u16_at(pe + 20)?);
+    let table = pe + 24 + optional;
+    let mut end = 0u64;
+    for i in 0..sections {
+        let s = table + i * 40;
+        let size = u64::from(u32_at(s + 16)?);
+        let ptr = u64::from(u32_at(s + 20)?);
+        end = end.max(ptr + size);
     }
-    if find(head, b"Rar!\x1a\x07").is_some() {
-        return Some(FormatId::Rar);
+    (end > 0).then_some(end)
+}
+
+/// A 7z signature header at the start of `b`: the signature, and the CRC of the start header
+/// that follows, so that the bytes of a program are not taken for an archive.
+fn is_7z_start(b: &[u8]) -> bool {
+    b.len() >= 32
+        && b.starts_with(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C])
+        && crc32fast::hash(&b[12..32]) == u32::from_le_bytes([b[8], b[9], b[10], b[11]])
+}
+
+/// The archive inside a self-extracting Windows executable: its format and where it starts.
+/// 7z and RAR archives follow the program (looked for from the end of its sections on); a ZIP
+/// is found by its end record, its offset by the ZIP engine. `None` for other files.
+pub fn find_sfx(path: &Path) -> Result<Option<(FormatId, u64)>> {
+    let (head, tail, len) = read_windows(path)?;
+    if !head.starts_with(b"MZ") {
+        return Ok(None);
     }
-    None
+    let from = pe_overlay(&head).filter(|&o| o < len).unwrap_or(0);
+    let mut f = File::open(path).map_err(|e| Error::io(e, path))?;
+    f.seek(SeekFrom::Start(from))
+        .map_err(|e| Error::io(e, path))?;
+    let mut window = Vec::with_capacity(SFX_SCAN + 32);
+    f.take((SFX_SCAN + 32) as u64)
+        .read_to_end(&mut window)
+        .map_err(|e| Error::io(e, path))?;
+    let seven = (0..window.len().saturating_sub(31))
+        .find(|&i| window[i] == 0x37 && is_7z_start(&window[i..]));
+    let rar = find(&window, b"Rar!\x1a\x07");
+    let found = match (seven, rar) {
+        (Some(a), Some(b)) if b < a => Some((FormatId::Rar, b)),
+        (Some(a), _) => Some((FormatId::SevenZ, a)),
+        (None, Some(b)) => Some((FormatId::Rar, b)),
+        (None, None) => None,
+    };
+    if let Some((format, at)) = found {
+        return Ok(Some((format, from + at as u64)));
+    }
+    if find(&tail, b"PK\x05\x06").is_some() {
+        return Ok(Some((FormatId::Zip, 0)));
+    }
+    Ok(None)
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -185,7 +241,11 @@ pub fn detect_path(path: &Path) -> Result<Detection> {
     if let Some(found) = sniff(&head) {
         // A ".tar.gz" file sniffs as gzip; that is consistent, not a mismatch.
         let consistent = by_name.is_none_or(|n| {
-            n == found || n.codec().is_some() && n.codec() == found.codec() || n == FormatId::Deb
+            n == found
+                || n.codec().is_some() && n.codec() == found.codec()
+                || n == FormatId::Deb
+                // `backup.001` holding a 7z: the parts of an archive, named as parts.
+                || n == FormatId::Split
         });
         let format = match by_name {
             // Keep the more specific compound name when the codec agrees.
@@ -199,7 +259,7 @@ pub fn detect_path(path: &Path) -> Result<Detection> {
             sfx: false,
         });
     }
-    if let Some(found) = sniff_sfx(&head, &tail) {
+    if let Some((found, _)) = find_sfx(path)? {
         return Ok(Detection {
             format: found,
             by_magic: true,
@@ -207,9 +267,21 @@ pub fn detect_path(path: &Path) -> Result<Detection> {
             sfx: true,
         });
     }
+    // The last volume of a spanned ZIP (`x.z01`, …, `x.zip`) starts in the middle of the data.
+    if by_name == Some(FormatId::Zip) && find(&tail, b"PK\x05\x06").is_some() {
+        return Ok(Detection {
+            format: FormatId::Zip,
+            by_magic: true,
+            extension_mismatch: false,
+            sfx: false,
+        });
+    }
     // Brotli and raw LZMA have no reliable signature; trust the name.
     if let Some(n) = by_name
-        && matches!(n, FormatId::Br | FormatId::TarBr | FormatId::Lzma)
+        && matches!(
+            n,
+            FormatId::Br | FormatId::TarBr | FormatId::Lzma | FormatId::Split
+        )
     {
         return Ok(Detection {
             format: n,
@@ -278,6 +350,36 @@ mod tests {
         let d = detect_path(&p).unwrap();
         assert_eq!(d.format, FormatId::Zip);
         assert!(d.extension_mismatch);
+
+        // A self-extracting 7z: a PE program whose sections end at 0x400, a configuration
+        // text, then the archive (with a valid start-header CRC).
+        let mut exe = vec![0u8; 0x400];
+        exe[..2].copy_from_slice(b"MZ");
+        exe[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        exe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        exe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+        exe[0x94..0x96].copy_from_slice(&0xE0u16.to_le_bytes());
+        let sec = 0x80 + 24 + 0xE0;
+        exe[sec + 16..sec + 20].copy_from_slice(&0x200u32.to_le_bytes());
+        exe[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        assert_eq!(pe_overlay(&exe), Some(0x400));
+        // A signature inside the program is not an archive.
+        exe[0x210..0x216].copy_from_slice(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]);
+        exe.extend_from_slice(b";!@Install@!UTF-8!\nTitle=\"x\"\n;!@InstallEnd@!");
+        let at = exe.len() as u64;
+        let mut start = vec![0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0, 4, 0, 0, 0, 0];
+        start.extend_from_slice(&[1u8; 20]);
+        let crc = crc32fast::hash(&start[12..32]);
+        start[8..12].copy_from_slice(&crc.to_le_bytes());
+        exe.extend_from_slice(&start);
+        let p = dir.path().join("setup.exe");
+        std::fs::write(&p, &exe).unwrap();
+        assert_eq!(find_sfx(&p).unwrap(), Some((FormatId::SevenZ, at)));
+        let d = detect_path(&p).unwrap();
+        assert!(d.sfx && d.format == FormatId::SevenZ);
+        // A plain program is no archive.
+        std::fs::write(&p, &exe[..0x400]).unwrap();
+        assert_eq!(find_sfx(&p).unwrap(), None);
 
         let p = dir.path().join("notes.txt");
         std::fs::write(&p, b"just text").unwrap();

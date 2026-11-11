@@ -3,7 +3,7 @@
 export type FormatId =
   | 'zip' | '7z' | 'rar' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz' | 'tar.zst' | 'tar.lz4' | 'tar.br'
   | 'gz' | 'bz2' | 'xz' | 'lzma' | 'zst' | 'lz4' | 'br'
-  | 'iso' | 'cab' | 'cpio' | 'ar' | 'deb' | 'rpm' | 'xar' | 'arj' | 'lzh' | 'wim';
+  | 'iso' | 'cab' | 'cpio' | 'ar' | 'deb' | 'rpm' | 'xar' | 'arj' | 'lzh' | 'wim' | 'split';
 
 export type Platform = 'win' | 'mac' | 'linux';
 export type EntryKind = 'file' | 'dir' | 'symlink' | 'hardlink' | 'other';

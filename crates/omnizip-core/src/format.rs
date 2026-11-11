@@ -64,6 +64,10 @@ pub enum FormatId {
     Lzh,
     #[serde(rename = "wim")]
     Wim,
+    /// A file cut into numbered parts (`movie.mkv.001`, `.002`, …) without any container:
+    /// read as an archive of that one file, so extracting it joins the parts.
+    #[serde(rename = "split")]
+    Split,
 }
 
 /// Single-stream codecs used by `tar.*` and standalone compressed files.
@@ -172,6 +176,7 @@ const ALL: &[FormatId] = &[
     FormatId::Arj,
     FormatId::Lzh,
     FormatId::Wim,
+    FormatId::Split,
 ];
 
 impl FormatId {
@@ -210,6 +215,7 @@ impl FormatId {
             FormatId::Arj => "arj",
             FormatId::Lzh => "lzh",
             FormatId::Wim => "wim",
+            FormatId::Split => "split",
         }
     }
 
@@ -271,6 +277,7 @@ impl FormatId {
             FormatId::Arj => &[".arj"],
             FormatId::Lzh => &[".lzh", ".lha"],
             FormatId::Wim => &[".wim", ".swm", ".esd"],
+            FormatId::Split => &[".001"],
         }
     }
 
@@ -292,7 +299,9 @@ impl FormatId {
                 }
             }
         }
+        // Numbered parts of anything else: a split file.
         best.map(|(_, f)| f)
+            .or_else(|| is_numbered_part(&lower).then_some(FormatId::Split))
     }
 
     /// The codec of a `tar.*` or single-file format.
@@ -378,7 +387,8 @@ impl FormatId {
             | FormatId::Rpm
             | FormatId::Xar
             | FormatId::Arj
-            | FormatId::Lzh => Tier::Two,
+            | FormatId::Lzh
+            | FormatId::Split => Tier::Two,
             FormatId::Wim => Tier::Three,
         }
     }
@@ -386,9 +396,12 @@ impl FormatId {
     /// Mount class (random-access quality) of the format.
     pub const fn mount_class(self, solid: bool) -> MountClass {
         match self {
-            FormatId::Tar | FormatId::Iso | FormatId::Cpio | FormatId::Cab | FormatId::Ar => {
-                MountClass::A
-            }
+            FormatId::Tar
+            | FormatId::Iso
+            | FormatId::Cpio
+            | FormatId::Cab
+            | FormatId::Ar
+            | FormatId::Split => MountClass::A,
             FormatId::Zip => MountClass::B,
             FormatId::SevenZ | FormatId::Rar if solid => MountClass::C,
             FormatId::SevenZ | FormatId::Rar => MountClass::B,
@@ -419,6 +432,13 @@ impl fmt::Display for FormatId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
     }
+}
+
+/// A name ending in a three-digit part number (`x.001`). The input must be lower-case.
+pub fn is_numbered_part(lower: &str) -> bool {
+    lower.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty() && ext.len() == 3 && ext.bytes().all(|b| b.is_ascii_digit())
+    })
 }
 
 /// Removes multi-volume suffixes: `x.7z.001` → `x.7z`, `x.part01.rar` → `x.rar`,

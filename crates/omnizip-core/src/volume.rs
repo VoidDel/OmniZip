@@ -149,16 +149,50 @@ fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
     std::os::unix::fs::FileExt::read_at(f, buf, offset)
 }
 
-/// The open files of an archive input (one, or the volumes of a split set).
+/// One piece of an archive input.
+#[derive(Debug)]
+enum Part {
+    /// A file from offset `base` on (an archive inside an executable starts after the program).
+    File { file: File, base: u64 },
+    /// Bytes made up in memory (the rewritten central directory of a spanned ZIP).
+    Bytes(Arc<[u8]>),
+}
+
+/// The pieces of an archive input, one after another: one file, the volumes of a split set, or
+/// a window of a file.
 #[derive(Debug)]
 struct Volumes {
-    files: Vec<File>,
+    parts: Vec<Part>,
     starts: Vec<u64>,
     len: u64,
 }
 
 impl Volumes {
-    /// Reads at joined offset `pos`, within one volume.
+    fn new() -> Self {
+        Self {
+            parts: Vec::new(),
+            starts: Vec::new(),
+            len: 0,
+        }
+    }
+
+    /// Adds `path` from offset `base` to its end.
+    fn push_file(&mut self, path: &Path, base: u64) -> Result<()> {
+        let file = File::open(path).map_err(|e| Error::io(e, path))?;
+        let size = file.metadata().map_err(|e| Error::io(e, path))?.len();
+        self.starts.push(self.len);
+        self.len += size.saturating_sub(base);
+        self.parts.push(Part::File { file, base });
+        Ok(())
+    }
+
+    fn push_bytes(&mut self, bytes: Vec<u8>) {
+        self.starts.push(self.len);
+        self.len += bytes.len() as u64;
+        self.parts.push(Part::Bytes(bytes.into()));
+    }
+
+    /// Reads at joined offset `pos`, within one part.
     fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
         if pos >= self.len || buf.is_empty() {
             return Ok(0);
@@ -166,10 +200,18 @@ impl Volumes {
         let v = volume_at(&self.starts, pos);
         let end = self.starts.get(v + 1).copied().unwrap_or(self.len);
         let want = buf.len().min((end - pos) as usize);
-        loop {
-            match read_at(&self.files[v], &mut buf[..want], pos - self.starts[v]) {
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                r => return r,
+        let within = pos - self.starts[v];
+        match &self.parts[v] {
+            Part::File { file, base } => loop {
+                match read_at(file, &mut buf[..want], base + within) {
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    r => return r,
+                }
+            },
+            Part::Bytes(b) => {
+                let at = within as usize;
+                buf[..want].copy_from_slice(&b[at..at + want]);
+                Ok(want)
             }
         }
     }
@@ -200,22 +242,37 @@ impl SharedInput {
         let paths = split_volumes(path)
             .filter(|v| v.len() > 1)
             .unwrap_or_else(|| vec![path.to_owned()]);
-        let mut files = Vec::with_capacity(paths.len());
-        let mut starts = Vec::with_capacity(paths.len());
-        let mut len = 0;
-        for p in &paths {
-            let f = File::open(p).map_err(|e| Error::io(e, p))?;
-            starts.push(len);
-            len += f.metadata().map_err(|e| Error::io(e, p))?.len();
-            files.push(f);
+        Self::join(&paths, Vec::new())
+    }
+
+    /// `path` from `offset` on, as if the file started there: the archive of a self-extracting
+    /// executable, which the archive's own offsets count from.
+    pub fn open_from(path: &Path, offset: u64) -> Result<Self> {
+        let mut v = Volumes::new();
+        v.push_file(path, offset)?;
+        Ok(Self::from_volumes(v))
+    }
+
+    /// `paths` one after another, then `tail` (bytes made up in memory, empty for none).
+    pub fn join(paths: &[PathBuf], tail: Vec<u8>) -> Result<Self> {
+        let mut v = Volumes::new();
+        for p in paths {
+            v.push_file(p, 0)?;
         }
-        Ok(Self {
-            volumes: Arc::new(Volumes { files, starts, len }),
+        if !tail.is_empty() {
+            v.push_bytes(tail);
+        }
+        Ok(Self::from_volumes(v))
+    }
+
+    fn from_volumes(volumes: Volumes) -> Self {
+        Self {
+            volumes: Arc::new(volumes),
             pos: 0,
             buf: Box::default(),
             buf_start: 0,
             filled: 0,
-        })
+        }
     }
 
     /// Total length of the input.
@@ -615,6 +672,29 @@ mod tests {
             assert_eq!(&big[..n], &data[data.len() - INPUT_BUFFER - 5..]);
             assert_eq!(a.read(&mut x).unwrap(), 0);
         }
+    }
+
+    #[test]
+    fn shared_input_windows_and_tails() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.bin");
+        let b = dir.path().join("b.bin");
+        fs::write(&a, b"MZstub|archive").unwrap();
+        fs::write(&b, b"0123456789").unwrap();
+        let mut w = SharedInput::open_from(&a, 7).unwrap();
+        let mut back = Vec::new();
+        w.read_to_end(&mut back).unwrap();
+        assert_eq!(back, b"archive");
+        assert_eq!(w.len(), 7);
+
+        let mut j = SharedInput::join(&[a.clone(), b.clone()], b"TAIL".to_vec()).unwrap();
+        assert_eq!(j.len(), 14 + 10 + 4);
+        j.seek(SeekFrom::Start(12)).unwrap();
+        let mut x = [0u8; 16];
+        j.read_exact(&mut x).unwrap();
+        assert_eq!(&x, b"ve0123456789TAIL");
+        // Past an offset larger than the file: nothing, not an underflow.
+        assert_eq!(SharedInput::open_from(&b, 100).unwrap().len(), 0);
     }
 
     #[test]

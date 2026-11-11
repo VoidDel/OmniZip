@@ -19,6 +19,7 @@ pub fn registry() -> FormatRegistry {
     r.register(Arc::new(omnizip_engine_tar::TarEngine));
     r.register(Arc::new(omnizip_engine_7z::SevenZEngine));
     r.register(Arc::new(omnizip_engine_zip::ZipEngine));
+    r.register(Arc::new(omnizip_engine_readonly::ReadonlyEngine));
     #[cfg(feature = "rar")]
     r.register(Arc::new(omnizip_engine_rar::RarEngine));
     r

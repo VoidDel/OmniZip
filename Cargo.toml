@@ -7,6 +7,7 @@ members = [
   "crates/omnizip-engine-7z",
   "crates/omnizip-engine-tar",
   "crates/omnizip-engine-rar",
+  "crates/omnizip-engine-readonly",
   "crates/omnizip-formats",
   "crates/omnizip-i18n",
   "crates/omnizip-cli",
@@ -24,6 +25,7 @@ default-members = [
   "crates/omnizip-engine-7z",
   "crates/omnizip-engine-tar",
   "crates/omnizip-engine-rar",
+  "crates/omnizip-engine-readonly",
   "crates/omnizip-formats",
   "crates/omnizip-i18n",
   "crates/omnizip-cli",
@@ -49,6 +51,7 @@ omnizip-engine-zip = { path = "crates/omnizip-engine-zip" }
 omnizip-engine-7z = { path = "crates/omnizip-engine-7z" }
 omnizip-engine-tar = { path = "crates/omnizip-engine-tar" }
 omnizip-engine-rar = { path = "crates/omnizip-engine-rar" }
+omnizip-engine-readonly = { path = "crates/omnizip-engine-readonly" }
 omnizip-formats = { path = "crates/omnizip-formats" }
 omnizip-i18n = { path = "crates/omnizip-i18n" }
 omnizip-vfs = { path = "crates/omnizip-vfs" }

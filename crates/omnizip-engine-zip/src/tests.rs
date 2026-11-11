@@ -878,3 +878,101 @@ fn parallel_extraction_reports_damage() {
         Ok(rep) => assert!(!rep.warnings.is_empty(), "the damage is reported"),
     }
 }
+
+#[test]
+fn spanned_volumes_read_from_any_part() {
+    let d = tempfile::tempdir().unwrap();
+    // Stored entries make the data long enough for several volumes.
+    let src = d.path().join("数据");
+    fs::create_dir_all(&src).unwrap();
+    let big: Vec<u8> = (0..200_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    fs::write(src.join("a.bin"), &big).unwrap();
+    fs::write(src.join("b.txt"), "第二个文件".repeat(500)).unwrap();
+    let sources = source::collect(&[src], &CollectOptions::default(), &ctx()).unwrap();
+    let whole = d.path().join("whole.zip");
+    let opts = WriteOptions {
+        level: Level::Store,
+        comment: Some("spanned".into()),
+        ..Default::default()
+    };
+    ZipEngine.create(&whole, &sources, &opts, &ctx()).unwrap();
+    let vols = spans::tests::span(&fs::read(&whole).unwrap(), 65_536);
+    assert!(vols.len() >= 4);
+    let set = d.path().join("set");
+    fs::create_dir(&set).unwrap();
+    let names: Vec<String> = (1..vols.len())
+        .map(|n| format!("x.z{n:02}"))
+        .chain(["x.zip".to_owned()])
+        .collect();
+    for (name, data) in names.iter().zip(&vols) {
+        fs::write(set.join(name), data).unwrap();
+    }
+    for first in ["x.zip", "x.z01", "x.z02"] {
+        let mut r = open(&set.join(first));
+        assert_eq!(r.info().volumes, vols.len() as u32);
+        assert_eq!(r.info().comment.as_deref(), Some("spanned"));
+        let out = d.path().join(format!("out-{first}"));
+        let xo = ExtractOptions {
+            destination: out.clone(),
+            ..Default::default()
+        };
+        let report = extract(r.as_mut(), &xo, Selection::all(), &ctx()).unwrap();
+        assert_eq!(report.files, 2);
+        assert_eq!(fs::read(out.join("数据/a.bin")).unwrap(), big);
+        assert_eq!(
+            fs::read_to_string(out.join("数据/b.txt")).unwrap(),
+            "第二个文件".repeat(500)
+        );
+        // Spread over volumes: never read in place.
+        assert_eq!(r.stored_range(0), None);
+    }
+    // The registry finds it by any part, the last one too (it starts mid-data).
+    let det = omnizip_core::detect::detect_path(&set.join("x.zip")).unwrap();
+    assert_eq!(det.format, FormatId::Zip);
+    // Not updated in place.
+    let err = update(&set.join("x.zip"), &[], &WriteOptions::default(), &ctx()).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::UnsupportedOperation);
+    // A volume missing in the middle is named.
+    fs::remove_file(set.join("x.z03")).unwrap();
+    let err = ZipEngine
+        .open(
+            &set.join("x.z01"),
+            FormatId::Zip,
+            &OpenOptions::default(),
+            &ctx(),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(err.code(), ErrorCode::MissingVolume);
+    assert!(err.param("path").unwrap().ends_with("x.z03"), "{err}");
+}
+
+#[test]
+fn self_extracting_zip_opens() {
+    let d = tempfile::tempdir().unwrap();
+    let zip = build(d.path(), &WriteOptions::default());
+    let mut exe = b"MZ".to_vec();
+    exe.resize(4096, 0);
+    exe.extend_from_slice(&fs::read(&zip).unwrap());
+    let sfx = d.path().join("setup.exe");
+    fs::write(&sfx, exe).unwrap();
+    let det = omnizip_core::detect::detect_path(&sfx).unwrap();
+    assert!(det.sfx && det.format == FormatId::Zip);
+    let mut r = open(&sfx);
+    assert!(r.info().sfx);
+    let out = d.path().join("x");
+    let xo = ExtractOptions {
+        destination: out.clone(),
+        ..Default::default()
+    };
+    assert_eq!(
+        extract(r.as_mut(), &xo, Selection::all(), &ctx())
+            .unwrap()
+            .files,
+        2
+    );
+    assert_eq!(
+        fs::read_to_string(out.join("项目/说明.txt")).unwrap(),
+        "中文内容".repeat(100)
+    );
+}

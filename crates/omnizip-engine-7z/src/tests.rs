@@ -465,3 +465,65 @@ fn parallel_extraction_writes_what_serial_does() {
         }
     }
 }
+
+/// A minimal PE program (one section ending at 0x400) with `config` after it, as SFX modules
+/// are laid out.
+fn sfx_stub(config: &[u8]) -> Vec<u8> {
+    let mut exe = vec![0u8; 0x400];
+    exe[..2].copy_from_slice(b"MZ");
+    exe[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+    exe[0x80..0x84].copy_from_slice(b"PE\0\0");
+    exe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+    exe[0x94..0x96].copy_from_slice(&0xE0u16.to_le_bytes());
+    let sec = 0x80 + 24 + 0xE0;
+    exe[sec + 16..sec + 20].copy_from_slice(&0x200u32.to_le_bytes());
+    exe[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes());
+    // The signature bytes inside the program itself must not be taken for the archive.
+    exe[0x300..0x306].copy_from_slice(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]);
+    exe.extend_from_slice(config);
+    exe
+}
+
+#[test]
+fn self_extracting_7z_opens() {
+    let d = tempfile::tempdir().unwrap();
+    for pw in [None, Some("秘密")] {
+        let opts = WriteOptions {
+            password: pw.map(|p| Secret::from(p.to_owned())),
+            encrypt_names: pw.is_some(),
+            ..opts7z()
+        };
+        let a = build(d.path(), &opts);
+        let mut exe = sfx_stub(b";!@Install@!UTF-8!\nTitle=\"Setup\"\n;!@InstallEnd@!\n");
+        exe.extend_from_slice(&fs::read(&a).unwrap());
+        let sfx = d.path().join("setup.exe");
+        fs::write(&sfx, exe).unwrap();
+        let det = omnizip_core::detect::detect_path(&sfx).unwrap();
+        assert!(det.sfx && det.format == FormatId::SevenZ);
+        let c = pw.map_or_else(ctx, pw_ctx);
+        let mut r = open_with(&sfx, &c).unwrap();
+        assert!(r.info().sfx);
+        assert_eq!(r.info().header_encrypted, pw.is_some());
+        let out = d.path().join(format!("x-{}", pw.is_some()));
+        let xo = ExtractOptions {
+            destination: out.clone(),
+            ..Default::default()
+        };
+        let report = extract(r.as_mut(), &xo, Selection::all(), &c).unwrap();
+        assert_eq!(report.files, 13);
+        assert_eq!(
+            fs::read_to_string(out.join("数据/sub/f05.txt")).unwrap(),
+            content(5)
+        );
+        // A clone decodes from the same offset.
+        let mut c2 = r.try_clone().unwrap();
+        assert_eq!(
+            test_archive(c2.as_mut(), Selection::all(), &c)
+                .unwrap()
+                .files,
+            13
+        );
+        fs::remove_file(&a).unwrap();
+        fs::remove_dir_all(d.path().join("数据")).unwrap();
+    }
+}

@@ -17,6 +17,7 @@ omnizip-core.workspace = true
 omnizip-engine-zip.workspace = true
 omnizip-engine-7z.workspace = true
 omnizip-engine-tar.workspace = true
+omnizip-engine-readonly.workspace = true
 omnizip-engine-rar = { workspace = true, optional = true }
 tempfile.workspace = true
 

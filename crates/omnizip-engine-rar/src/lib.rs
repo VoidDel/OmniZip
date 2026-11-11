@@ -491,6 +491,41 @@ mod tests {
     }
 
     #[test]
+    fn self_extracting_rar_opens() {
+        // A PE program whose one section ends at 0x400, then the archive, as WinRAR lays out
+        // its SFX modules.
+        let mut exe = vec![0u8; 0x400];
+        exe[..2].copy_from_slice(b"MZ");
+        exe[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        exe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        exe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+        exe[0x94..0x96].copy_from_slice(&0xE0u16.to_le_bytes());
+        let sec = 0x80 + 24 + 0xE0;
+        exe[sec + 16..sec + 20].copy_from_slice(&0x200u32.to_le_bytes());
+        exe[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        exe.extend_from_slice(&fs::read(fixture("version.rar")).unwrap());
+        let d = tempfile::tempdir().unwrap();
+        let sfx = d.path().join("setup.exe");
+        fs::write(&sfx, exe).unwrap();
+        let det = omnizip_core::detect::detect_path(&sfx).unwrap();
+        assert!(det.sfx && det.format == FormatId::Rar);
+        let mut r = RarEngine
+            .open(&sfx, FormatId::Rar, &OpenOptions::default(), &ctx())
+            .unwrap();
+        assert_eq!(r.entries()[0].path, "VERSION");
+        let o = ExtractOptions {
+            destination: d.path().join("x"),
+            ..Default::default()
+        };
+        assert_eq!(
+            extract(r.as_mut(), &o, Selection::all(), &ctx())
+                .unwrap()
+                .files,
+            1
+        );
+    }
+
+    #[test]
     fn unicode_names() {
         let r = RarEngine
             .open(

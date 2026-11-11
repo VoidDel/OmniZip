@@ -24,6 +24,7 @@ use zip::{
 };
 
 mod parallel;
+mod spans;
 
 const UTF8_FLAG: u16 = 1 << 11;
 
@@ -190,8 +191,16 @@ pub struct ZipReader {
 
 impl ZipReader {
     fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Self> {
-        let input = SharedInput::open(path)?;
-        let archive_size = volume::input_size(path)?;
+        // A spanned set (`x.z01` … `x.zip`), split volumes (`x.zip.001` …) or one file.
+        let spanned = spans::volumes(path);
+        let (input, archive_size, volumes) = match &spanned {
+            Some(v) => (spans::open(v)?, spans::size(v)?, v.len() as u32),
+            None => (
+                SharedInput::open(path)?,
+                volume::input_size(path)?,
+                volume::split_volumes(path).map_or(1, |v| v.len() as u32),
+            ),
+        };
         let archive = ZipArchive::new(input).map_err(|e| map_err(e, path))?;
         ctx.policy.check_entries(archive.len() as u64)?;
 
@@ -205,7 +214,7 @@ impl ZipReader {
         let mut info = ArchiveInfo::new(path, FormatId::Zip, archive_size);
         info.encoding = enc;
         info.sfx = archive.offset() > 0;
-        info.volumes = volume::split_volumes(path).map_or(1, |v| v.len() as u32);
+        info.volumes = volumes;
         let comment = archive.comment();
         if !comment.is_empty() {
             info.comment = Some(
@@ -597,7 +606,7 @@ fn under(name: &str, prefix: &str) -> bool {
 /// In-place update: untouched entries are copied raw (no recompression), then additions are
 /// written. The result replaces the original atomically.
 fn update(path: &Path, ops: &[UpdateOp], opts: &WriteOptions, ctx: &JobCtx) -> Result<Report> {
-    if volume::split_volumes(path).is_some_and(|v| v.len() > 1) {
+    if volume::split_volumes(path).is_some_and(|v| v.len() > 1) || spans::volumes(path).is_some() {
         return Err(Error::new(ErrorCode::UnsupportedOperation).with("operation", "update-split"));
     }
     let open_opts = OpenOptions::default();

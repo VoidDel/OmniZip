@@ -38,8 +38,8 @@
 | RPM | .rpm | 纯 Rust 头解析 + 内层 cpio | payload 可能为 gz / xz / zstd |
 | ARJ / LZH (LHA) | .arj .lzh .lha | libarchive | 老格式，日本/亚洲历史资料常见 |
 | XAR / PKG | .xar .pkg | libarchive | macOS 安装包 |
-| 自解压 SFX | .exe | 检测覆盖区 → 交给 ZIP / 7z / RAR 引擎 | 不执行任何代码 |
-| 分割文件 | .001 .002…（无容器） | 内置拼接 | 识别 `.001` 为纯分割时提供"合并"操作 |
+| 自解压 SFX | .exe | 检测覆盖区 → 交给 ZIP / 7z / RAR 引擎 | 不执行任何代码。按 PE 节表求出程序末尾（覆盖区起点），从那里往后 1 MiB 内找 7z（校验起始头 CRC，程序里碰巧出现的签名不算）与 RAR 签名，可越过 7-Zip 安装器的配置文本；ZIP 按末尾的结束记录。7z 从找到的位置开窗口读取（`SharedInput::open_from`），RAR 与 ZIP 由各自的库处理偏移（2026-11-11） |
+| 分割文件 | .001 .002…（无容器） | 内置拼接（`omnizip-engine-readonly`） | 不是压缩包分卷的 `.001`（`movie.mkv.001`）按格式 `split` 打开：一个条目，即拼接后的文件，"解压"就是合并；从任意一卷都能打开，缺第一卷时报缺卷。内容是压缩包的（`backup.001` 里是 7z）仍交给那个格式 |
 
 ## 4. Tier 3 与明确不支持
 
@@ -161,6 +161,7 @@ pub struct ExtractOptions {
 ## 7. 多卷
 
 - 支持 ZIP spanned（`.zip` + `.z01…`）、7z（`.7z.001…`）、RAR（`.part1.rar` / `.r00`）。
+- ZIP spanned / split（PKZIP、WinZip、Info-ZIP 的 `x.z01 … x.zip`，2026-11-11，`omnizip-engine-zip` 的 `spans`）：各卷首尾相接成一个输入，再在末尾接上改写过的中央目录（偏移改为"卷起点 + 卷内偏移"，卷号全为 0，需要时改用 zip64 字段），zip 库照普通压缩包读；从任意一卷都能打开，缺卷时报出缺的是哪一卷；不支持原地更新。
 - `VolumeSource` 把多个文件抽象为一个连续的 `Read + Seek`；缺卷时暂停并提示定位或跳过。
 - 创建分卷预设：FAT32（4 GiB − 1 B）、DVD（4.37 GiB）、邮件（25 MB）、自定义。
 

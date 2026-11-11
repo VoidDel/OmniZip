@@ -11,7 +11,7 @@ use std::{
 use omnizip_core::{
     ArchiveInfo, ArchiveReader, Capabilities, Engine, Entry, EntryData, EntryId, EntryKind, Error,
     ErrorCode, ExtractSink, FormatId, JobCtx, Level, OpenOptions, Phase, Report, Result, Secret,
-    Source, SourceKind, WriteOptions,
+    Source, SourceKind, WriteOptions, detect,
     job::MAX_PASSWORD_ATTEMPTS,
     sink::drain,
     source,
@@ -132,9 +132,25 @@ pub struct SevenZReader {
     display_name: String,
 }
 
+/// The archive input: the file (or the volumes of a split set), or the archive part of a
+/// self-extracting executable, whose offsets count from where the archive starts.
+fn open_source(path: &Path) -> Result<(SharedInput, u64)> {
+    let mut sig = [0u8; 6];
+    let starts_with_archive = std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut sig))
+        .is_ok_and(|()| sig == [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]);
+    if !starts_with_archive
+        && let Some((FormatId::SevenZ, offset)) = detect::find_sfx(path)?
+        && offset > 0
+    {
+        return Ok((SharedInput::open_from(path, offset)?, offset));
+    }
+    Ok((SharedInput::open(path)?, 0))
+}
+
 impl SevenZReader {
     fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Self> {
-        let mut source = SharedInput::open(path)?;
+        let (mut source, sfx_offset) = open_source(path)?;
         let archive_size = volume::input_size(path)?;
         let display_name = path
             .file_name()
@@ -186,6 +202,7 @@ impl SevenZReader {
         let mut info = ArchiveInfo::new(path, FormatId::SevenZ, archive_size);
         info.solid = archive.is_solid;
         info.header_encrypted = header_encrypted;
+        info.sfx = sfx_offset > 0;
         info.volumes = volume::split_volumes(path).map_or(1, |v| v.len() as u32);
 
         // Per-block methods, encryption and packed size.
