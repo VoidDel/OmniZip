@@ -32,7 +32,7 @@
 |---|---|---|---|
 | RAR 4 / RAR 5 | .rar .r00–.r99 .part1.rar | `unrar`（C++ 绑定，隔离 crate） | 多卷、加密（含头加密）、固实；恢复记录仅校验；**不提供创建**（许可限制） |
 | CAB | .cab | 纯 Rust（`omnizip-engine-readonly`；LZX 用 `lzxd`，MSZIP 用 flate2） | 存储 / MSZIP / LZX；Quantum 只列出不解压；跨多个 cab 的文件不拼接。每个 folder 是一条压缩流，按 folder 从头解一遍取出其中所需的文件（同 7z 固实块，`solid_block`），不像 `cab` crate 那样每个文件都从 folder 开头重解；未标 UTF-8 的名字按代码页探测（makecab 写的 GBK 名可正确显示）。解压结果与 libarchive 一致 |
-| ISO 9660 / UDF | .iso .img | 纯 Rust（`omnizip-engine-readonly`） | 名称依次取 Rock Ridge（含权限、符号链接、时间、CE 续区、CL / RE 深目录重定位）、Joliet、ISO 9660；多段文件（>4 GiB）按段拼接；文件原样存放，挂载时就地读取；卷标显示为注释。只有 UDF 的镜像不支持。Alpine 3.20 virt 镜像解压结果与 libarchive 一致（2026-11-11） |
+| ISO 9660 / UDF | .iso .img | 纯 Rust（`omnizip-engine-readonly`） | 名称依次取 Rock Ridge（含权限、符号链接、时间、CE 续区、CL / RE 深目录重定位）、Joliet、ISO 9660；多段文件（>4 GiB）按段拼接；文件原样存放，挂载时就地读取；卷标显示为注释。Alpine 3.20 virt 镜像解压结果与 libarchive 一致（2026-11-11）。有 UDF 的镜像（DVD、蓝光、Windows 安装镜像，后者的 ISO 9660 部分往往只有一个 README.TXT）优先按 UDF 读（1.02–2.60，含 2.50 的元数据分区），UDF 出错时退回 ISO 9660；只有 UDF 的镜像也能识别。Windows 11 LTSC 2024 安装镜像的 16 个文件（含 2 GiB 的 install.esd）与系统挂载后逐个比对 SHA-256 一致（2026-11-12） |
 | CPIO | .cpio（newc / crc / odc / bin） | 纯 Rust（`omnizip-engine-readonly`） | initramfs 常见；文件数据原样存放，挂载时就地读取；硬链接的数据只存一份（newc 存在最后一个名字上），其余名字作为指向它的硬链接 |
 | AR / DEB | .a .lib .deb | 纯 Rust（`omnizip-engine-readonly`）+ 内层 tar | GNU（`//` 长名表）与 BSD（`#1/长度`）成员名，符号表跳过；.deb 展开 `data.tar.*` 到根目录、`control.tar.*` 到 `DEBIAN/`（同 `dpkg-deb -R`），压缩方式 gz / xz / zst / bz2 / lzma / 无 |
 | RPM | .rpm | 纯 Rust 头解析 + 内层 cpio | payload 为 gz / bz2 / xz / lzma / zstd；注释显示"名称-版本-发行"；每次列出与解压都从头解码 payload。Fedora 45 的 tzdata（zstd，1806 个文件，大半是硬链接）解压结果与 libarchive 逐字节一致（2026-11-11） |

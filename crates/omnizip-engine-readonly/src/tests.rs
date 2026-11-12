@@ -371,6 +371,84 @@ fn iso_rock_ridge_joliet_and_plain() {
 }
 
 #[test]
+fn udf_damage_is_an_error_not_a_crash() {
+    // Bytes of the volume structures and file entries changed at random (a fixed sequence):
+    // opening and reading may fail, never panic or run away.
+    let mut seed: u64 = 0x5eed_1234;
+    let mut next = move || {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) as usize
+    };
+    for f in ["udf-102", "bridge", "udf-250"] {
+        let good = fs::read(fixture(&format!("iso/{f}.iso"))).unwrap();
+        // Where UDF keeps its structures: the anchor, the descriptors and the first entries.
+        let hot = 256 * 2048..(300 * 2048).min(good.len());
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("bad.iso");
+        for _ in 0..120 {
+            let mut bad = good.clone();
+            for _ in 0..1 + next() % 8 {
+                let at = hot.start + next() % (hot.end - hot.start);
+                bad[at] = next() as u8;
+            }
+            fs::write(&p, &bad).unwrap();
+            let Ok(format) = omnizip_core::detect::detect_path(&p).map(|d| d.format) else {
+                continue;
+            };
+            let Ok(mut r) =
+                ReadonlyEngine.open(&p, format, &OpenOptions::default(), &JobCtx::default())
+            else {
+                continue;
+            };
+            let ids: Vec<_> = r.entries().iter().map(|e| e.id).collect();
+            for id in ids {
+                let _ = read_entry(r.as_mut(), id, 1 << 20, &JobCtx::default());
+            }
+        }
+    }
+}
+
+#[test]
+fn iso_through_udf() {
+    // UDF alone (no ISO 9660 at all), ISO 9660 and UDF (read through UDF, as Windows
+    // installation images, whose ISO 9660 side may hold a README only), and UDF 2.50 with its
+    // file entries in a metadata partition. Made by fixtures/make-udf-fixtures.ps1.
+    for f in ["udf-102", "bridge", "udf-250"] {
+        let p = fixture(&format!("iso/{f}.iso"));
+        let mut r = open(&p);
+        assert_eq!(r.info().format, FormatId::Iso, "{f}");
+        let mut names = paths(r.as_ref());
+        names.sort_unstable();
+        assert_eq!(names, TREE, "{f}");
+        assert_eq!(r.info().comment.as_deref(), Some("OMNIZIP"), "{f}");
+        assert!(r.entries().iter().all(|e| e.mtime.is_some()), "{f}");
+        // In place, as ISO 9660 files are.
+        let id = r
+            .entries()
+            .iter()
+            .find(|e| e.path == "hello.txt")
+            .unwrap()
+            .id;
+        let (off, len) = r.stored_range(id).unwrap();
+        assert_eq!(
+            &fs::read(&p).unwrap()[off as usize..][..len as usize],
+            b"hello\n",
+            "{f}"
+        );
+        extract_all(
+            r.as_mut(),
+            &[
+                ("hello.txt", b"hello\n"),
+                ("sub/数据/中文名.txt", "中文内容\n".as_bytes()),
+                ("A Long File Name With Spaces and Mixed Case.txt", b"long\n"),
+            ],
+        );
+    }
+}
+
+#[test]
 fn xar_every_compression() {
     for f in ["test", "bzip2", "none"] {
         let mut r = open(&fixture(&format!("xar/{f}.xar")));

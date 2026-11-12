@@ -1,7 +1,8 @@
 //! ISO 9660 images (`docs/03-formats.md` §3) with the Rock Ridge (POSIX names, modes, links,
 //! times) and Joliet (Unicode names) extensions, preferred in that order, as libarchive does.
-//! Files lie as they are in the image, so mounts read them in place. UDF-only images are not
-//! read (they have no ISO 9660 descriptor and are not detected as ISO).
+//! Files lie as they are in the image, so mounts read them in place. Images with a UDF file
+//! system (DVD, Blu-ray, Windows installation images, whose ISO 9660 side may hold only a
+//! `README.TXT`) are read through UDF (`udf`), ISO 9660 being the fallback.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -263,19 +264,34 @@ fn directory(input: &mut SharedInput, extent: u64, size: u64, path: &Path) -> Re
     Ok(out)
 }
 
-/// One listed item before names are decoded.
-struct Item {
-    raw: Vec<u8>,
-    kind: EntryKind,
-    size: u64,
-    mtime: Option<SystemTime>,
-    mode: Option<u32>,
-    link: Option<String>,
-    pieces: Vec<(u64, u64)>,
+/// One listed item before names are decoded (also UDF's).
+pub(crate) struct Item {
+    pub raw: Vec<u8>,
+    pub kind: EntryKind,
+    pub size: u64,
+    pub mtime: Option<SystemTime>,
+    pub mode: Option<u32>,
+    pub link: Option<String>,
+    /// Where a file's data lies: `(offset, length)` in order.
+    pub pieces: Vec<(u64, u64)>,
 }
 
 pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stored> {
     let mut input = SharedInput::open(path)?;
+    // UDF first: where an image has both, UDF holds the files (Windows images' ISO 9660 side is
+    // a README only), and its names are Unicode. On damage, ISO 9660.
+    if crate::udf::present(&mut input, path) {
+        match crate::udf::read(&mut input, path, ctx) {
+            Ok((label, items)) if !items.is_empty() => {
+                let label = Some(label)
+                    .filter(|l| !l.is_empty())
+                    .or_else(|| iso_label(&mut input, path));
+                return Ok(stored(items, label, input, path, opts));
+            }
+            Err(e) if e.code() == omnizip_core::ErrorCode::Cancelled => return Err(e),
+            _ => {}
+        }
+    }
     let size = input.len();
     let mut primary = None;
     let mut joliet = None;
@@ -401,6 +417,33 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
             ctx.policy.check_entries(items.len() as u64)?;
         }
     }
+    let label = String::from_utf8_lossy(&primary[40..72]).trim().to_owned();
+    Ok(stored(
+        items,
+        Some(label).filter(|l| !l.is_empty()),
+        input,
+        path,
+        opts,
+    ))
+}
+
+/// The ISO 9660 volume label, if the image has one.
+fn iso_label(input: &mut SharedInput, path: &Path) -> Option<String> {
+    let d = read_at(input, 16 * SECTOR, SECTOR as usize, path).ok()?;
+    (&d[1..6] == b"CD001" && d[0] == 1)
+        .then(|| String::from_utf8_lossy(&d[40..72]).trim().to_owned())
+        .filter(|l| !l.is_empty())
+}
+
+/// The entries of `items` over `input`, files in place.
+fn stored(
+    mut items: Vec<Item>,
+    label: Option<String>,
+    input: SharedInput,
+    path: &Path,
+    opts: &OpenOptions,
+) -> Stored {
+    let size = input.len();
     // Directories first come out in stack order: list in path order instead.
     items.sort_by(|a, b| a.raw.cmp(&b.raw));
 
@@ -442,11 +485,8 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
     info.encoding = enc;
     info.volumes = volume::split_volumes(path).map_or(1, |v| v.len() as u32);
     info.add_method("Store");
-    let label = String::from_utf8_lossy(&primary[40..72]).trim().to_owned();
-    if !label.is_empty() {
-        info.comment = Some(label);
-    }
-    Ok(Stored {
+    info.comment = label;
+    Stored {
         in_place: info.volumes == 1,
         info,
         entries: entries.into(),
@@ -455,5 +495,5 @@ pub(crate) fn open(path: &Path, opts: &OpenOptions, ctx: &JobCtx) -> Result<Stor
         codings: Arc::from([]),
         checks: Arc::from([]),
         input,
-    })
+    }
 }

@@ -19,6 +19,7 @@ mod rpm;
 mod split;
 #[cfg(test)]
 mod tests;
+mod udf;
 mod xar;
 
 const FORMATS: &[FormatId] = &[

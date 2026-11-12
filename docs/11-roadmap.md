@@ -221,4 +221,4 @@ M2"格式"一行的进度。ZIP 原地更新、格式转换、7z 文件名加密
 - 第 3 批：ISO 9660（Rock Ridge、Joliet）、XAR / PKG；真实的 Alpine 镜像与 python.org 安装包解压结果与 libarchive 一致。
 - 第 4 批：CAB（存储 / MSZIP / LZX，按 folder 顺序解码）、LZH（delharc，头级别 0–3）、ARJ（方法 0–4）。至此 M2"格式"一行全部完成。
 - 模糊测试：夜间任务新增 `readonly` 目标（首字节选格式，种子语料为各格式样本）；单元测试另对每个样本做截断与翻转位的变体，确认不会 panic。
-- 未做：UDF-only 镜像、CAB Quantum 与跨 cab 文件、ARJ 加密与多卷、`.z01` 分卷用真实 Info-ZIP / WinZip 样本的验证（本机没有这两个工具，测试样本由程序按 PKZIP 规范切分）。
+- 未做：CAB Quantum 与跨 cab 文件、ARJ 加密与多卷、`.z01` 分卷用真实 Info-ZIP / WinZip 样本的验证（本机没有这两个工具，测试样本由程序按 PKZIP 规范切分）。

@@ -89,7 +89,8 @@ pub fn sniff(head: &[u8]) -> Option<FormatId> {
     if is_tar_header(head) {
         return Some(FormatId::Tar);
     }
-    if head.len() >= 0x8006 && &head[0x8001..0x8006] == b"CD001" {
+    // ISO 9660, or UDF alone (its volume recognition sequence where ISO 9660's would be).
+    if head.len() >= 0x8006 && matches!(&head[0x8001..0x8006], b"CD001" | b"BEA01") {
         return Some(FormatId::Iso);
     }
     None
@@ -309,6 +310,12 @@ mod tests {
         assert_eq!(sniff(b"BZh91AY"), Some(FormatId::Bz2));
         assert_eq!(sniff(b"BZhx"), None);
         assert_eq!(sniff(b"hello world"), None);
+        // ISO 9660, and UDF alone: their volume structure at 32 KiB.
+        let mut iso = vec![0u8; 0x8006];
+        iso[0x8001..0x8006].copy_from_slice(b"CD001");
+        assert_eq!(sniff(&iso), Some(FormatId::Iso));
+        iso[0x8001..0x8006].copy_from_slice(b"BEA01");
+        assert_eq!(sniff(&iso), Some(FormatId::Iso));
         assert_eq!(sniff(b"!<arch>\ndebian-binary   "), Some(FormatId::Deb));
     }
 
